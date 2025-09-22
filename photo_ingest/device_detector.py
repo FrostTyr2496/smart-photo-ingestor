@@ -1,13 +1,10 @@
-"""Device detection engine for camera/device identification."""
+"""Device detection engine for camera/device identification from EXIF data."""
 
-import logging
 import re
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 
 from .config import DeviceMapping
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -23,224 +20,164 @@ class DeviceDetector:
     """Detects device type from EXIF data and maps to folder codes."""
     
     def __init__(self, device_config: DeviceMapping):
-        """Initialize device detector.
+        """
+        Initialize device detector with configuration.
         
         Args:
             device_config: Device mapping configuration
         """
         self.config = device_config
-        self._detection_rules = self._build_detection_rules()
-        logger.info(f"Device detector initialized with {len(self.config.mappings)} mappings")
+        self._build_detection_rules()
     
-    def _build_detection_rules(self) -> Dict[str, Dict[str, Any]]:
-        """Build optimized detection rules from configuration.
+    def _build_detection_rules(self) -> None:
+        """Build optimized detection rules from configuration."""
+        # Create reverse mapping for priority lookup
+        self._priority_map = {device: idx for idx, device in enumerate(self.config.priority_rules)}
         
-        Returns:
-            Dictionary of detection rules for fast lookup
-        """
-        rules = {}
-        
-        # Build rules from EXIF identifiers (highest priority)
+        # Normalize EXIF identifiers for case-insensitive matching
+        self._normalized_identifiers = {}
         for device_code, identifiers in self.config.exif_identifiers.items():
-            rules[device_code] = {
-                'type': 'exif_identifiers',
-                'identifiers': identifiers,
-                'priority': self._get_device_priority(device_code)
+            self._normalized_identifiers[device_code] = {
+                field.lower(): value.lower() for field, value in identifiers.items()
             }
-        
-        # Build rules from direct mappings (lower priority)
-        for camera_model, device_code in self.config.mappings.items():
-            if device_code not in rules:  # Don't override EXIF identifier rules
-                rules[device_code] = {
-                    'type': 'direct_mapping',
-                    'camera_model': camera_model,
-                    'priority': self._get_device_priority(device_code)
-                }
-        
-        return rules
-    
-    def _get_device_priority(self, device_code: str) -> int:
-        """Get priority for device code.
-        
-        Args:
-            device_code: Device code to check
-            
-        Returns:
-            Priority value (lower number = higher priority)
-        """
-        try:
-            return self.config.priority_rules.index(device_code)
-        except ValueError:
-            return 999  # Low priority for devices not in priority rules
     
     def detect_device(self, exif_data: Dict[str, Any]) -> str:
-        """Detect device from EXIF and return folder code.
+        """
+        Detect device from EXIF and return folder code.
         
         Args:
             exif_data: EXIF metadata dictionary
             
         Returns:
-            Device folder code
+            str: Device folder code
         """
-        raw_camera_model = exif_data.get('Model', '').strip()
-        
-        # Try configured device identifiers first (highest confidence)
-        # Collect all matching devices and sort by priority
-        matching_devices = []
-        for device_code, identifiers in self.config.exif_identifiers.items():
-            if self._matches_identifiers(exif_data, identifiers):
-                priority = self._get_device_priority(device_code)
-                matching_devices.append((priority, device_code))
-        
-        if matching_devices:
-            # Sort by priority (lower number = higher priority) and return the best match
-            matching_devices.sort(key=lambda x: x[0])
-            device_code = matching_devices[0][1]
-            logger.debug(f"Device detected via EXIF identifiers: {device_code} for {raw_camera_model}")
-            return device_code
-        
-        # Fall back to direct camera model mapping
-        if raw_camera_model in self.config.mappings:
-            device_code = self.config.mappings[raw_camera_model]
-            logger.debug(f"Device detected via direct mapping: {device_code} for {raw_camera_model}")
-            return device_code
-        
-        # Use sanitized raw camera model if no mapping found
-        sanitized = self._sanitize_folder_name(raw_camera_model)
-        if sanitized:
-            logger.debug(f"Using sanitized camera model as device code: {sanitized}")
-            return sanitized
-        
-        # Final fallback
-        logger.debug(f"No device mapping found for {raw_camera_model}, using 'Unknown'")
-        return "Unknown"
+        result = self.detect_device_detailed(exif_data)
+        return result.device_code
     
     def detect_device_detailed(self, exif_data: Dict[str, Any]) -> DeviceDetectionResult:
-        """Detect device with detailed result information.
+        """
+        Detect device from EXIF with detailed results.
         
         Args:
             exif_data: EXIF metadata dictionary
             
         Returns:
-            Detailed detection result
+            DeviceDetectionResult: Detailed detection result
         """
-        raw_camera_model = exif_data.get('Model', '').strip()
-        matched_fields = []
-        confidence = 0.0
+        raw_camera_model = self._extract_camera_model(exif_data)
         
-        # Try configured device identifiers first
-        for device_code, identifiers in self.config.exif_identifiers.items():
-            matches, matched = self._matches_identifiers_detailed(exif_data, identifiers)
-            if matches:
-                confidence = len(matched) / len(identifiers)  # Confidence based on match ratio
-                return DeviceDetectionResult(
-                    device_code=device_code,
-                    confidence=confidence,
-                    matched_fields=matched,
-                    raw_camera_model=raw_camera_model
-                )
+        # Try configured device identifiers first (highest confidence)
+        identifier_result = self._try_exif_identifiers(exif_data, raw_camera_model)
+        if identifier_result:
+            return identifier_result
         
-        # Fall back to direct camera model mapping
-        if raw_camera_model in self.config.mappings:
-            device_code = self.config.mappings[raw_camera_model]
+        # Fall back to direct camera model mapping (medium confidence)
+        mapping_result = self._try_direct_mapping(raw_camera_model)
+        if mapping_result:
+            return mapping_result
+        
+        # Use sanitized raw camera model as fallback (low confidence)
+        sanitized_model = self._sanitize_folder_name(raw_camera_model)
+        return DeviceDetectionResult(
+            device_code=sanitized_model or "Unknown",
+            confidence=0.3 if sanitized_model else 0.1,
+            matched_fields=[],
+            raw_camera_model=raw_camera_model
+        )
+    
+    def _extract_camera_model(self, exif_data: Dict[str, Any]) -> str:
+        """Extract camera model from EXIF data with fallbacks."""
+        # Try common EXIF fields for camera model
+        model_fields = ['Model', 'Camera Model Name', 'Camera Model']
+        
+        for field in model_fields:
+            if field in exif_data and exif_data[field]:
+                return str(exif_data[field]).strip()
+        
+        return ""
+    
+    def _try_exif_identifiers(self, exif_data: Dict[str, Any], raw_camera_model: str) -> Optional[DeviceDetectionResult]:
+        """Try to match using configured EXIF identifiers."""
+        candidates = []
+        
+        for device_code, identifiers in self._normalized_identifiers.items():
+            matched_fields = []
+            total_fields = len(identifiers)
+            
+            for field, expected_value in identifiers.items():
+                # Check both exact field name and case variations
+                exif_value = None
+                for exif_field, exif_val in exif_data.items():
+                    if exif_field.lower() == field:
+                        exif_value = str(exif_val).lower().strip()
+                        break
+                
+                if exif_value and expected_value in exif_value:
+                    matched_fields.append(field)
+            
+            if matched_fields:
+                confidence = len(matched_fields) / total_fields
+                candidates.append((device_code, confidence, matched_fields))
+        
+        if not candidates:
+            return None
+        
+        # Sort by confidence, then by priority rules
+        candidates.sort(key=lambda x: (x[1], -self._get_priority_score(x[0])), reverse=True)
+        
+        best_device, confidence, matched_fields = candidates[0]
+        
+        # Only accept if we have reasonable confidence (at least one field matched)
+        if confidence > 0:
             return DeviceDetectionResult(
-                device_code=device_code,
-                confidence=1.0,  # Exact match
+                device_code=best_device,
+                confidence=min(0.9, confidence),  # Cap at 0.9 for identifier-based detection
+                matched_fields=matched_fields,
+                raw_camera_model=raw_camera_model
+            )
+        
+        return None
+    
+    def _try_direct_mapping(self, raw_camera_model: str) -> Optional[DeviceDetectionResult]:
+        """Try direct camera model to folder name mapping."""
+        if not raw_camera_model:
+            return None
+        
+        # Try exact match first
+        if raw_camera_model in self.config.mappings:
+            return DeviceDetectionResult(
+                device_code=self.config.mappings[raw_camera_model],
+                confidence=0.8,
                 matched_fields=['Model'],
                 raw_camera_model=raw_camera_model
             )
         
-        # Use sanitized raw camera model
-        sanitized = self._sanitize_folder_name(raw_camera_model)
-        device_code = sanitized if sanitized else "Unknown"
-        confidence = 0.5 if sanitized else 0.0
+        # Try case-insensitive partial matching
+        raw_lower = raw_camera_model.lower()
+        for camera_model, device_code in self.config.mappings.items():
+            if camera_model.lower() in raw_lower or raw_lower in camera_model.lower():
+                return DeviceDetectionResult(
+                    device_code=device_code,
+                    confidence=0.6,
+                    matched_fields=['Model'],
+                    raw_camera_model=raw_camera_model
+                )
         
-        return DeviceDetectionResult(
-            device_code=device_code,
-            confidence=confidence,
-            matched_fields=['Model'] if sanitized else [],
-            raw_camera_model=raw_camera_model
-        )
+        return None
     
-    def _matches_identifiers(self, exif_data: Dict[str, Any], identifiers: Dict[str, str]) -> bool:
-        """Check if EXIF data matches device identifiers.
-        
-        Args:
-            exif_data: EXIF metadata dictionary
-            identifiers: Device identifier patterns
-            
-        Returns:
-            True if all identifiers match, False otherwise
-        """
-        for field, expected_value in identifiers.items():
-            actual_value = exif_data.get(field, '').strip()
-            
-            # Support both exact match and pattern matching
-            if not self._value_matches(actual_value, expected_value):
-                return False
-        
-        return True
-    
-    def _matches_identifiers_detailed(self, exif_data: Dict[str, Any], 
-                                    identifiers: Dict[str, str]) -> tuple[bool, List[str]]:
-        """Check identifier matches with detailed information.
-        
-        Args:
-            exif_data: EXIF metadata dictionary
-            identifiers: Device identifier patterns
-            
-        Returns:
-            Tuple of (all_match, list_of_matched_fields)
-        """
-        matched_fields = []
-        
-        for field, expected_value in identifiers.items():
-            actual_value = exif_data.get(field, '').strip()
-            
-            if self._value_matches(actual_value, expected_value):
-                matched_fields.append(field)
-        
-        all_match = len(matched_fields) == len(identifiers)
-        return all_match, matched_fields
-    
-    def _value_matches(self, actual: str, expected: str) -> bool:
-        """Check if actual value matches expected pattern.
-        
-        Args:
-            actual: Actual value from EXIF
-            expected: Expected value or pattern
-            
-        Returns:
-            True if values match, False otherwise
-        """
-        if not actual or not expected:
-            return actual == expected
-        
-        # Exact match (case-insensitive)
-        if actual.lower() == expected.lower():
-            return True
-        
-        # Pattern matching with wildcards
-        if '*' in expected or '?' in expected:
-            # Convert shell-style wildcards to regex
-            pattern = expected.replace('*', '.*').replace('?', '.')
-            try:
-                return bool(re.match(pattern, actual, re.IGNORECASE))
-            except re.error:
-                logger.warning(f"Invalid pattern in device identifier: {expected}")
-                return False
-        
-        # Substring match for partial matches
-        return expected.lower() in actual.lower()
+    def _get_priority_score(self, device_code: str) -> int:
+        """Get priority score for device (higher is better priority)."""
+        return self._priority_map.get(device_code, -1)
     
     def _sanitize_folder_name(self, name: str) -> str:
-        """Convert camera model to valid folder name.
+        """
+        Convert camera model to valid folder name.
         
         Args:
             name: Raw camera model name
             
         Returns:
-            Sanitized folder name
+            str: Sanitized folder name
         """
         if not name:
             return ""
@@ -251,12 +188,19 @@ class DeviceDetector:
         # Remove manufacturer names that are often redundant
         prefixes_to_remove = [
             'NIKON CORPORATION',
+            'NIKON',
             'Canon',
+            'CANON',
+            'Sony',
             'SONY',
+            'Fujifilm',
             'FUJIFILM',
+            'Olympus',
             'OLYMPUS',
             'Panasonic',
+            'PANASONIC',
             'Leica',
+            'LEICA',
             'DJI'
         ]
         
@@ -265,35 +209,11 @@ class DeviceDetector:
                 sanitized = sanitized[len(prefix):].strip()
                 break
         
-        # Replace problematic characters with safe alternatives
-        char_replacements = {
-            ' ': '_',
-            '/': '_',
-            '\\': '_',
-            ':': '_',
-            '*': '_',
-            '?': '_',
-            '"': '_',
-            '<': '_',
-            '>': '_',
-            '|': '_',
-            '.': '_',
-            ',': '_',
-            ';': '_',
-            '=': '_',
-            '+': '_',
-            '[': '_',
-            ']': '_',
-            '(': '_',
-            ')': '_'
-        }
+        # Replace invalid filesystem characters
+        sanitized = re.sub(r'[<>:"/\\|?*]', '_', sanitized)
         
-        for old_char, new_char in char_replacements.items():
-            sanitized = sanitized.replace(old_char, new_char)
-        
-        # Remove multiple consecutive underscores
-        while '__' in sanitized:
-            sanitized = sanitized.replace('__', '_')
+        # Replace multiple spaces/underscores with single underscore
+        sanitized = re.sub(r'[\s_]+', '_', sanitized)
         
         # Remove leading/trailing underscores
         sanitized = sanitized.strip('_')
@@ -304,89 +224,48 @@ class DeviceDetector:
         
         return sanitized
     
-    def get_all_device_codes(self) -> List[str]:
-        """Get all configured device codes.
-        
-        Returns:
-            List of all device codes
-        """
-        device_codes = set()
-        
-        # From EXIF identifiers
-        device_codes.update(self.config.exif_identifiers.keys())
-        
-        # From direct mappings
-        device_codes.update(self.config.mappings.values())
-        
-        return sorted(device_codes)
-    
-    def get_device_info(self, device_code: str) -> Optional[Dict[str, Any]]:
-        """Get information about a specific device code.
-        
-        Args:
-            device_code: Device code to look up
-            
-        Returns:
-            Device information dictionary or None if not found
-        """
-        info = {
-            'device_code': device_code,
-            'detection_method': None,
-            'identifiers': None,
-            'camera_models': []
-        }
-        
-        # Check EXIF identifiers
-        if device_code in self.config.exif_identifiers:
-            info['detection_method'] = 'exif_identifiers'
-            info['identifiers'] = self.config.exif_identifiers[device_code]
-        
-        # Check direct mappings
-        camera_models = [model for model, code in self.config.mappings.items() if code == device_code]
-        if camera_models:
-            if info['detection_method'] is None:
-                info['detection_method'] = 'direct_mapping'
-            info['camera_models'] = camera_models
-        
-        return info if info['detection_method'] else None
+    def get_supported_devices(self) -> List[str]:
+        """Get list of all configured device codes."""
+        configured_devices = set(self.config.exif_identifiers.keys())
+        mapped_devices = set(self.config.mappings.values())
+        return sorted(configured_devices | mapped_devices)
     
     def validate_configuration(self) -> List[str]:
-        """Validate device configuration and return any issues.
+        """
+        Validate device configuration and return list of issues.
         
         Returns:
-            List of validation issues (empty if no issues)
+            List[str]: List of validation issues (empty if valid)
         """
         issues = []
         
-        # Check for empty device codes
-        for device_code in self.config.exif_identifiers.keys():
-            if not device_code.strip():
-                issues.append("Empty device code in EXIF identifiers")
-        
-        for device_code in self.config.mappings.values():
-            if not device_code.strip():
-                issues.append("Empty device code in mappings")
-        
-        # Check for conflicting device codes
-        exif_devices = set(self.config.exif_identifiers.keys())
+        # Check for conflicts between identifiers and mappings
+        identifier_devices = set(self.config.exif_identifiers.keys())
         mapping_devices = set(self.config.mappings.values())
         
-        # This is actually OK - devices can have both EXIF identifiers and direct mappings
-        # But we should warn about potential conflicts
-        overlapping = exif_devices.intersection(mapping_devices)
-        if overlapping:
-            logger.info(f"Device codes with both EXIF identifiers and direct mappings: {overlapping}")
-        
-        # Check priority rules reference valid devices
-        all_devices = exif_devices.union(mapping_devices)
+        # Check for priority rules referencing non-existent devices
+        all_devices = identifier_devices | mapping_devices
         for priority_device in self.config.priority_rules:
             if priority_device not in all_devices:
                 issues.append(f"Priority rule references unknown device: {priority_device}")
         
-        # Check for invalid characters in device codes
-        invalid_chars = set('<>:"/\\|?*')
-        for device_code in all_devices:
-            if any(char in device_code for char in invalid_chars):
-                issues.append(f"Device code contains invalid characters: {device_code}")
+        # Check for duplicate device codes
+        if len(mapping_devices) != len(self.config.mappings):
+            # Find duplicates
+            seen = set()
+            duplicates = set()
+            for device_code in self.config.mappings.values():
+                if device_code in seen:
+                    duplicates.add(device_code)
+                seen.add(device_code)
+            issues.append(f"Duplicate device codes in mappings: {duplicates}")
+        
+        # Check for empty or invalid folder names
+        for camera_model, device_code in self.config.mappings.items():
+            sanitized = self._sanitize_folder_name(device_code)
+            if not sanitized:
+                issues.append(f"Device code '{device_code}' for camera '{camera_model}' results in empty folder name")
+            elif sanitized != device_code:
+                issues.append(f"Device code '{device_code}' contains invalid characters, would be sanitized to '{sanitized}'")
         
         return issues

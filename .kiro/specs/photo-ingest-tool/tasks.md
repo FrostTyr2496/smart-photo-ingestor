@@ -28,7 +28,7 @@
   - Write unit tests for EXIF extraction and caching
   - _Requirements: 12.1, 12.2, 12.3, 12.5, 14.1_
 
-- [ ] 5. Implement device detection system
+- [x] 5. Implement device detection system
   - Create DeviceDetector class for camera/device identification
   - Add EXIF-based device matching with configurable identifiers
   - Implement fallback to direct camera model mapping

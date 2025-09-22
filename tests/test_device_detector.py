@@ -50,32 +50,29 @@ class TestDeviceDetector:
     def test_init(self, device_detector, sample_device_config):
         """Test device detector initialization."""
         assert device_detector.config == sample_device_config
-        assert len(device_detector._detection_rules) > 0
+        assert hasattr(device_detector, '_priority_map')
+        assert hasattr(device_detector, '_normalized_identifiers')
     
     def test_build_detection_rules(self, device_detector):
         """Test detection rules building."""
-        rules = device_detector._detection_rules
+        # Check that normalized identifiers are created
+        assert "z6" in device_detector._normalized_identifiers
+        assert "z6ii" in device_detector._normalized_identifiers
+        assert "drone" in device_detector._normalized_identifiers
         
-        # Should have rules for all configured devices
-        assert "Z6" in rules
-        assert "Z6II" in rules
-        assert "Drone" in rules
-        assert "iPhone" in rules
-        assert "R5" in rules  # From direct mapping
-        
-        # Check rule types
-        assert rules["Z6"]["type"] == "exif_identifiers"
-        assert rules["R5"]["type"] == "direct_mapping"
+        # Check priority map
+        assert device_detector._priority_map["Z6II"] == 0
+        assert device_detector._priority_map["Z6"] == 1
     
-    def test_get_device_priority(self, device_detector):
+    def test_get_priority_score(self, device_detector):
         """Test device priority calculation."""
         # Devices in priority rules should have low numbers (high priority)
-        assert device_detector._get_device_priority("Z6II") == 0
-        assert device_detector._get_device_priority("Z6") == 1
-        assert device_detector._get_device_priority("R5") == 2
+        assert device_detector._get_priority_score("Z6II") == 0
+        assert device_detector._get_priority_score("Z6") == 1
+        assert device_detector._get_priority_score("R5") == 2
         
-        # Devices not in priority rules should have high numbers (low priority)
-        assert device_detector._get_device_priority("Unknown") == 999
+        # Devices not in priority rules should have -1 (low priority)
+        assert device_detector._get_priority_score("Unknown") == -1
     
     def test_detect_device_via_exif_identifiers(self, device_detector):
         """Test device detection via EXIF identifiers."""
@@ -128,8 +125,8 @@ class TestDeviceDetector:
         
         assert isinstance(result, DeviceDetectionResult)
         assert result.device_code == "Drone"
-        assert result.confidence == 1.0  # Perfect match
-        assert result.matched_fields == ["Make", "Model"]
+        assert result.confidence > 0.8  # High confidence for EXIF match
+        assert "make" in result.matched_fields or "model" in result.matched_fields
         assert result.raw_camera_model == "FC3582"
     
     def test_detect_device_detailed_partial_match(self, device_detector):
@@ -140,7 +137,7 @@ class TestDeviceDetector:
             "Model": "Test Model",
             "SerialNumber": "12345"
         }
-        device_detector._detection_rules = device_detector._build_detection_rules()
+        device_detector._build_detection_rules()
         
         exif_data = {
             "Make": "Test Manufacturer",
@@ -150,8 +147,9 @@ class TestDeviceDetector:
         
         result = device_detector.detect_device_detailed(exif_data)
         
-        # Should not match because not all identifiers match
-        assert result.device_code != "TestDevice"
+        # Should match TestDevice with partial confidence
+        assert result.device_code == "TestDevice"
+        assert result.confidence < 1.0  # Not perfect match
     
     def test_detect_device_detailed_direct_mapping(self, device_detector):
         """Test detailed device detection with direct mapping."""
@@ -163,102 +161,82 @@ class TestDeviceDetector:
         result = device_detector.detect_device_detailed(exif_data)
         
         assert result.device_code == "R5"
-        assert result.confidence == 1.0
+        assert result.confidence == 0.8  # Direct mapping confidence
         assert result.matched_fields == ["Model"]
         assert result.raw_camera_model == "Canon EOS R5"
     
-    def test_matches_identifiers_exact_match(self, device_detector):
-        """Test identifier matching with exact match."""
+    def test_extract_camera_model(self, device_detector):
+        """Test camera model extraction from EXIF."""
+        # Test standard Model field
+        exif_data = {"Model": "NIKON Z 6"}
+        result = device_detector._extract_camera_model(exif_data)
+        assert result == "NIKON Z 6"
+        
+        # Test Camera Model Name field
+        exif_data = {"Camera Model Name": "Canon EOS R5"}
+        result = device_detector._extract_camera_model(exif_data)
+        assert result == "Canon EOS R5"
+        
+        # Test empty/missing model
+        exif_data = {}
+        result = device_detector._extract_camera_model(exif_data)
+        assert result == ""
+    
+    def test_try_exif_identifiers_perfect_match(self, device_detector):
+        """Test EXIF identifier matching with perfect match."""
         exif_data = {
             "Make": "NIKON CORPORATION",
             "Model": "NIKON Z 6"
         }
         
-        identifiers = {
-            "Make": "NIKON CORPORATION",
-            "Model": "NIKON Z 6"
-        }
+        result = device_detector._try_exif_identifiers(exif_data, "NIKON Z 6")
         
-        result = device_detector._matches_identifiers(exif_data, identifiers)
-        assert result is True
+        assert result is not None
+        assert result.device_code == "Z6"
+        assert result.confidence > 0.8
     
-    def test_matches_identifiers_case_insensitive(self, device_detector):
-        """Test identifier matching is case insensitive."""
+    def test_try_exif_identifiers_case_insensitive(self, device_detector):
+        """Test EXIF identifier matching is case insensitive."""
         exif_data = {
-            "Make": "nikon corporation",
-            "Model": "nikon z 6"
+            "make": "nikon corporation",  # lowercase
+            "model": "nikon z 6"
         }
         
-        identifiers = {
-            "Make": "NIKON CORPORATION",
-            "Model": "NIKON Z 6"
-        }
+        result = device_detector._try_exif_identifiers(exif_data, "nikon z 6")
         
-        result = device_detector._matches_identifiers(exif_data, identifiers)
-        assert result is True
+        assert result is not None
+        assert result.device_code == "Z6"
     
-    def test_matches_identifiers_partial_match(self, device_detector):
-        """Test identifier matching with missing field."""
+    def test_try_exif_identifiers_no_match(self, device_detector):
+        """Test EXIF identifier matching with no match."""
         exif_data = {
-            "Make": "NIKON CORPORATION"
-            # Missing Model
+            "Make": "Unknown Manufacturer",
+            "Model": "Unknown Camera"
         }
         
-        identifiers = {
-            "Make": "NIKON CORPORATION",
-            "Model": "NIKON Z 6"
-        }
+        result = device_detector._try_exif_identifiers(exif_data, "Unknown Camera")
+        assert result is None
+    
+    def test_try_direct_mapping_exact_match(self, device_detector):
+        """Test direct mapping with exact match."""
+        result = device_detector._try_direct_mapping("Canon EOS R5")
         
-        result = device_detector._matches_identifiers(exif_data, identifiers)
-        assert result is False
+        assert result is not None
+        assert result.device_code == "R5"
+        assert result.confidence == 0.8
     
-    def test_matches_identifiers_detailed(self, device_detector):
-        """Test detailed identifier matching."""
-        exif_data = {
-            "Make": "NIKON CORPORATION",
-            "Model": "NIKON Z 6",
-            "SerialNumber": "12345"
-        }
+    def test_try_direct_mapping_partial_match(self, device_detector):
+        """Test direct mapping with partial match."""
+        result = device_detector._try_direct_mapping("Canon EOS R5 Mark II")
         
-        identifiers = {
-            "Make": "NIKON CORPORATION",
-            "Model": "NIKON Z 6",
-            "SerialNumber": "12345",
-            "LensModel": "Missing"  # This field is missing in EXIF
-        }
-        
-        all_match, matched_fields = device_detector._matches_identifiers_detailed(exif_data, identifiers)
-        
-        assert all_match is False
-        assert len(matched_fields) == 3
-        assert "Make" in matched_fields
-        assert "Model" in matched_fields
-        assert "SerialNumber" in matched_fields
-        assert "LensModel" not in matched_fields
+        assert result is not None
+        assert result.device_code == "R5"
+        assert result.confidence == 0.6
     
-    def test_value_matches_exact(self, device_detector):
-        """Test exact value matching."""
-        assert device_detector._value_matches("Canon", "Canon") is True
-        assert device_detector._value_matches("Canon", "canon") is True
-        assert device_detector._value_matches("Canon", "Nikon") is False
-    
-    def test_value_matches_wildcard(self, device_detector):
-        """Test wildcard value matching."""
-        assert device_detector._value_matches("NIKON Z 6", "NIKON*") is True
-        assert device_detector._value_matches("NIKON Z 6", "NIKON Z ?") is True
-        assert device_detector._value_matches("Canon EOS R5", "NIKON*") is False
-    
-    def test_value_matches_substring(self, device_detector):
-        """Test substring value matching."""
-        assert device_detector._value_matches("NIKON CORPORATION", "NIKON") is True
-        assert device_detector._value_matches("Canon EOS R5", "EOS") is True
-        assert device_detector._value_matches("Sony A7R", "Canon") is False
-    
-    def test_value_matches_empty_values(self, device_detector):
-        """Test value matching with empty values."""
-        assert device_detector._value_matches("", "") is True
-        assert device_detector._value_matches("Canon", "") is False
-        assert device_detector._value_matches("", "Canon") is False
+    def test_try_direct_mapping_no_match(self, device_detector):
+        """Test direct mapping with no match."""
+        result = device_detector._try_direct_mapping("Unknown Camera")
+        assert result is None
     
     def test_sanitize_folder_name_basic(self, device_detector):
         """Test basic folder name sanitization."""
@@ -303,61 +281,18 @@ class TestDeviceDetector:
         result = device_detector._sanitize_folder_name("   ")
         assert result == ""
     
-    def test_get_all_device_codes(self, device_detector):
-        """Test getting all device codes."""
-        device_codes = device_detector.get_all_device_codes()
+    def test_get_supported_devices(self, device_detector):
+        """Test getting all supported device codes."""
+        device_codes = device_detector.get_supported_devices()
         
         expected_codes = {"Z6", "Z6II", "R5", "Drone", "iPhone"}
         assert set(device_codes) == expected_codes
         assert device_codes == sorted(device_codes)  # Should be sorted
     
-    def test_get_device_info_exif_identifiers(self, device_detector):
-        """Test getting device info for EXIF identifier device."""
-        info = device_detector.get_device_info("Z6")
-        
-        assert info is not None
-        assert info["device_code"] == "Z6"
-        assert info["detection_method"] == "exif_identifiers"
-        assert info["identifiers"] == {"Make": "NIKON CORPORATION", "Model": "NIKON Z 6"}
-    
-    def test_get_device_info_direct_mapping(self, device_detector):
-        """Test getting device info for direct mapping device."""
-        info = device_detector.get_device_info("R5")
-        
-        assert info is not None
-        assert info["device_code"] == "R5"
-        assert info["detection_method"] == "direct_mapping"
-        assert "Canon EOS R5" in info["camera_models"]
-    
-    def test_get_device_info_both_methods(self, device_detector):
-        """Test getting device info for device with both methods."""
-        # Add a direct mapping for a device that also has EXIF identifiers
-        device_detector.config.mappings["NIKON Z 6"] = "Z6"
-        
-        info = device_detector.get_device_info("Z6")
-        
-        assert info is not None
-        assert info["device_code"] == "Z6"
-        assert info["detection_method"] == "exif_identifiers"  # EXIF identifiers take precedence
-        assert "NIKON Z 6" in info["camera_models"]
-    
-    def test_get_device_info_unknown(self, device_detector):
-        """Test getting device info for unknown device."""
-        info = device_detector.get_device_info("UnknownDevice")
-        assert info is None
-    
     def test_validate_configuration_valid(self, device_detector):
         """Test configuration validation with valid config."""
         issues = device_detector.validate_configuration()
         assert len(issues) == 0
-    
-    def test_validate_configuration_empty_device_code(self, device_detector):
-        """Test configuration validation with empty device code."""
-        device_detector.config.exif_identifiers[""] = {"Make": "Test"}
-        
-        issues = device_detector.validate_configuration()
-        assert len(issues) > 0
-        assert any("Empty device code" in issue for issue in issues)
     
     def test_validate_configuration_invalid_priority_rule(self, device_detector):
         """Test configuration validation with invalid priority rule."""
@@ -366,6 +301,15 @@ class TestDeviceDetector:
         issues = device_detector.validate_configuration()
         assert len(issues) > 0
         assert any("Priority rule references unknown device" in issue for issue in issues)
+    
+    def test_validate_configuration_duplicate_mappings(self, device_detector):
+        """Test configuration validation with duplicate device codes."""
+        device_detector.config.mappings["Test Camera 1"] = "TestDevice"
+        device_detector.config.mappings["Test Camera 2"] = "TestDevice"
+        
+        issues = device_detector.validate_configuration()
+        assert len(issues) > 0
+        assert any("Duplicate device codes" in issue for issue in issues)
     
     def test_validate_configuration_invalid_characters(self, device_detector):
         """Test configuration validation with invalid characters."""

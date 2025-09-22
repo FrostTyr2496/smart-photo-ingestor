@@ -31,18 +31,18 @@ class OperationType(Enum):
 class FileRecord:
     """Represents a file record in the database."""
     source_path: str
-    dest_path: Optional[str]
-    raw_backup_path: Optional[str]
     sha256_hash: str
-    perceptual_hash: Optional[str]
     file_size: int
     file_mtime: int
     created_date: str
     processed_date: str
-    camera_model: Optional[str]
-    lens_model: Optional[str]
-    device_code: Optional[str]
     operation_type: str
+    dest_path: Optional[str] = None
+    raw_backup_path: Optional[str] = None
+    perceptual_hash: Optional[str] = None
+    camera_model: Optional[str] = None
+    lens_model: Optional[str] = None
+    device_code: Optional[str] = None
     processing_status: str = ProcessingStatus.COMPLETED.value
 
 
@@ -381,6 +381,24 @@ class DatabaseManager:
                 (str(file_path), current_mtime)
             )
             return cursor.fetchone() is not None
+    
+    def get_file_by_path_and_mtime(self, file_path: str, mtime: int) -> Optional[Dict[str, Any]]:
+        """Get file record by path and modification time.
+        
+        Args:
+            file_path: File path to search for
+            mtime: Modification time
+            
+        Returns:
+            File record if found, None otherwise
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM file_records WHERE source_path = ? AND file_mtime = ?",
+                (file_path, mtime)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
     
     def get_database_stats(self) -> Dict[str, int]:
         """Get database statistics.
