@@ -1,8 +1,13 @@
 """CLI interface for the Photo Ingest Tool."""
 
 import click
+import sys
 from pathlib import Path
 from typing import Optional
+
+from .analyzer import PhotoAnalyzer
+from .output_formatter import AnalysisFormatter
+from .config import FileTypes, PerformanceConfig
 
 
 @click.group()
@@ -21,18 +26,70 @@ def main(ctx, verbose: int, quiet: bool):
 @click.argument('folder', type=click.Path(exists=True, path_type=Path))
 @click.option('--config', type=click.Path(path_type=Path), help='Configuration file path')
 @click.option('--json', is_flag=True, help='Output results in JSON format')
-@click.option('--peek', is_flag=True, help='Include visual content analysis')
-@click.option('--exif-only', is_flag=True, help='Skip visual analysis even if LLM configured')
-@click.option('--samples', default=5, help='Number of sample images per device for visual analysis')
+@click.option('--detailed/--basic', default=True, help='Detailed EXIF analysis (default) or basic analysis')
+@click.option('--summary', is_flag=True, help='Show only a brief summary')
+@click.option('--workers', default=4, help='Number of parallel workers for processing')
 @click.pass_context
-def analyze(ctx, folder: Path, config: Optional[Path], json: bool, peek: bool, exif_only: bool, samples: int):
-    """Analyze folder contents with optional visual content analysis."""
-    click.echo(f"Analyzing folder: {folder}")
-    if peek and not exif_only:
-        click.echo(f"Visual analysis enabled with {samples} samples per device")
-    if json:
-        click.echo("JSON output format selected")
-    # TODO: Implement analyze functionality
+def analyze(ctx, folder: Path, config: Optional[Path], json: bool, detailed: bool, summary: bool, workers: int):
+    """Analyze folder contents with comprehensive EXIF metadata extraction."""
+    verbose = ctx.obj.get('verbose', 0)
+    quiet = ctx.obj.get('quiet', False)
+    
+    if not quiet:
+        click.echo(f"📁 Analyzing folder: {folder}")
+        if detailed:
+            click.echo("🔍 Using detailed EXIF analysis")
+        else:
+            click.echo("⚡ Using basic EXIF analysis")
+    
+    try:
+        # Configure analyzer
+        file_types = FileTypes()
+        performance_config = PerformanceConfig(parallel_workers=workers)
+        analyzer = PhotoAnalyzer(file_types, performance_config, detailed=detailed)
+        
+        # Enhanced progress callback
+        def progress_callback(phase, current, total, message):
+            if not quiet:
+                if phase == "scan":
+                    click.echo(f"\r🔍 Scanning: {current} files found...", nl=False)
+                elif phase == "exif":
+                    percentage = (current / total) * 100 if total > 0 else 0
+                    click.echo(f"\r📸 Extracting EXIF: {current}/{total} ({percentage:.1f}%) - {message}", nl=False)
+        
+        # Run analysis
+        result = analyzer.analyze_directory(
+            folder, 
+            progress_callback=progress_callback if not quiet else None
+        )
+        
+        if not quiet:
+            click.echo()  # New line after progress
+        
+        # Format and output results
+        if json:
+            output = AnalysisFormatter.format_json(result)
+        elif summary:
+            output = AnalysisFormatter.format_summary(result)
+        else:
+            output = AnalysisFormatter.format_human_readable(result, detailed=detailed)
+        
+        click.echo(output)
+        
+        if result.total_files == 0:
+            click.echo("No supported photo files found in the specified directory.", err=True)
+            ctx.exit(1)
+        
+    except ImportError as e:
+        click.echo(f"❌ Missing dependency: {e}", err=True)
+        click.echo("Install required packages with: pip install Pillow", err=True)
+        ctx.exit(1)
+    except Exception as e:
+        click.echo(f"❌ Analysis failed: {e}", err=True)
+        if verbose > 1:
+            import traceback
+            traceback.print_exc()
+        ctx.exit(1)
 
 
 @main.command()
