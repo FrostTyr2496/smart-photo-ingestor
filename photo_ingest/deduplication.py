@@ -4,7 +4,7 @@ import hashlib
 import logging
 import mmap
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from enum import Enum
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -146,16 +146,26 @@ class DeduplicationEngine:
             size=file_size
         )
     
-    def batch_calculate_hashes(self, file_paths: List[Path]) -> Dict[Path, FileHashes]:
-        """Calculate hashes for multiple files in parallel.
+    def batch_calculate_hashes(self, file_paths: List[Path], 
+                              progress_callback=None) -> Dict[Path, FileHashes]:
+        """Calculate hashes for multiple files in parallel with progress tracking.
         
         Args:
             file_paths: List of file paths
+            progress_callback: Optional callback function for progress updates
             
         Returns:
             Dictionary mapping file paths to their hashes
         """
         results = {}
+        total_files = len(file_paths)
+        processed_files = 0
+        
+        def update_progress():
+            nonlocal processed_files
+            processed_files += 1
+            if progress_callback:
+                progress_callback(processed_files, total_files)
         
         if self.config.parallel_workers > 1 and len(file_paths) > 1:
             with ThreadPoolExecutor(max_workers=self.config.parallel_workers) as executor:
@@ -168,15 +178,67 @@ class DeduplicationEngine:
                     path = future_to_path[future]
                     try:
                         results[path] = future.result()
+                        update_progress()
                     except Exception as e:
                         logger.error(f"Failed to calculate hashes for {path}: {e}")
+                        update_progress()
         else:
             # Sequential processing
             for path in file_paths:
                 try:
                     results[path] = self.calculate_hashes(path)
+                    update_progress()
                 except Exception as e:
                     logger.error(f"Failed to calculate hashes for {path}: {e}")
+                    update_progress()
+        
+        return results
+    
+    def batch_check_duplicates(self, file_paths: List[Path], 
+                              progress_callback=None) -> Dict[Path, DuplicateCheckResult]:
+        """Check multiple files for duplicates in parallel.
+        
+        Args:
+            file_paths: List of file paths to check
+            progress_callback: Optional callback for progress updates
+            
+        Returns:
+            Dictionary mapping file paths to duplicate check results
+        """
+        results = {}
+        total_files = len(file_paths)
+        processed_files = 0
+        
+        def update_progress():
+            nonlocal processed_files
+            processed_files += 1
+            if progress_callback:
+                progress_callback(processed_files, total_files)
+        
+        if self.config.parallel_workers > 1 and len(file_paths) > 1:
+            with ThreadPoolExecutor(max_workers=self.config.parallel_workers) as executor:
+                future_to_path = {
+                    executor.submit(self.check_duplicate, path): path
+                    for path in file_paths
+                }
+                
+                for future in as_completed(future_to_path):
+                    path = future_to_path[future]
+                    try:
+                        results[path] = future.result()
+                        update_progress()
+                    except Exception as e:
+                        logger.error(f"Failed to check duplicates for {path}: {e}")
+                        update_progress()
+        else:
+            # Sequential processing
+            for path in file_paths:
+                try:
+                    results[path] = self.check_duplicate(path)
+                    update_progress()
+                except Exception as e:
+                    logger.error(f"Failed to check duplicates for {path}: {e}")
+                    update_progress()
         
         return results
     
@@ -239,17 +301,43 @@ class DeduplicationEngine:
         return self.db_manager.is_file_unchanged(file_path, current_mtime)
     
     def _get_files_by_size(self, file_size: int) -> List[Dict]:
-        """Get files with matching size for duplicate detection."""
-        # Use a small range to account for filesystem differences
-        size_tolerance = 0  # Exact match for now
+        """Get files with matching size for duplicate detection with smart tolerance."""
+        # Use adaptive size tolerance based on file size
+        if file_size < 1024:  # < 1KB
+            size_tolerance = 0  # Exact match for small files
+        elif file_size < 1024 * 1024:  # < 1MB
+            size_tolerance = 1  # 1 byte tolerance for medium files
+        else:  # >= 1MB
+            size_tolerance = file_size // (1024 * 1024)  # 1 byte per MB tolerance
+        
         return self.db_manager.get_files_by_size_range(
             file_size - size_tolerance, 
             file_size + size_tolerance
         )
     
+    def get_size_distribution_stats(self) -> Dict[str, Any]:
+        """Get statistics about file size distribution for optimization insights."""
+        with self.db_manager._get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT 
+                    COUNT(*) as total_files,
+                    MIN(file_size) as min_size,
+                    MAX(file_size) as max_size,
+                    AVG(file_size) as avg_size,
+                    COUNT(CASE WHEN file_size < 1024 THEN 1 END) as small_files,
+                    COUNT(CASE WHEN file_size >= 1024 AND file_size < 1048576 THEN 1 END) as medium_files,
+                    COUNT(CASE WHEN file_size >= 1048576 THEN 1 END) as large_files
+                FROM file_records
+            """)
+            
+            row = cursor.fetchone()
+            if row:
+                return dict(row)
+            return {}
+    
     def _check_hash_duplicates(self, hashes: FileHashes, 
                               potential_duplicates: List[Dict]) -> DuplicateCheckResult:
-        """Check for hash-based duplicates."""
+        """Check for hash-based duplicates with enhanced similarity detection."""
         # Check for exact SHA-256 match
         for existing in potential_duplicates:
             if existing['sha256_hash'] == hashes.sha256:
@@ -261,22 +349,63 @@ class DeduplicationEngine:
         
         # Check for perceptual hash similarity if available
         if hashes.perceptual and IMAGEHASH_AVAILABLE:
-            similar_files = self.db_manager.get_files_by_perceptual_hash(hashes.perceptual)
-            if similar_files:
-                # For now, treat any perceptual match as similar
-                # In a more sophisticated implementation, you'd calculate
-                # Hamming distance between hashes
-                return DuplicateCheckResult(
-                    status=DuplicateStatus.SIMILAR,
-                    existing_file=similar_files[0]['source_path'],
-                    similarity_score=0.9,  # Placeholder
-                    hashes=hashes
-                )
+            similar_result = self._find_similar_images(hashes.perceptual)
+            if similar_result:
+                return similar_result
         
         return DuplicateCheckResult(
             status=DuplicateStatus.NEW,
             hashes=hashes
         )
+    
+    def _find_similar_images(self, perceptual_hash: str, threshold: int = 5) -> Optional[DuplicateCheckResult]:
+        """Find similar images using Hamming distance on perceptual hashes.
+        
+        Args:
+            perceptual_hash: Perceptual hash to compare
+            threshold: Maximum Hamming distance for similarity (default: 5)
+            
+        Returns:
+            DuplicateCheckResult if similar image found, None otherwise
+        """
+        if not IMAGEHASH_AVAILABLE:
+            return None
+        
+        try:
+            import imagehash
+            target_hash = imagehash.hex_to_hash(perceptual_hash)
+        except (ValueError, AttributeError):
+            logger.debug(f"Invalid perceptual hash format: {perceptual_hash}")
+            return None
+        
+        # Get all files with perceptual hashes
+        all_perceptual_files = self.db_manager.get_all_files_with_perceptual_hash()
+        
+        for existing_file in all_perceptual_files:
+            try:
+                existing_hash = imagehash.hex_to_hash(existing_file['perceptual_hash'])
+                hamming_distance = target_hash - existing_hash
+                
+                if hamming_distance <= threshold:
+                    # Calculate similarity score (0.0 to 1.0)
+                    max_distance = len(perceptual_hash) * 4  # 4 bits per hex char
+                    similarity_score = 1.0 - (hamming_distance / max_distance)
+                    
+                    return DuplicateCheckResult(
+                        status=DuplicateStatus.SIMILAR,
+                        existing_file=existing_file['source_path'],
+                        similarity_score=similarity_score,
+                        hashes=FileHashes(
+                            sha256=existing_file['sha256_hash'],
+                            perceptual=existing_file['perceptual_hash'],
+                            size=existing_file['file_size']
+                        )
+                    )
+            except (ValueError, AttributeError) as e:
+                logger.debug(f"Error comparing perceptual hash for {existing_file['source_path']}: {e}")
+                continue
+        
+        return None
     
     def _calculate_sha256_standard(self, file_path: Path) -> str:
         """Calculate SHA-256 hash using standard file reading."""
@@ -289,28 +418,81 @@ class DeduplicationEngine:
         return hash_sha256.hexdigest()
     
     def _calculate_sha256_mmap(self, file_path: Path) -> str:
-        """Calculate SHA-256 hash using memory-mapped file."""
+        """Calculate SHA-256 hash using memory-mapped file with chunked processing."""
         hash_sha256 = hashlib.sha256()
+        file_size = file_path.stat().st_size
         
-        with open(file_path, 'rb') as f:
-            with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
-                hash_sha256.update(mm)
+        # For very large files, process in chunks to avoid memory issues
+        chunk_size = min(64 * 1024 * 1024, file_size)  # 64MB chunks max
+        
+        try:
+            with open(file_path, 'rb') as f:
+                if file_size == 0:
+                    return hash_sha256.hexdigest()
+                
+                with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                    if file_size <= chunk_size:
+                        # Small enough to process at once
+                        hash_sha256.update(mm)
+                    else:
+                        # Process in chunks for large files
+                        for i in range(0, file_size, chunk_size):
+                            end = min(i + chunk_size, file_size)
+                            hash_sha256.update(mm[i:end])
+        except (OSError, ValueError) as e:
+            logger.warning(f"Memory mapping failed for {file_path}, falling back to standard hashing: {e}")
+            return self._calculate_sha256_standard(file_path)
         
         return hash_sha256.hexdigest()
     
     def _calculate_perceptual_hash(self, file_path: Path) -> str:
-        """Calculate perceptual hash for image files."""
+        """Calculate perceptual hash for image files using multiple algorithms."""
         if not IMAGEHASH_AVAILABLE:
             return None
         
         try:
             with Image.open(file_path) as img:
-                # Use average hash for good balance of speed and accuracy
-                phash = imagehash.average_hash(img)
+                # Convert to RGB if necessary for consistent hashing
+                if img.mode not in ('RGB', 'L'):
+                    img = img.convert('RGB')
+                
+                # Use difference hash (dHash) for better similarity detection
+                # dHash is more robust to gamma correction and color histogram adjustments
+                phash = imagehash.dhash(img, hash_size=8)
                 return str(phash)
         except Exception as e:
             logger.debug(f"Failed to calculate perceptual hash for {file_path}: {e}")
             return None
+    
+    def calculate_multiple_perceptual_hashes(self, file_path: Path) -> Dict[str, str]:
+        """Calculate multiple perceptual hashes for comprehensive similarity detection.
+        
+        Args:
+            file_path: Path to image file
+            
+        Returns:
+            Dictionary with different hash types and their values
+        """
+        if not IMAGEHASH_AVAILABLE:
+            return {}
+        
+        hashes = {}
+        try:
+            with Image.open(file_path) as img:
+                # Convert to RGB if necessary
+                if img.mode not in ('RGB', 'L'):
+                    img = img.convert('RGB')
+                
+                # Different hash algorithms for different use cases
+                hashes['dhash'] = str(imagehash.dhash(img, hash_size=8))      # Good for crops/resizes
+                hashes['ahash'] = str(imagehash.average_hash(img, hash_size=8))  # Good for brightness changes
+                hashes['phash'] = str(imagehash.phash(img, hash_size=8))      # Good for minor modifications
+                hashes['whash'] = str(imagehash.whash(img, hash_size=8))      # Wavelet hash, good for compression
+                
+        except Exception as e:
+            logger.debug(f"Failed to calculate multiple perceptual hashes for {file_path}: {e}")
+        
+        return hashes
     
     def _is_image_file(self, file_path: Path) -> bool:
         """Check if file is an image that supports perceptual hashing."""

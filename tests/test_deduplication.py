@@ -242,7 +242,7 @@ class TestDeduplicationEngine:
     
     def test_get_duplicate_statistics(self, dedup_engine, temp_files):
         """Test getting duplicate statistics."""
-        # Store some files
+        # Store some files (file1 and file2 have same content, so only 2 unique files will be stored)
         for file_path in temp_files[:3]:
             hashes = dedup_engine.calculate_hashes(file_path)
             dedup_engine.store_file_record(file_path, hashes)
@@ -254,7 +254,7 @@ class TestDeduplicationEngine:
         
         assert 'file_records' in stats
         assert 'duplicate_groups' in stats
-        assert stats['file_records'] >= 3
+        assert stats['file_records'] >= 2  # Only unique files are stored
     
     def test_is_image_file(self, dedup_engine):
         """Test image file detection."""
@@ -272,8 +272,9 @@ class TestDeduplicationEngine:
         """Test perceptual hash calculation."""
         # Mock PIL Image and imagehash
         mock_img = Mock()
+        mock_img.mode = 'RGB'
         mock_image.open.return_value.__enter__.return_value = mock_img
-        mock_imagehash.average_hash.return_value = "1234567890abcdef"
+        mock_imagehash.dhash.return_value = "1234567890abcdef"
         
         file_path = Path("test.jpg")
         
@@ -281,7 +282,35 @@ class TestDeduplicationEngine:
         
         assert result == "1234567890abcdef"
         mock_image.open.assert_called_once_with(file_path)
-        mock_imagehash.average_hash.assert_called_once_with(mock_img)
+        mock_imagehash.dhash.assert_called_once_with(mock_img, hash_size=8)
+    
+    @patch('photo_ingest.deduplication.IMAGEHASH_AVAILABLE', True)
+    @patch('photo_ingest.deduplication.imagehash')
+    @patch('photo_ingest.deduplication.Image')
+    def test_calculate_multiple_perceptual_hashes(self, mock_image, mock_imagehash, dedup_engine):
+        """Test multiple perceptual hash calculation."""
+        # Mock PIL Image and imagehash
+        mock_img = Mock()
+        mock_img.mode = 'RGB'
+        mock_image.open.return_value.__enter__.return_value = mock_img
+        
+        # Mock different hash functions
+        mock_imagehash.dhash.return_value = "dhash123"
+        mock_imagehash.average_hash.return_value = "ahash456"
+        mock_imagehash.phash.return_value = "phash789"
+        mock_imagehash.whash.return_value = "whash012"
+        
+        file_path = Path("test.jpg")
+        
+        result = dedup_engine.calculate_multiple_perceptual_hashes(file_path)
+        
+        assert result == {
+            'dhash': 'dhash123',
+            'ahash': 'ahash456',
+            'phash': 'phash789',
+            'whash': 'whash012'
+        }
+        mock_image.open.assert_called_once_with(file_path)
     
     @patch('photo_ingest.deduplication.IMAGEHASH_AVAILABLE', False)
     def test_calculate_perceptual_hash_unavailable(self, dedup_engine):
@@ -385,3 +414,111 @@ class TestDeduplicationIntegration:
         with patch.object(Path, 'stat', side_effect=PermissionError("Permission denied")):
             with pytest.raises(PermissionError):
                 dedup_engine.check_duplicate(file_path)
+    
+    @patch('photo_ingest.deduplication.IMAGEHASH_AVAILABLE', True)
+    @patch('photo_ingest.deduplication.imagehash')
+    def test_find_similar_images(self, mock_imagehash, dedup_engine):
+        """Test finding similar images using Hamming distance."""
+        # Mock imagehash functions
+        mock_target_hash = Mock()
+        mock_existing_hash = Mock()
+        mock_target_hash.__sub__ = Mock(return_value=3)  # Hamming distance of 3
+        
+        # Mock hex_to_hash to return our mock objects
+        def mock_hex_to_hash(hex_str):
+            if hex_str == 'target_hash':
+                return mock_target_hash
+            elif hex_str == 'existing_hash':
+                return mock_existing_hash
+            return Mock()
+        
+        mock_imagehash.hex_to_hash.side_effect = mock_hex_to_hash
+        
+        # Mock database to return files with perceptual hashes
+        dedup_engine.db_manager.get_all_files_with_perceptual_hash = Mock(return_value=[
+            {
+                'source_path': '/path/to/similar.jpg',
+                'sha256_hash': 'abc123',
+                'perceptual_hash': 'existing_hash',
+                'file_size': 1024
+            }
+        ])
+        
+        result = dedup_engine._find_similar_images('target_hash', threshold=5)
+        
+        assert result is not None
+        assert result.status == DuplicateStatus.SIMILAR
+        assert result.existing_file == '/path/to/similar.jpg'
+        assert result.similarity_score > 0.8  # Should be high similarity
+    
+    def test_get_size_distribution_stats(self, dedup_engine, temp_files):
+        """Test getting file size distribution statistics."""
+        # Store some files with different sizes
+        for file_path in temp_files:
+            hashes = dedup_engine.calculate_hashes(file_path)
+            dedup_engine.store_file_record(file_path, hashes)
+        
+        dedup_engine.flush_pending_records()
+        
+        stats = dedup_engine.get_size_distribution_stats()
+        
+        assert 'total_files' in stats
+        assert 'min_size' in stats
+        assert 'max_size' in stats
+        assert 'avg_size' in stats
+        # Only unique files are stored (file1 and file2 have same content, so 3 unique files)
+        assert stats['total_files'] >= 3
+    
+    def test_batch_check_duplicates(self, dedup_engine, temp_files):
+        """Test batch duplicate checking."""
+        file_paths = temp_files[:3]
+        progress_updates = []
+        
+        def progress_callback(current, total):
+            progress_updates.append((current, total))
+        
+        results = dedup_engine.batch_check_duplicates(file_paths, progress_callback)
+        
+        assert len(results) == 3
+        assert len(progress_updates) == 3
+        assert progress_updates[-1] == (3, 3)  # Final progress update
+        
+        for file_path in file_paths:
+            assert file_path in results
+            assert isinstance(results[file_path], DuplicateCheckResult)
+    
+    def test_memory_mapped_hashing_large_file(self, temp_db, temp_files):
+        """Test memory-mapped hashing with chunked processing."""
+        config = PerformanceConfig(memory_mapped_hashing=True)
+        engine = DeduplicationEngine(temp_db, config)
+        
+        # Use the large file (2MB)
+        large_file = temp_files[3]
+        
+        # Test chunked processing
+        hash_result = engine._calculate_sha256_mmap(large_file)
+        
+        assert len(hash_result) == 64  # Valid SHA-256 hash
+        
+        # Compare with standard hashing to ensure consistency
+        standard_hash = engine._calculate_sha256_standard(large_file)
+        assert hash_result == standard_hash
+    
+    def test_adaptive_size_tolerance(self, dedup_engine):
+        """Test adaptive size tolerance for different file sizes."""
+        # Small file (< 1KB)
+        small_files = dedup_engine._get_files_by_size(512)
+        # Should use exact match (tolerance = 0)
+        
+        # Medium file (< 1MB)
+        medium_files = dedup_engine._get_files_by_size(512 * 1024)
+        # Should use 1 byte tolerance
+        
+        # Large file (>= 1MB)
+        large_files = dedup_engine._get_files_by_size(5 * 1024 * 1024)
+        # Should use 5 byte tolerance (1 byte per MB)
+        
+        # These calls should not raise exceptions and return lists
+        assert isinstance(small_files, list)
+        assert isinstance(medium_files, list)
+        assert isinstance(large_files, list)

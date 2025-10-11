@@ -1,0 +1,54 @@
+# Example configuration for enhanced analyze with visual analysis
+archive_root: "${HOME}/Photos/Archive"
+
+# LLM Configuration for Visual Analysis
+llm:
+  enabled: true
+  provider: "ollama"
+  endpoint: "http://localhost:11434/api/generate"
+  model: "llama3.1:8b"
+  vision_model: "llava:7b"
+  retry_attempts: 3
+  retry_delay: 1.0
+
+# Peek/Visual Analysis Configuration
+peek:
+  enabled: true
+  include_exif_summary: true
+  include_visual_analysis: true
+  sample_count: 5
+  max_resolution: 1024
+  supported_formats: ["jpg", "jpeg", "heic", "nef", "cr3", "dng"]
+  vision_prompt: |
+    Analyze this photo and describe:
+    1. Main subject/content
+    2. Photography style (portrait, landscape, macro, etc.)
+    3. Setting/location if identifiable
+    4. Notable visual elements
+    Keep response concise, 2-3 sentences.
+
+# Device Detection (optional)
+devices:
+  mappings:
+    "NIKON Z 6": "Z6"
+    "NIKON Z 6_2": "Z6II"
+    "DJI AIR 2S": "Drone"
+  exif_identifiers:
+    "Z6":
+      Make: "NIKON CORPORATION"
+      Model: "NIKON Z 6"
+    "Drone":
+      Make: "DJI"
+      Model: "FC3582"
+
+# File Types
+file_types:
+  raw: ["nef", "cr3", "cr2", "arw", "dng", "orf", "raf", "rw2"]
+  jpeg: ["jpg", "jpeg", "heic", "heif"]
+  video: ["mp4", "mov", "avi", "mkv"]
+
+# Performance Settings
+performance:
+  parallel_workers: 4
+  batch_size: 100
+  cache_exif: true

@@ -18,6 +18,7 @@ except ImportError:
     RICH_AVAILABLE = False
 
 from .analyzer import AnalysisResult
+from .analyze_command import EnhancedAnalysisResult
 from .file_operations import FileOperation, OperationResults, OperationType
 from .deduplication import DuplicateStatus
 
@@ -52,6 +53,20 @@ class OutputManager:
             self._display_rich_analyze_results(results)
         else:
             self._display_plain_analyze_results(results)
+    
+    def display_enhanced_analyze_results(self, results: EnhancedAnalysisResult, json_format: bool = False):
+        """Display enhanced analyze command results.
+        
+        Args:
+            results: Enhanced analysis results
+            json_format: Output in JSON format
+        """
+        if json_format:
+            self._display_enhanced_json_results(results)
+        elif RICH_AVAILABLE:
+            self._display_rich_enhanced_analyze_results(results)
+        else:
+            self._display_plain_enhanced_analyze_results(results)
     
     def display_ingest_plan(self, operations: List[FileOperation], dry_run: bool = True):
         """Display ingest operation plan.
@@ -330,6 +345,219 @@ class OutputManager:
         """Display results in JSON format."""
         json_data = results.to_dict()
         print(json.dumps(json_data, indent=2, default=str))
+    
+    def _display_enhanced_json_results(self, results: EnhancedAnalysisResult):
+        """Display enhanced results in JSON format."""
+        json_data = results.to_dict()
+        print(json.dumps(json_data, indent=2, default=str))
+    
+    def _display_rich_enhanced_analyze_results(self, results: EnhancedAnalysisResult):
+        """Display enhanced analysis results using Rich formatting."""
+        # Display basic EXIF analysis first
+        self._display_rich_analyze_results(results.exif_analysis)
+        
+        # Display device breakdown if available
+        if results.device_breakdown:
+            self._display_device_breakdown(results.device_breakdown)
+        
+        # Display visual analysis results if available
+        if results.visual_analysis and results.processing_mode in ["peek", "exif_with_visual"]:
+            self._display_visual_analysis_results(results.visual_analysis)
+        
+        # Display processing summary
+        self._display_processing_summary(results)
+    
+    def _display_device_breakdown(self, device_breakdown: Dict[str, Dict[str, Any]]):
+        """Display device-specific breakdown."""
+        if not device_breakdown:
+            return
+        
+        device_table = Table(title="📱 Device Breakdown", box=box.SIMPLE)
+        device_table.add_column("Device", style="cyan")
+        device_table.add_column("Files", justify="right", style="green")
+        device_table.add_column("Size", justify="right", style="blue")
+        device_table.add_column("Date Range", style="yellow")
+        device_table.add_column("ISO Range", style="magenta")
+        
+        for device_code, stats in device_breakdown.items():
+            date_range = "N/A"
+            if stats['date_range'][0] and stats['date_range'][1]:
+                if stats['date_range'][0] == stats['date_range'][1]:
+                    date_range = stats['date_range'][0]
+                else:
+                    date_range = f"{stats['date_range'][0]} to {stats['date_range'][1]}"
+            
+            iso_range = "N/A"
+            if stats['iso_range'][0] is not None and stats['iso_range'][1] is not None:
+                if stats['iso_range'][0] == stats['iso_range'][1]:
+                    iso_range = f"ISO {stats['iso_range'][0]}"
+                else:
+                    iso_range = f"ISO {stats['iso_range'][0]}-{stats['iso_range'][1]}"
+            
+            device_table.add_row(
+                device_code,
+                f"{stats['file_count']:,}",
+                self._format_size(stats['total_size']),
+                date_range,
+                iso_range
+            )
+        
+        self.console.print(device_table)
+    
+    def _display_visual_analysis_results(self, visual_results):
+        """Display visual analysis results."""
+        if not visual_results.device_analyses and not visual_results.folder_analyses:
+            return
+        
+        # Overall visual summary
+        if visual_results.overall_summary:
+            summary_text = f"🎨 Comprehensive Analysis:\n{visual_results.overall_summary}"
+            self.console.print(Panel(summary_text, title="👁️  Overall Visual Analysis", box=box.ROUNDED))
+        
+        # Folder-based analysis
+        if visual_results.folder_analyses:
+            self._display_folder_analysis_results(visual_results.folder_analyses)
+            
+            # Folder summary
+            if visual_results.folder_summary:
+                folder_text = f"📁 Folder Organization Summary:\n{visual_results.folder_summary}"
+                self.console.print(Panel(folder_text, title="🗂️  Folder Analysis", box=box.ROUNDED))
+        
+        # Device-specific visual analysis
+        if visual_results.device_analyses:
+            for device_code, analysis in visual_results.device_analyses.items():
+                if analysis.visual_analyses:
+                    self._display_device_visual_analysis(device_code, analysis)
+        
+        # Processing statistics
+        if visual_results.processing_stats:
+            stats = visual_results.processing_stats
+            stats_text = f"""
+📊 Images Sampled: {stats.images_sampled:,} from {stats.total_files_scanned:,} total files
+🤖 LLM Calls: {stats.llm_calls_made:,}
+⏱️  Processing Time: {stats.processing_time:.2f}s
+❌ Errors: {stats.errors_encountered:,}
+            """.strip()
+            
+            self.console.print(Panel(stats_text, title="📈 Visual Analysis Stats", box=box.ROUNDED))
+    
+    def _display_folder_analysis_results(self, folder_analyses):
+        """Display folder-based analysis results."""
+        if not folder_analyses:
+            return
+        
+        # Folder summary table
+        folder_table = Table(title="📁 Folder Analysis", box=box.SIMPLE)
+        folder_table.add_column("Folder", style="cyan")
+        folder_table.add_column("Files", justify="right", style="green")
+        folder_table.add_column("Sampled", justify="right", style="blue")
+        folder_table.add_column("Summary", style="yellow")
+        
+        # Sort folders by path for consistent display
+        sorted_folders = sorted(folder_analyses.items(), key=lambda x: x[0])
+        
+        for folder_path, analysis in sorted_folders:
+            folder_name = Path(folder_path).name or "Root"
+            summary = analysis.folder_summary or "No summary available"
+            
+            # Truncate long summaries for table display
+            if len(summary) > 100:
+                summary = summary[:97] + "..."
+            
+            folder_table.add_row(
+                folder_name,
+                f"{analysis.file_count:,}",
+                f"{len(analysis.sampled_files):,}",
+                summary
+            )
+        
+        self.console.print(folder_table)
+        
+        # Show detailed folder summaries if verbose
+        if self.verbosity > 0:
+            for folder_path, analysis in sorted_folders[:5]:  # Show first 5 folders
+                if analysis.folder_summary and "Failed to generate" not in analysis.folder_summary:
+                    folder_name = Path(folder_path).name or "Root"
+                    folder_text = f"📁 {folder_name} ({analysis.file_count} files): {analysis.folder_summary}"
+                    self.console.print(Panel(folder_text, title=f"🗂️  {folder_name} Details", box=box.SIMPLE))
+    
+    def _display_device_visual_analysis(self, device_code: str, analysis):
+        """Display visual analysis for a specific device."""
+        if not analysis.visual_analyses:
+            return
+        
+        # Device summary
+        if analysis.device_summary:
+            device_text = f"📷 {device_code}: {analysis.device_summary}"
+            self.console.print(Panel(device_text, title=f"🎯 {device_code} Visual Summary", box=box.SIMPLE))
+        
+        # Sample analyses (show only if verbose)
+        if self.verbosity > 0:
+            sample_table = Table(title=f"🖼️  {device_code} Sample Analyses", box=box.SIMPLE)
+            sample_table.add_column("File", style="cyan")
+            sample_table.add_column("Description", style="green")
+            sample_table.add_column("Confidence", justify="right", style="yellow")
+            
+            for va in analysis.visual_analyses[:3]:  # Show first 3
+                if va.visual_description and not va.error:
+                    confidence_str = f"{va.confidence:.1%}" if va.confidence > 0 else "N/A"
+                    # Truncate long descriptions
+                    description = va.visual_description[:80] + "..." if len(va.visual_description) > 80 else va.visual_description
+                    sample_table.add_row(
+                        va.file_path.name,
+                        description,
+                        confidence_str
+                    )
+            
+            if len(analysis.visual_analyses) > 3:
+                sample_table.add_row("...", f"({len(analysis.visual_analyses) - 3} more samples)", "")
+            
+            self.console.print(sample_table)
+    
+    def _display_processing_summary(self, results: EnhancedAnalysisResult):
+        """Display processing summary."""
+        mode_descriptions = {
+            "exif_only": "EXIF Analysis Only",
+            "peek": "EXIF + Visual Analysis (Peek Mode)",
+            "exif_with_visual": "EXIF + Visual Analysis (Auto)"
+        }
+        
+        summary_text = f"""
+🔍 Processing Mode: {mode_descriptions.get(results.processing_mode, results.processing_mode)}
+⏱️  Total Processing Time: {results.total_processing_time:.2f}s
+        """.strip()
+        
+        if results.visual_analysis and results.visual_analysis.processing_stats:
+            visual_stats = results.visual_analysis.processing_stats
+            summary_text += f"\n👁️  Visual Analysis: {visual_stats.images_sampled} images sampled, {visual_stats.llm_calls_made} LLM calls"
+        
+        self.console.print(Panel(summary_text, title="⚙️ Processing Summary", box=box.ROUNDED))
+    
+    def _display_plain_enhanced_analyze_results(self, results: EnhancedAnalysisResult):
+        """Display enhanced analysis results in plain text format."""
+        # Display basic EXIF analysis
+        self._display_plain_analyze_results(results.exif_analysis)
+        
+        # Display device breakdown
+        if results.device_breakdown:
+            print(f"\n=== Device Breakdown ===")
+            for device_code, stats in results.device_breakdown.items():
+                print(f"{device_code}: {stats['file_count']:,} files, {self._format_size(stats['total_size'])}")
+        
+        # Display visual analysis
+        if results.visual_analysis:
+            print(f"\n=== Visual Analysis ===")
+            if results.visual_analysis.overall_summary:
+                print(f"Overall Summary: {results.visual_analysis.overall_summary}")
+            
+            for device_code, analysis in results.visual_analysis.device_analyses.items():
+                if analysis.device_summary:
+                    print(f"{device_code}: {analysis.device_summary}")
+        
+        # Processing summary
+        print(f"\n=== Processing Summary ===")
+        print(f"Mode: {results.processing_mode}")
+        print(f"Total Time: {results.total_processing_time:.2f}s")
     
     def _display_plain_analyze_results(self, results: AnalysisResult):
         """Display analysis results in plain text format."""

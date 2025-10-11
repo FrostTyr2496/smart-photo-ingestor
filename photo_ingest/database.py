@@ -321,6 +321,20 @@ class DatabaseManager:
             )
             return [dict(row) for row in cursor.fetchall()]
     
+    def get_all_files_with_perceptual_hash(self) -> List[Dict[str, Any]]:
+        """Get all files that have perceptual hashes for similarity comparison.
+        
+        Returns:
+            List of file records with perceptual hashes
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute(
+                """SELECT source_path, sha256_hash, perceptual_hash, file_size 
+                   FROM file_records 
+                   WHERE perceptual_hash IS NOT NULL AND perceptual_hash != ''"""
+            )
+            return [dict(row) for row in cursor.fetchall()]
+    
     def insert_file_record(self, record: FileRecord):
         """Insert a single file record.
         

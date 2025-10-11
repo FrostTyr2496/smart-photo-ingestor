@@ -44,7 +44,7 @@
   - Write unit tests for file scanning operations
   - _Requirements: 1.1, 11.1_
 
-- [ ] 7. Build deduplication engine with performance optimizations
+- [x] 7. Build deduplication engine with performance optimizations
   - Implement DeduplicationEngine with SHA-256 hashing
   - Add perceptual hashing for image similarity detection
   - Create size-based pre-filtering for performance
@@ -53,7 +53,7 @@
   - Write unit tests for duplicate detection and hashing
   - _Requirements: 4.1, 4.2, 4.3, 4.5, 11.5, 14.5_
 
-- [ ] 8. Implement enhanced analyze command with optional visual analysis
+- [x] 8. Implement enhanced analyze command with optional visual analysis
   - Create AnalyzeCommand class with EXIF summarization logic
   - Add camera, lens, date range, and technical parameter analysis
   - Implement VisualContentAnalyzer with image sampling and downscaling for --peek mode

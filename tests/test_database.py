@@ -256,6 +256,44 @@ class TestDatabaseManager:
         results = temp_db.get_files_by_perceptual_hash(perceptual_hash)
         assert len(results) == 2
     
+    def test_get_all_files_with_perceptual_hash(self, temp_db):
+        """Test retrieving all files that have perceptual hashes."""
+        # Insert records with and without perceptual hashes
+        records_data = [
+            ("hash1", "perceptual1"),
+            ("hash2", "perceptual2"),
+            ("hash3", None),  # No perceptual hash
+            ("hash4", ""),    # Empty perceptual hash
+            ("hash5", "perceptual5")
+        ]
+        
+        for i, (sha256, perceptual) in enumerate(records_data):
+            record = FileRecord(
+                source_path=f"/test/IMG_{i}.jpg",
+                dest_path=f"/dest/IMG_{i}.jpg",
+                raw_backup_path=None,
+                sha256_hash=sha256,
+                perceptual_hash=perceptual,
+                file_size=1024,
+                file_mtime=1705123456,
+                created_date="2024-01-15T12:00:00",
+                processed_date="2024-01-15T12:05:00",
+                camera_model="Test Camera",
+                lens_model="Test Lens",
+                device_code="TEST",
+                operation_type=OperationType.ORGANIZED.value
+            )
+            temp_db.insert_file_record(record)
+        
+        # Should only return files with non-null, non-empty perceptual hashes
+        results = temp_db.get_all_files_with_perceptual_hash()
+        assert len(results) == 3  # Only records with actual perceptual hashes
+        
+        perceptual_hashes = [r['perceptual_hash'] for r in results]
+        assert "perceptual1" in perceptual_hashes
+        assert "perceptual2" in perceptual_hashes
+        assert "perceptual5" in perceptual_hashes
+    
     def test_get_database_stats(self, temp_db, sample_file_record):
         """Test getting database statistics."""
         # Initially empty

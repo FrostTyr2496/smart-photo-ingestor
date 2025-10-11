@@ -6,9 +6,12 @@ from pathlib import Path
 from typing import Optional
 
 from .analyzer import PhotoAnalyzer
+from .analyze_command import AnalyzeCommand, EnhancedAnalysisResult
+from .visual_analyzer import VisualContentAnalyzer
 from .output_formatter import AnalysisFormatter
 from .output_manager import OutputManager
-from .config import FileTypes, PerformanceConfig, ConfigManager, ConfigurationError
+from .config import FileTypes, PerformanceConfig, ConfigManager, ConfigurationError, PeekConfig, LLMConfig
+from .settings import settings_manager
 
 
 @click.group()
@@ -33,8 +36,10 @@ def main(ctx, verbose: int, quiet: bool):
 @click.option('--detailed/--basic', default=True, help='Detailed EXIF analysis (default) or basic analysis')
 @click.option('--summary', is_flag=True, help='Show only a brief summary')
 @click.option('--workers', default=4, help='Number of parallel workers for processing')
+@click.option('--folder-analysis/--no-folder-analysis', default=True, help='Enable folder-by-folder analysis (default: enabled)')
+@click.option('--location/--no-location', default=True, help='Enable GPS location resolution (default: enabled)')
 @click.pass_context
-def analyze(ctx, folder: Path, config: Optional[Path], json: bool, peek: bool, exif_only: bool, samples: int, detailed: bool, summary: bool, workers: int):
+def analyze(ctx, folder: Path, config: Optional[Path], json: bool, peek: bool, exif_only: bool, samples: int, detailed: bool, summary: bool, workers: int, folder_analysis: bool, location: bool):
     """Analyze folder contents with optional visual content analysis."""
     verbose = ctx.obj.get('verbose', 0)
     quiet = ctx.obj.get('quiet', False)
@@ -60,27 +65,79 @@ def analyze(ctx, folder: Path, config: Optional[Path], json: bool, peek: bool, e
         # Initialize output manager
         output_manager = OutputManager(verbosity=verbose, quiet=quiet)
         
-        # Load configuration if provided (for peek mode)
+        # Load configuration - try provided config, then saved config, then defaults
         ingest_config = None
-        if config or peek:
+        config_source = None
+        
+        # Determine config file to use
+        config_to_use = config
+        if not config_to_use:
+            # Try to use saved config path
+            saved_config = settings_manager.get_config_path()
+            if saved_config and Path(saved_config).exists():
+                config_to_use = saved_config
+                config_source = "saved"
+        
+        if config_to_use:
             try:
-                ingest_config = ConfigManager.load_config(config)
+                ingest_config = ConfigManager.load_config(config_to_use)
+                
+                # Save the config path if it was explicitly provided
+                if config and config != settings_manager.get_config_path():
+                    settings_manager.set_config_path(config)
+                    if not quiet:
+                        output_manager.print_message(f"💾 Saved config path: {config}")
+                elif config_source == "saved" and not quiet:
+                    output_manager.print_message(f"📁 Using saved config: {config_to_use}")
+                
                 if peek and not ingest_config.llm.enabled:
                     output_manager.print_warning("Peek mode requested but LLM is not enabled in config")
                     if not exif_only:
                         output_manager.print_message("Falling back to EXIF-only analysis")
                         peek = False
+                        
             except ConfigurationError as e:
+                output_manager.print_warning(f"Config error: {e}")
                 if peek and not exif_only:
-                    output_manager.print_warning(f"Config error: {e}")
                     output_manager.print_message("Falling back to EXIF-only analysis")
                     peek = False
                 # For analyze command, config is optional, so continue without it
+        elif peek and not exif_only:
+            # Peek mode requested but no config provided or found
+            output_manager.print_warning("Peek mode requested but no configuration file provided")
+            output_manager.print_message("💡 Tip: Use --config to specify a config file, or run 'photo-ingest config set' to save one")
+            output_manager.print_message("Falling back to EXIF-only analysis")
+            peek = False
         
-        # Configure analyzer
+        # Configure enhanced analyzer
         file_types = ingest_config.file_types if ingest_config else FileTypes()
         performance_config = ingest_config.performance if ingest_config else PerformanceConfig(parallel_workers=workers)
-        analyzer = PhotoAnalyzer(file_types, performance_config, detailed=detailed)
+        
+        # Create enhanced analyze command
+        analyze_command = AnalyzeCommand(
+            config=ingest_config,
+            file_types=file_types,
+            performance_config=performance_config
+        )
+        
+        # Enable verbose logging if requested
+        if verbose > 0:
+            import logging
+            logging.basicConfig(
+                level=logging.INFO if verbose == 1 else logging.DEBUG,
+                format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            )
+            analyze_command.set_verbose(True)
+        
+        # Configure location services
+        if analyze_command.visual_analyzer and not location:
+            # Recreate visual analyzer with location disabled
+            analyze_command.visual_analyzer = VisualContentAnalyzer(
+                ingest_config.peek if ingest_config else PeekConfig(),
+                ingest_config.llm if ingest_config else LLMConfig(),
+                verbose=verbose > 0,
+                enable_location=False
+            )
         
         # Enhanced progress callback
         def progress_callback(phase, current, total, message):
@@ -90,24 +147,30 @@ def analyze(ctx, folder: Path, config: Optional[Path], json: bool, peek: bool, e
                 elif phase == "exif":
                     percentage = (current / total) * 100 if total > 0 else 0
                     output_manager.print_progress(f"📸 Extracting EXIF: {current}/{total} ({percentage:.1f}%) - {message}", style="green")
+                elif phase == "visual":
+                    percentage = (current / total) * 100 if total > 0 else 0
+                    output_manager.print_progress(f"👁️  Visual Analysis: {current}/{total} ({percentage:.1f}%) - {message}", style="magenta")
+                elif phase == "analyze":
+                    percentage = (current / total) * 100 if total > 0 else 0
+                    output_manager.print_progress(f"🔍 Analysis: {message} ({percentage:.0f}%)", style="blue")
         
-        # Run analysis
-        result = analyzer.analyze_directory(
-            folder, 
+        # Run enhanced analysis
+        result = analyze_command.analyze_directory(
+            folder,
+            peek_mode=peek,
+            exif_only=exif_only,
+            samples=samples,
+            enable_folder_analysis=folder_analysis,
             progress_callback=progress_callback if not quiet else None
         )
         
         if not quiet:
             click.echo()  # New line after progress
         
-        # TODO: Implement peek mode visual analysis here
-        if peek and not exif_only:
-            output_manager.print_message("🔮 Visual analysis not yet implemented", style="yellow")
+        # Display results using enhanced output manager
+        output_manager.display_enhanced_analyze_results(result, json_format=json)
         
-        # Display results using output manager
-        output_manager.display_analyze_results(result, json_format=json)
-        
-        if result.total_files == 0:
+        if result.exif_analysis.total_files == 0:
             output_manager.print_error("No supported photo files found in the specified directory.")
             ctx.exit(1)
         
@@ -121,6 +184,78 @@ def analyze(ctx, folder: Path, config: Optional[Path], json: bool, peek: bool, e
             import traceback
             traceback.print_exc()
         ctx.exit(1)
+
+
+@main.group()
+def config():
+    """Manage configuration settings."""
+    pass
+
+
+@config.command()
+@click.argument('config_file', type=click.Path(exists=True, path_type=Path))
+def set(config_file: Path):
+    """Set the default configuration file path."""
+    try:
+        # Validate the config file by trying to load it
+        ConfigManager.load_config(config_file)
+        
+        # Save the config path
+        settings_manager.set_config_path(str(config_file))
+        
+        click.echo(f"✅ Default config set to: {config_file.resolve()}")
+        click.echo("💡 You can now use --peek without --config flag")
+        
+    except ConfigurationError as e:
+        click.echo(f"❌ Invalid config file: {e}", err=True)
+        click.echo("Please check your configuration file and try again.", err=True)
+
+
+@config.command()
+def show():
+    """Show current configuration settings."""
+    saved_config = settings_manager.get_config_path()
+    
+    if saved_config:
+        config_path = Path(saved_config)
+        if config_path.exists():
+            click.echo(f"📁 Default config: {saved_config}")
+            click.echo(f"✅ Status: Found")
+            
+            # Show some basic config info
+            try:
+                ingest_config = ConfigManager.load_config(saved_config)
+                click.echo(f"🔧 LLM enabled: {ingest_config.llm.enabled}")
+                click.echo(f"👁️  Visual analysis: {ingest_config.peek.include_visual_analysis}")
+                click.echo(f"📦 Archive root: {ingest_config.archive_root}")
+            except ConfigurationError:
+                click.echo("⚠️  Config file has errors")
+        else:
+            click.echo(f"📁 Default config: {saved_config}")
+            click.echo(f"❌ Status: File not found")
+    else:
+        click.echo("📁 No default config set")
+        click.echo("💡 Use 'photo-ingest config set <file>' to set one")
+
+
+@config.command()
+def clear():
+    """Clear the saved configuration file path."""
+    settings_manager.clear_config_path()
+    click.echo("✅ Default config cleared")
+    click.echo("💡 You'll need to use --config flag or set a new default")
+
+
+@config.command()
+@click.argument('output_file', type=click.Path(path_type=Path))
+def create(output_file: Path):
+    """Create an example configuration file."""
+    try:
+        ConfigManager.create_example_config(output_file)
+        click.echo(f"✅ Example config created: {output_file.resolve()}")
+        click.echo("💡 Edit the file to match your setup, then use 'photo-ingest config set' to make it default")
+    except Exception as e:
+        click.echo(f"❌ Failed to create config: {e}", err=True)
 
 
 @main.command()
