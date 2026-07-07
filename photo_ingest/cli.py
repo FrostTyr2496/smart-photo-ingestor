@@ -266,28 +266,113 @@ def create(output_file: Path):
 @click.option('--copy/--move', default=True, help='Copy files (default) or move them')
 @click.option('--raw-only', is_flag=True, help='Perform only raw backup')
 @click.option('--organized-only', is_flag=True, help='Perform only organized import')
+@click.option('--json', 'json_output', is_flag=True, help='Output results in JSON format')
 @click.pass_context
-def ingest(ctx, config: Optional[Path], source: Path, event: str, dry_run: bool, copy: bool, raw_only: bool, organized_only: bool):
+def ingest(ctx, config: Optional[Path], source: Path, event: str, dry_run: bool,
+           copy: bool, raw_only: bool, organized_only: bool, json_output: bool):
     """Ingest photos into structured archive with optional raw backup."""
-    click.echo(f"Ingesting from: {source}")
-    click.echo(f"Event: {event}")
-    click.echo(f"Mode: {'Copy' if copy else 'Move'}")
-    
+    from .ingest_command import IngestCommand
+    import json as _json
+
+    verbose = ctx.obj.get('verbose', 0)
+    quiet = ctx.obj.get('quiet', False)
+
     if raw_only and organized_only:
         click.echo("Error: Cannot specify both --raw-only and --organized-only", err=True)
         ctx.exit(1)
-    
-    if raw_only:
-        click.echo("Raw backup only mode")
-    elif organized_only:
-        click.echo("Organized import only mode")
+        return
+
+    if not quiet:
+        click.echo(f"📥 Ingesting from: {source}")
+        click.echo(f"🏷️  Event: {event}")
+        click.echo(f"📋 Mode: {'Copy' if copy else 'Move'}")
+        if raw_only:
+            click.echo("📦 Raw backup only")
+        elif organized_only:
+            click.echo("📂 Organised import only")
+        else:
+            click.echo("🔄 Both raw backup and organised import")
+        if dry_run:
+            click.echo("🔍 DRY RUN — no files will be modified")
+
+    # Load config
+    output_manager = OutputManager(verbosity=verbose, quiet=quiet)
+    ingest_config = None
+
+    config_to_use = config
+    if not config_to_use:
+        saved = settings_manager.get_config_path()
+        if saved and Path(saved).exists():
+            config_to_use = saved
+
+    if config_to_use:
+        try:
+            ingest_config = ConfigManager.load_config(config_to_use)
+        except ConfigurationError as e:
+            click.echo(f"❌ Config error: {e}", err=True)
+            ctx.exit(1)
+            return
     else:
-        click.echo("Both raw backup and organized import")
-    
-    if dry_run:
-        click.echo("DRY RUN MODE - No files will be modified")
-    
-    # TODO: Implement ingest functionality
+        click.echo("❌ No configuration file found. Use --config or run 'photo-ingest config set'.", err=True)
+        ctx.exit(1)
+        return
+
+    # Progress callback
+    def progress_callback(phase, current, total, message):
+        if quiet:
+            return
+        pct = f"{current/total*100:.0f}%" if total else ""
+        icons = {"scan": "🔍", "exif": "📸", "dedup": "🔄", "copy": "📂"}
+        icon = icons.get(phase, "⚙️")
+        output_manager.print_progress(f"{icon} {phase.capitalize()}: {message} {pct}")
+
+    try:
+        cmd = IngestCommand(ingest_config, progress_callback=progress_callback if not quiet else None)
+        result = cmd.run(
+            source=source,
+            event_name=event,
+            copy_mode=copy,
+            dry_run=dry_run,
+            raw_only=raw_only,
+            organized_only=organized_only,
+        )
+
+        if not quiet:
+            click.echo()  # newline after progress
+
+        if json_output:
+            import dataclasses
+            print(_json.dumps(dataclasses.asdict(result), indent=2, default=str))
+        else:
+            _display_ingest_result(result, output_manager, dry_run)
+
+        if result.errors:
+            ctx.exit(1)
+
+    except Exception as e:
+        click.echo(f"❌ Ingest failed: {e}", err=True)
+        if verbose > 1:
+            import traceback
+            traceback.print_exc()
+        ctx.exit(1)
+
+
+def _display_ingest_result(result, output_manager: OutputManager, dry_run: bool) -> None:
+    """Pretty-print ingest results."""
+    prefix = "🔍 DRY RUN" if dry_run else "✅ Ingest"
+    output_manager.print_message(f"\n{prefix} complete in {result.processing_time_seconds:.1f}s")
+    output_manager.print_message(f"  📁 Total files:    {result.total_files:,}")
+    output_manager.print_message(f"  ✅ Copied/moved:   {result.files_copied + result.files_moved:,}")
+    output_manager.print_message(f"  🔄 Duplicates:     {result.duplicates_found:,}")
+    output_manager.print_message(f"  ⏭️  Skipped:        {result.files_skipped:,}")
+    if result.manifest_path:
+        output_manager.print_message(f"  📄 Manifest:       {result.manifest_path}")
+    if result.summary_path:
+        output_manager.print_message(f"  📝 Summary:        {result.summary_path}")
+    if result.notes_path:
+        output_manager.print_message(f"  🤖 Notes:          {result.notes_path}")
+    if result.errors:
+        output_manager.print_warning(f"  ⚠️  {len(result.errors)} error(s) — check logs")
 
 
 if __name__ == '__main__':

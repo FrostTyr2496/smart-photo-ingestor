@@ -336,11 +336,11 @@ class TestRawBackupManager:
     """Test RawBackupManager class."""
     
     @pytest.fixture
-    def backup_config(self):
+    def backup_config(self, tmp_path):
         """Create backup configuration for testing."""
         return RawBackupConfig(
             enabled=True,
-            backup_root="/test/backup",
+            backup_root=str(tmp_path / "backup"),
             preserve_structure=True,
             timestamp_format="%Y-%m-%d_%H%M%S"
         )

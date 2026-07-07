@@ -38,14 +38,20 @@ class FileOperation:
         """Get event date from metadata."""
         if 'DateTime' in self.metadata and self.metadata['DateTime']:
             try:
-                if isinstance(self.metadata['DateTime'], str):
-                    dt = datetime.fromisoformat(self.metadata['DateTime'].replace(':', '-', 2))
+                dt_val = self.metadata['DateTime']
+                if isinstance(dt_val, str):
+                    # Handle ISO format (2023-12-01T10:30:00) and EXIF format (2023:12:01 10:30:00)
+                    if 'T' in dt_val:
+                        dt = datetime.fromisoformat(dt_val)
+                    else:
+                        # EXIF format uses colons in date part: replace first two only
+                        dt = datetime.fromisoformat(dt_val.replace(':', '-', 2))
                 else:
-                    dt = self.metadata['DateTime']
+                    dt = dt_val
                 return dt.strftime('%Y-%m-%d')
             except Exception:
                 pass
-        
+
         # Fallback to file modification time
         try:
             return datetime.fromtimestamp(self.source_path.stat().st_mtime).strftime('%Y-%m-%d')
@@ -251,18 +257,30 @@ class FileOperationsManager:
             return datetime.now().strftime('%Y-%m-%d')
     
     def _execute_raw_backup_operations(self, operations: List[FileOperation], 
-                                     copy_mode: bool) -> RawBackupResult:
+                                     copy_mode: bool, dry_run: bool = False) -> RawBackupResult:
         """Execute raw backup operations."""
         source_files = [op.source_path for op in operations]
         source_root = self._find_common_root(source_files)
         
         return self.raw_backup_manager.create_raw_backup(
-            source_files, source_root, copy_mode=copy_mode
+            source_files, source_root, copy_mode=copy_mode, dry_run=dry_run
         )
     
     def _execute_organized_operations(self, operations: List[FileOperation], 
                                     copy_mode: bool) -> OperationResults:
-        """Execute organized import operations."""
+        """Execute organized import operations in parallel using ThreadPoolExecutor.
+        
+        Each file operation runs concurrently, respecting the configured number of
+        parallel workers.  Errors on individual files are captured and recorded
+        without stopping the remaining operations.
+        
+        Args:
+            operations: List of FileOperation objects to execute.
+            copy_mode: True to copy files, False to move them.
+            
+        Returns:
+            OperationResults aggregated across all workers.
+        """
         results = OperationResults(
             files_processed=0,
             files_copied=0,
@@ -271,41 +289,84 @@ class FileOperationsManager:
             duplicates_found=0,
             errors=[]
         )
-        
-        for i, operation in enumerate(operations):
+
+        # Counters are mutated from worker threads; protect them with a lock.
+        import threading
+        lock = threading.Lock()
+        total = len(operations)
+
+        def _process_one(indexed_op: tuple) -> None:
+            """Process a single operation inside a worker thread."""
+            idx, operation = indexed_op
             if self.progress_callback:
-                self.progress_callback("organize", i + 1, len(operations), 
-                                     f"Processing {operation.source_path.name}")
-            
+                self.progress_callback("organize", idx + 1, total,
+                                       f"Processing {operation.source_path.name}")
             try:
-                # Skip duplicates
+                # Skip duplicates – record and return early.
                 if operation.duplicate_status == DuplicateStatus.DUPLICATE:
-                    results.duplicates_found += 1
-                    results.files_skipped += 1
-                    continue
-                
-                # Ensure destination directory exists
+                    with lock:
+                        results.duplicates_found += 1
+                        results.files_skipped += 1
+                    return
+
+                if operation.dest_path is None:
+                    with lock:
+                        results.errors.append(
+                            f"No destination path planned for {operation.source_path}"
+                        )
+                    return
+
+                # Ensure destination directory exists (parents=True is thread-safe
+                # because exist_ok=True suppresses the race-condition error).
                 operation.dest_path.parent.mkdir(parents=True, exist_ok=True)
-                
-                # Perform file operation
+
                 if copy_mode:
                     shutil.copy2(operation.source_path, operation.dest_path)
-                    results.files_copied += 1
+                    # Verify integrity only for copies (source still exists).
+                    if not self.verify_file_integrity(operation.source_path, operation.dest_path):
+                        with lock:
+                            results.errors.append(
+                                f"File integrity check failed: {operation.source_path}"
+                            )
+                        return
+                    with lock:
+                        results.files_copied += 1
                 else:
                     shutil.move(str(operation.source_path), operation.dest_path)
-                    results.files_moved += 1
-                
-                # Verify file integrity
-                if not self.verify_file_integrity(operation.source_path, operation.dest_path):
-                    results.errors.append(f"File integrity check failed: {operation.source_path}")
-                
-                results.files_processed += 1
-                
+                    with lock:
+                        results.files_moved += 1
+
+                with lock:
+                    results.files_processed += 1
+
             except Exception as e:
                 error_msg = f"Failed to process {operation.source_path}: {e}"
                 logger.error(error_msg)
-                results.errors.append(error_msg)
-        
+                with lock:
+                    results.errors.append(error_msg)
+
+        parallel_workers = getattr(self.config.performance, 'parallel_workers', 4)
+
+        if parallel_workers > 1 and len(operations) > 1:
+            with ThreadPoolExecutor(max_workers=parallel_workers) as executor:
+                futures = {
+                    executor.submit(_process_one, (i, op)): op
+                    for i, op in enumerate(operations)
+                }
+                for future in as_completed(futures):
+                    # Propagate unexpected exceptions that slipped past the inner try/except.
+                    exc = future.exception()
+                    if exc is not None:
+                        op = futures[future]
+                        error_msg = f"Unexpected error processing {op.source_path}: {exc}"
+                        logger.error(error_msg)
+                        with lock:
+                            results.errors.append(error_msg)
+        else:
+            # Sequential fallback for single-worker config or single file.
+            for i, op in enumerate(operations):
+                _process_one((i, op))
+
         return results
     
     def _simulate_operations(self, operations: List[FileOperation], 
@@ -337,7 +398,10 @@ class FileOperationsManager:
         return results
     
     def verify_file_integrity(self, source: Path, dest: Path) -> bool:
-        """Verify copied file matches source checksum.
+        """Verify copied file matches source checksum using SHA-256 (Req 11.3).
+        
+        Performs a fast size pre-check, then a full SHA-256 comparison for all
+        files regardless of size, ensuring data integrity is always confirmed.
         
         Args:
             source: Source file path
@@ -347,25 +411,12 @@ class FileOperationsManager:
             True if files match, False otherwise
         """
         try:
-            # Quick check: file sizes
+            # Fast pre-check: file sizes must match
             if source.stat().st_size != dest.stat().st_size:
                 return False
             
-            # For small files, do full checksum verification
-            if source.stat().st_size < 10 * 1024 * 1024:  # 10MB threshold
-                import hashlib
-                
-                def file_hash(path):
-                    hash_md5 = hashlib.md5()
-                    with open(path, "rb") as f:
-                        for chunk in iter(lambda: f.read(4096), b""):
-                            hash_md5.update(chunk)
-                    return hash_md5.hexdigest()
-                
-                return file_hash(source) == file_hash(dest)
-            
-            # For large files, assume size check is sufficient
-            return True
+            # Full SHA-256 checksum verification (Req 11.3)
+            return RawBackupManager._verify_sha256(source, dest)
             
         except Exception as e:
             logger.error(f"File integrity check failed: {e}")
@@ -407,13 +458,14 @@ class RawBackupManager:
         self._backup_directory = None
     
     def create_raw_backup(self, files: List[Path], source_root: Path, 
-                         copy_mode: bool = True) -> RawBackupResult:
+                         copy_mode: bool = True, dry_run: bool = False) -> RawBackupResult:
         """Create timestamped raw backup preserving original structure.
         
         Args:
             files: List of files to backup
             source_root: Root directory of source files
             copy_mode: True to copy files, False to move them
+            dry_run: If True, simulate operations without writing any files
             
         Returns:
             RawBackupResult with operation details
@@ -428,6 +480,28 @@ class RawBackupManager:
             )
         
         backup_dir = self.get_backup_directory()
+        
+        if dry_run:
+            # Simulate: compute what would happen without touching the filesystem
+            total_size = 0
+            errors = []
+            skipped = 0
+            backed_up = 0
+            for file_path in files:
+                try:
+                    total_size += file_path.stat().st_size
+                    backed_up += 1
+                except Exception as e:
+                    errors.append(f"Failed to stat {file_path}: {e}")
+                    skipped += 1
+            return RawBackupResult(
+                backup_directory=backup_dir,
+                files_backed_up=backed_up,
+                files_skipped=skipped,
+                total_size=total_size,
+                errors=errors
+            )
+        
         backup_dir.mkdir(parents=True, exist_ok=True)
         
         result = RawBackupResult(
@@ -440,16 +514,30 @@ class RawBackupManager:
         
         for file_path in files:
             try:
+                if not file_path.exists():
+                    raise FileNotFoundError(f"Source file not found: {file_path}")
+                
                 backup_path = self.get_backup_path(file_path, source_root)
                 backup_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                file_size = file_path.stat().st_size
                 
                 if copy_mode:
                     shutil.copy2(file_path, backup_path)
                 else:
                     shutil.move(str(file_path), backup_path)
                 
+                # Verify integrity using SHA-256 (only meaningful for copy; move changes source)
+                if copy_mode and backup_path.exists():
+                    if not self._verify_sha256(file_path, backup_path):
+                        error_msg = f"Integrity check failed for {file_path}: SHA-256 mismatch"
+                        logger.error(error_msg)
+                        result.errors.append(error_msg)
+                        result.files_skipped += 1
+                        continue
+                
                 result.files_backed_up += 1
-                result.total_size += file_path.stat().st_size
+                result.total_size += file_size
                 
             except Exception as e:
                 error_msg = f"Failed to backup {file_path}: {e}"
@@ -476,33 +564,64 @@ class RawBackupManager:
                 relative_path = source_file.relative_to(source_root)
             except ValueError:
                 # File is not under source_root, use just the filename
-                relative_path = source_file.name
+                relative_path = Path(source_file.name)
         else:
-            relative_path = source_file.name
+            relative_path = Path(source_file.name)
         
         return backup_dir / relative_path
     
     def get_backup_directory(self) -> Path:
         """Get the backup directory, ensuring it's unique."""
         if self._backup_directory is None:
-            self._backup_directory = self._ensure_unique_backup_dir()
+            self._backup_directory = self.ensure_unique_backup_dir()
         return self._backup_directory
     
-    def _ensure_unique_backup_dir(self) -> Path:
-        """Ensure backup directory is unique, append sequence if needed."""
+    def ensure_unique_backup_dir(self) -> Path:
+        """Ensure backup directory is unique, append sequence number if needed.
+        
+        Returns:
+            Path to a backup directory that does not yet exist on disk.
+            If the base timestamp directory doesn't exist, returns it directly.
+            Otherwise appends _001, _002, ... until a free name is found.
+            
+        Raises:
+            RuntimeError: If no unique directory could be found within 999 attempts.
+        """
         base_dir = Path(self.config.backup_root) / self.backup_timestamp
         
         if not base_dir.exists():
             return base_dir
         
-        # Directory exists, find unique name with sequence number
-        sequence = 1
-        while True:
-            unique_dir = Path(self.config.backup_root) / f"{self.backup_timestamp}_{sequence:02d}"
+        # Directory exists, find unique name with three-digit sequence number
+        for sequence in range(1, 1000):
+            unique_dir = Path(self.config.backup_root) / f"{self.backup_timestamp}_{sequence:03d}"
             if not unique_dir.exists():
                 return unique_dir
-            sequence += 1
+        
+        raise RuntimeError("Cannot create unique backup directory: all sequence numbers exhausted")
+    
+    @staticmethod
+    def _verify_sha256(source: Path, dest: Path) -> bool:
+        """Verify that source and destination files have the same SHA-256 hash.
+        
+        Args:
+            source: Source file path
+            dest: Destination file path
             
-            # Safety check to prevent infinite loop
-            if sequence > 99:
-                raise RuntimeError("Cannot create unique backup directory")
+        Returns:
+            True if hashes match, False otherwise
+        """
+        import hashlib
+        
+        def _sha256(path: Path) -> str:
+            h = hashlib.sha256()
+            with open(path, "rb") as f:
+                for chunk in iter(lambda: f.read(65536), b""):
+                    h.update(chunk)
+            return h.hexdigest()
+        
+        try:
+            return _sha256(source) == _sha256(dest)
+        except Exception as e:
+            logger.error(f"SHA-256 verification error: {e}")
+            return False
