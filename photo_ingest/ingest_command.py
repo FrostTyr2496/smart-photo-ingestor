@@ -144,6 +144,12 @@ class IngestCommand:
         # --- initialise sub-components ---
         self._init_components()
 
+        # Validate source before entering the error-absorbing try block so that
+        # callers (and tests) receive a real FileNotFoundError instead of having
+        # it swallowed into result.errors.
+        if not source.exists():
+            raise FileNotFoundError(f"Source directory not found: {source}")
+
         try:
             # 1. Scan
             self._emit("scan", 0, 1, "Scanning source directory…")
