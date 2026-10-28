@@ -11,6 +11,7 @@ from .visual_analyzer import VisualContentAnalyzer
 from .output_formatter import AnalysisFormatter
 from .output_manager import OutputManager
 from .config import FileTypes, PerformanceConfig, ConfigManager, ConfigurationError, PeekConfig, LLMConfig
+from .exceptions import PhotoIngestError, format_user_error
 from .settings import settings_manager
 
 
@@ -178,8 +179,11 @@ def analyze(ctx, folder: Path, config: Optional[Path], json: bool, peek: bool, e
         click.echo(f"❌ Missing dependency: {e}", err=True)
         click.echo("Install required packages with: pip install Pillow", err=True)
         ctx.exit(1)
+    except PhotoIngestError as e:
+        click.echo(f"❌ {format_user_error(e)}", err=True)
+        ctx.exit(1)
     except Exception as e:
-        click.echo(f"❌ Analysis failed: {e}", err=True)
+        click.echo(f"❌ Analysis failed: {format_user_error(e)}", err=True)
         if verbose > 1:
             import traceback
             traceback.print_exc()
@@ -349,8 +353,11 @@ def ingest(ctx, config: Optional[Path], source: Path, event: str, dry_run: bool,
         if result.errors:
             ctx.exit(1)
 
+    except (click.exceptions.Exit, click.exceptions.Abort):
+        # ctx.exit()/abort must propagate; don't treat them as pipeline failures.
+        raise
     except Exception as e:
-        click.echo(f"❌ Ingest failed: {e}", err=True)
+        click.echo(f"❌ Ingest failed: {format_user_error(e)}", err=True)
         if verbose > 1:
             import traceback
             traceback.print_exc()

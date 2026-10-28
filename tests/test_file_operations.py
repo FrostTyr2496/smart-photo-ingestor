@@ -204,7 +204,26 @@ class TestFileOperationsManager:
         assert op.operation_type == OperationType.BOTH
         assert op.dest_path is not None
         assert op.raw_backup_path is not None
-    
+
+    def test_plan_operations_default_demotes_to_organized_when_raw_disabled(
+        self, sample_config, temp_files, sample_metadata
+    ):
+        """F2: a default run with raw backup disabled plans organized-only, not BOTH."""
+        sample_config.raw_backup.enabled = False
+        manager = FileOperationsManager(sample_config)
+
+        operations = manager.plan_operations(
+            {temp_files[0]: sample_metadata},
+            "TestEvent",
+            {temp_files[0]: DuplicateStatus.NEW},
+        )
+
+        assert len(operations) == 1
+        op = operations[0]
+        assert op.operation_type == OperationType.ORGANIZED_ONLY
+        assert op.dest_path is not None
+        assert op.raw_backup_path is None
+
     def test_plan_operations_skip_duplicates(self, file_ops_manager, temp_files, sample_metadata):
         """Test that duplicates are skipped in organized mode."""
         files_with_metadata = {

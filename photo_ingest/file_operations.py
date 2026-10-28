@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .config import IngestConfig, RawBackupConfig
 from .deduplication import DuplicateStatus
+from .exceptions import FileOperationError, ArchiveDirectoryError
 
 logger = logging.getLogger(__name__)
 
@@ -118,8 +119,12 @@ class FileOperationsManager:
                 operation_type = OperationType.RAW_BACKUP_ONLY
             elif organized_only:
                 operation_type = OperationType.ORGANIZED_ONLY
-            else:
+            elif self.config.raw_backup.enabled:
                 operation_type = OperationType.BOTH
+            else:
+                # Raw backup disabled: treat default run as organized-only so the
+                # disabled raw step never runs and never emits a spurious error.
+                operation_type = OperationType.ORGANIZED_ONLY
             
             # Get duplicate status
             duplicate_status = duplicate_results.get(file_path, DuplicateStatus.NEW)
@@ -231,7 +236,35 @@ class FileOperationsManager:
                    camera_code)
         
         return dest_dir / file_path.name
-    
+
+    @staticmethod
+    def _resolve_collision(dest_path: Path, reserved: set) -> Path:
+        """Return a non-colliding destination path.
+
+        A collision exists if the destination is already present on disk or has
+        already been reserved by another in-run operation. When one is found,
+        a numeric suffix is appended to the stem (``name.jpg`` -> ``name_1.jpg``,
+        ``name_2.jpg``, ...). The chosen path is added to ``reserved``.
+
+        Callers must hold the shared lock while invoking this so the check and
+        reservation are atomic across worker threads.
+        """
+        candidate = dest_path
+        if candidate not in reserved and not candidate.exists():
+            reserved.add(candidate)
+            return candidate
+
+        stem = dest_path.stem
+        suffix = dest_path.suffix
+        parent = dest_path.parent
+        counter = 1
+        while True:
+            candidate = parent / f"{stem}_{counter}{suffix}"
+            if candidate not in reserved and not candidate.exists():
+                reserved.add(candidate)
+                return candidate
+            counter += 1
+
     def _extract_date_from_metadata(self, metadata: Dict[str, Any], file_path: Path) -> str:
         """Extract date string from metadata."""
         # Try to get date from EXIF
@@ -293,6 +326,9 @@ class FileOperationsManager:
         # Counters are mutated from worker threads; protect them with a lock.
         import threading
         lock = threading.Lock()
+        # Destination paths reserved by in-run operations, so two files that map
+        # to the same path don't overwrite each other. Guarded by `lock`.
+        reserved_paths: set = set()
         total = len(operations)
 
         def _process_one(indexed_op: tuple) -> None:
@@ -318,32 +354,56 @@ class FileOperationsManager:
 
                 # Ensure destination directory exists (parents=True is thread-safe
                 # because exist_ok=True suppresses the race-condition error).
-                operation.dest_path.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    operation.dest_path.parent.mkdir(parents=True, exist_ok=True)
+                except OSError as mkdir_exc:
+                    arch_err = ArchiveDirectoryError(operation.dest_path.parent, str(mkdir_exc))
+                    logger.error("%s", arch_err)
+                    with lock:
+                        results.errors.append(arch_err.user_message)
+                    return
+
+                # Reserve a collision-free destination so same-named files on the
+                # same date/device don't silently overwrite each other.
+                with lock:
+                    dest_path = self._resolve_collision(operation.dest_path, reserved_paths)
+                if dest_path != operation.dest_path:
+                    logger.info(
+                        "Destination %s already exists; writing %s instead",
+                        operation.dest_path, dest_path,
+                    )
+                operation.dest_path = dest_path
 
                 if copy_mode:
-                    shutil.copy2(operation.source_path, operation.dest_path)
+                    shutil.copy2(operation.source_path, dest_path)
                     # Verify integrity only for copies (source still exists).
-                    if not self.verify_file_integrity(operation.source_path, operation.dest_path):
+                    if not self.verify_file_integrity(operation.source_path, dest_path):
+                        file_err = FileOperationError(
+                            operation.source_path, dest_path, "SHA-256 integrity check failed"
+                        )
+                        logger.error("%s", file_err)
                         with lock:
-                            results.errors.append(
-                                f"File integrity check failed: {operation.source_path}"
-                            )
+                            results.errors.append(file_err.user_message)
                         return
                     with lock:
                         results.files_copied += 1
                 else:
-                    shutil.move(str(operation.source_path), operation.dest_path)
+                    shutil.move(str(operation.source_path), dest_path)
                     with lock:
                         results.files_moved += 1
 
                 with lock:
                     results.files_processed += 1
 
-            except Exception as e:
-                error_msg = f"Failed to process {operation.source_path}: {e}"
-                logger.error(error_msg)
+            except (FileOperationError, ArchiveDirectoryError) as op_exc:
+                logger.error("%s", op_exc)
                 with lock:
-                    results.errors.append(error_msg)
+                    results.errors.append(op_exc.user_message)
+            except Exception as e:
+                file_err = FileOperationError(operation.source_path, operation.dest_path, str(e))
+                logger.error("%s", file_err)
+                with lock:
+                    results.errors.append(file_err.user_message)
 
         parallel_workers = getattr(self.config.performance, 'parallel_workers', 4)
 
@@ -358,10 +418,10 @@ class FileOperationsManager:
                     exc = future.exception()
                     if exc is not None:
                         op = futures[future]
-                        error_msg = f"Unexpected error processing {op.source_path}: {exc}"
-                        logger.error(error_msg)
+                        file_err = FileOperationError(op.source_path, op.dest_path, str(exc))
+                        logger.error("Unexpected error: %s", file_err)
                         with lock:
-                            results.errors.append(error_msg)
+                            results.errors.append(file_err.user_message)
         else:
             # Sequential fallback for single-worker config or single file.
             for i, op in enumerate(operations):
@@ -502,8 +562,11 @@ class RawBackupManager:
                 errors=errors
             )
         
-        backup_dir.mkdir(parents=True, exist_ok=True)
-        
+        try:
+            backup_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as mkdir_exc:
+            raise ArchiveDirectoryError(backup_dir, str(mkdir_exc)) from mkdir_exc
+
         result = RawBackupResult(
             backup_directory=backup_dir,
             files_backed_up=0,
@@ -530,19 +593,25 @@ class RawBackupManager:
                 # Verify integrity using SHA-256 (only meaningful for copy; move changes source)
                 if copy_mode and backup_path.exists():
                     if not self._verify_sha256(file_path, backup_path):
-                        error_msg = f"Integrity check failed for {file_path}: SHA-256 mismatch"
-                        logger.error(error_msg)
-                        result.errors.append(error_msg)
+                        file_err = FileOperationError(
+                            file_path, backup_path, "SHA-256 integrity check failed"
+                        )
+                        logger.error("%s", file_err)
+                        result.errors.append(file_err.user_message)
                         result.files_skipped += 1
                         continue
                 
                 result.files_backed_up += 1
                 result.total_size += file_size
                 
+            except (FileOperationError, ArchiveDirectoryError) as op_exc:
+                logger.error("%s", op_exc)
+                result.errors.append(op_exc.user_message)
+                result.files_skipped += 1
             except Exception as e:
-                error_msg = f"Failed to backup {file_path}: {e}"
-                logger.error(error_msg)
-                result.errors.append(error_msg)
+                file_err = FileOperationError(file_path, None, str(e))
+                logger.error("%s", file_err)
+                result.errors.append(file_err.user_message)
                 result.files_skipped += 1
         
         return result
