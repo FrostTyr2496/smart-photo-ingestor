@@ -78,6 +78,7 @@ class FileScanner:
         self.file_types = file_types
         self.performance_config = performance_config or PerformanceConfig()
         self.progress_callback = progress_callback
+        self._errors: List[str] = []  # Per-scan error messages, reset in scan_directory
         
         # Build set of supported extensions for fast lookup
         self._supported_extensions = set()
@@ -109,6 +110,7 @@ class FileScanner:
             PermissionError: If directory is not accessible
         """
         start_time = datetime.now()
+        self._errors = []
         
         if not directory.exists():
             raise FileNotFoundError(f"Directory not found: {directory}")
@@ -138,7 +140,7 @@ class FileScanner:
                 total_files=len(files),
                 total_size=sum(f.size for f in files),
                 scan_time=scan_time,
-                errors=[],  # TODO: Collect errors during scanning
+                errors=list(self._errors),
                 directories_scanned=len(set(f.path.parent for f in files))
             )
             
@@ -156,10 +158,13 @@ class FileScanner:
         """Discover all supported files in directory."""
         try:
             if recursive:
-                # Use rglob for recursive scanning
-                for file_path in directory.rglob("*"):
-                    if self._is_supported_file(file_path):
-                        yield file_path
+                # os.walk lets us prune hidden dirs (.Trashes, .Spotlight-V100, .fseventsd)
+                for root, dirnames, filenames in os.walk(directory):
+                    dirnames[:] = [d for d in dirnames if not self._is_hidden_name(d)]
+                    for filename in filenames:
+                        file_path = Path(root) / filename
+                        if self._is_supported_file(file_path):
+                            yield file_path
             else:
                 # Use iterdir for non-recursive scanning
                 for file_path in directory.iterdir():
@@ -167,12 +172,31 @@ class FileScanner:
                         yield file_path
         except PermissionError as e:
             logger.warning(f"Permission denied accessing {directory}: {e}")
+            self._errors.append(f"Permission denied accessing {directory}: {e}")
         except Exception as e:
             logger.error(f"Error discovering files in {directory}: {e}")
+            self._errors.append(f"Error discovering files in {directory}: {e}")
     
+    @staticmethod
+    def _is_hidden_name(name: str) -> bool:
+        """Hidden entries (incl. AppleDouble '._*' sidecars) start with a dot."""
+        return name.startswith('.')
+
     def _is_supported_file(self, file_path: Path) -> bool:
         """Check if file is a supported type."""
+        if self._is_hidden_name(file_path.name):
+            return False
+
         if not file_path.is_file():
+            return False
+
+        # Zero-byte files are never real photos (interrupted copies, card placeholders)
+        try:
+            if file_path.stat().st_size == 0:
+                logger.debug(f"Skipping zero-byte file {file_path}")
+                return False
+        except OSError as e:
+            logger.debug(f"Cannot stat {file_path}: {e}")
             return False
         
         extension = file_path.suffix.lower()
@@ -202,6 +226,7 @@ class FileScanner:
                     
             except Exception as e:
                 logger.warning(f"Error processing file {file_path}: {e}")
+                self._errors.append(f"Error processing file {file_path}: {e}")
         
         return files
     
@@ -227,6 +252,7 @@ class FileScanner:
                     files.append(file_info)
                 except Exception as e:
                     logger.warning(f"Error processing file {path}: {e}")
+                    self._errors.append(f"Error processing file {path}: {e}")
                 
                 if self.progress_callback:
                     self.progress_callback(completed, len(file_paths), f"Processing {path.name}")

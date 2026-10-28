@@ -188,7 +188,16 @@ short pointers are in `visual_analyzer.py`, `exif_processor.py`, `config.py`. Su
 - Verify: run the same import twice; second run should be a clean no-op (or clearly
   versioned output).
 
-## 🟠 F11 — Scanner imports non-photo junk from cards
+## ✅ F11 — Scanner imports non-photo junk from cards — FIXED (2026-10-28)
+- Changed: `file_scanner.py` `_is_hidden_name` (new), `_is_supported_file` (rejects dot-prefixed
+  names, covering `._*`, and zero-byte files), `_discover_files` (recursive walk now uses `os.walk`
+  and prunes dot-dirs), `scan_directory` + per-file except blocks now populate `ScanResult.errors`
+  via `self._errors` (replaces the L141 TODO; reset each scan).
+- Verify: `pytest tests/test_file_scanner.py -v` → 32 passed. `pytest -m offline` → 5 passed.
+  Earlier read-only scan of real volumes (before zero-byte/errors change): `X9 Pro` 260 files,
+  `Flats 1` 27155, `NIKON Z 6  ` 3117, `NIKON Z 6_2` 2386; 0 hidden entries leaked. Source `._*` files untouched.
+- Deliberately left out: tiny-but-nonzero byte threshold (no value chosen; zero-byte only).
+- Original problem/fix direction (for reference):
 - Where: `photo_ingest/file_scanner.py` `_is_supported_file` (L173) matches on extension
   only; `_discover_files` (L155) walks with `rglob("*")` (L160) with no exclusions.
 - Problem: AppleDouble sidecars (`._DSC_0001.JPG`, common on FAT/exFAT cards) and hidden
@@ -253,7 +262,7 @@ Suggested additions, in order:
 
 1. Larger-drive run of the metadata pass (`analyze --json --exif-only`): check throughput, worker count, cache
    re-run, and whether the SSD benchmark numbers hold on the real drive.
-2. F11 — scanner hygiene (small; `._*` files appear on the real volume). File: `file_scanner.py`.
+2. ~~F11~~ ✅ FIXED (2026-10-28). Hidden/`._*` and zero-byte exclusion plus `ScanResult.errors` in `file_scanner.py`.
 3. ~~F10~~ ✅ FIXED (2026-10-28). Dedupe tier 2 with `CameraSerialNumber` still missing.
    Files: `ingest_command.py`, `deduplication.py`, `output_generator.py`.
 4. Clean up the 17 stale tests above (mostly fixtures/strings that drifted from the code).

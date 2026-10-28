@@ -463,3 +463,84 @@ class TestDirectoryValidator:
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+class TestHiddenFileExclusion:
+    """Regression tests for F11: AppleDouble sidecars and dot-dirs from cards."""
+
+    @pytest.fixture
+    def scanner(self):
+        file_types = FileTypes(raw=["nef"], jpeg=["jpg"], video=["mp4"])
+        return FileScanner(file_types, PerformanceConfig(parallel_workers=1, batch_size=10))
+
+    def test_appledouble_and_dot_dirs_excluded(self, scanner, tmp_path):
+        """'._*' sidecars and '.Trashes/' or '.Spotlight-V100/' contents are skipped."""
+        (tmp_path / "DCIM").mkdir()
+        (tmp_path / "DCIM" / "DSC_0001.JPG").write_bytes(b"x" * 10)
+        (tmp_path / "DCIM" / "._DSC_0001.JPG").write_bytes(b"x" * 10)
+        (tmp_path / ".Trashes").mkdir()
+        (tmp_path / ".Trashes" / "DSC_0002.JPG").write_bytes(b"x" * 10)
+        (tmp_path / ".Spotlight-V100").mkdir()
+        (tmp_path / ".Spotlight-V100" / "DSC_0003.NEF").write_bytes(b"x" * 10)
+
+        result = scanner.scan_directory(tmp_path, recursive=True)
+
+        names = sorted(f.path.name for f in result.files)
+        assert names == ["DSC_0001.JPG"]
+
+    def test_non_recursive_skips_appledouble(self, scanner, tmp_path):
+        """Non-recursive scans also skip '._*' sidecars at the top level."""
+        (tmp_path / "DSC_0001.JPG").write_bytes(b"x" * 10)
+        (tmp_path / "._DSC_0001.JPG").write_bytes(b"x" * 10)
+
+        result = scanner.scan_directory(tmp_path, recursive=False)
+
+        assert [f.path.name for f in result.files] == ["DSC_0001.JPG"]
+
+
+class TestScanHygiene:
+    """Regression tests for F11 follow-ups: zero-byte skip and error collection."""
+
+    @pytest.fixture
+    def scanner(self):
+        file_types = FileTypes(raw=["nef"], jpeg=["jpg"], video=["mp4"])
+        return FileScanner(file_types, PerformanceConfig(parallel_workers=1, batch_size=10))
+
+    def test_zero_byte_files_skipped(self, scanner, tmp_path):
+        """Empty .JPG/.NEF files are not reported as photos."""
+        (tmp_path / "empty.JPG").write_bytes(b"")
+        (tmp_path / "real.NEF").write_bytes(b"x" * 10)
+
+        result = scanner.scan_directory(tmp_path, recursive=True)
+
+        assert [f.path.name for f in result.files] == ["real.NEF"]
+        assert result.errors == []
+
+    def test_per_file_errors_collected(self, scanner, tmp_path):
+        """A file that fails extraction is reported in ScanResult.errors, not silently dropped."""
+        (tmp_path / "good.JPG").write_bytes(b"x" * 10)
+        (tmp_path / "bad.JPG").write_bytes(b"x" * 10)
+        original = scanner._create_file_info
+
+        def flaky(path):
+            if path.name == "bad.JPG":
+                raise OSError("simulated read failure")
+            return original(path)
+
+        with patch.object(scanner, "_create_file_info", side_effect=flaky):
+            result = scanner.scan_directory(tmp_path, recursive=True)
+
+        assert [f.path.name for f in result.files] == ["good.JPG"]
+        assert len(result.errors) == 1
+        assert "bad.JPG" in result.errors[0]
+        assert "simulated read failure" in result.errors[0]
+
+    def test_errors_reset_between_scans(self, scanner, tmp_path):
+        """Errors from one scan do not leak into the next."""
+        (tmp_path / "good.JPG").write_bytes(b"x" * 10)
+        with patch.object(scanner, "_create_file_info", side_effect=OSError("boom")):
+            first = scanner.scan_directory(tmp_path, recursive=True)
+        second = scanner.scan_directory(tmp_path, recursive=True)
+
+        assert len(first.errors) == 1
+        assert second.errors == []
