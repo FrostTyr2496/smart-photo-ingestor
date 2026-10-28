@@ -50,7 +50,7 @@ def analyze(ctx, folder: Path, config: Optional[Path], json: bool, peek: bool, e
         click.echo("Error: Cannot specify both --peek and --exif-only", err=True)
         ctx.exit(1)
     
-    if not quiet:
+    if not quiet and not json:
         click.echo(f"📁 Analyzing folder: {folder}")
         if peek:
             click.echo(f"👁️  Visual analysis enabled (sampling {samples} images per device)")
@@ -86,9 +86,9 @@ def analyze(ctx, folder: Path, config: Optional[Path], json: bool, peek: bool, e
                 # Save the config path if it was explicitly provided
                 if config and config != settings_manager.get_config_path():
                     settings_manager.set_config_path(config)
-                    if not quiet:
+                    if not quiet and not json:
                         output_manager.print_message(f"💾 Saved config path: {config}")
-                elif config_source == "saved" and not quiet:
+                elif config_source == "saved" and not quiet and not json:
                     output_manager.print_message(f"📁 Using saved config: {config_to_use}")
                 
                 if peek and not ingest_config.llm.enabled:
@@ -162,10 +162,10 @@ def analyze(ctx, folder: Path, config: Optional[Path], json: bool, peek: bool, e
             exif_only=exif_only,
             samples=samples,
             enable_folder_analysis=folder_analysis,
-            progress_callback=progress_callback if not quiet else None
+            progress_callback=progress_callback if not (quiet or json) else None
         )
         
-        if not quiet:
+        if not quiet and not json:
             click.echo()  # New line after progress
         
         # Display results using enhanced output manager
@@ -286,7 +286,7 @@ def ingest(ctx, config: Optional[Path], source: Path, event: str, dry_run: bool,
         ctx.exit(1)
         return
 
-    if not quiet:
+    if not quiet and not json_output:
         click.echo(f"📥 Ingesting from: {source}")
         click.echo(f"🏷️  Event: {event}")
         click.echo(f"📋 Mode: {'Copy' if copy else 'Move'}")
@@ -304,6 +304,11 @@ def ingest(ctx, config: Optional[Path], source: Path, event: str, dry_run: bool,
     ingest_config = None
 
     config_to_use = config
+    if not config_to_use:
+        # Order: --config -> ./ingest.yaml -> ~/.photo-ingest.yaml -> saved default
+        discovered = ConfigManager._resolve_config_path(None)
+        if discovered.exists():
+            config_to_use = discovered
     if not config_to_use:
         saved = settings_manager.get_config_path()
         if saved and Path(saved).exists():
@@ -331,7 +336,7 @@ def ingest(ctx, config: Optional[Path], source: Path, event: str, dry_run: bool,
         output_manager.print_progress(f"{icon} {phase.capitalize()}: {message} {pct}")
 
     try:
-        cmd = IngestCommand(ingest_config, progress_callback=progress_callback if not quiet else None)
+        cmd = IngestCommand(ingest_config, progress_callback=progress_callback if not (quiet or json_output) else None)
         result = cmd.run(
             source=source,
             event_name=event,
@@ -341,7 +346,7 @@ def ingest(ctx, config: Optional[Path], source: Path, event: str, dry_run: bool,
             organized_only=organized_only,
         )
 
-        if not quiet:
+        if not quiet and not json_output:
             click.echo()  # newline after progress
 
         if json_output:

@@ -1,5 +1,6 @@
 """Visual content analyzer with image sampling and LLM integration."""
 
+import logging
 import random
 import time
 from pathlib import Path
@@ -17,6 +18,8 @@ except ImportError:
 from .config import PeekConfig, LLMConfig
 from .llm_client import VisionLLMClient
 from .location_service import LocationService, LocationInfo
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -130,7 +133,7 @@ class ImageProcessor:
                 )
                 
         except Exception as e:
-            print(f"DEBUG: Failed to process image {file_path.name}: {e}")
+            logger.debug(f"Failed to process image {file_path.name}: {e}")
             return None
     
     def extract_raw_preview(self, raw_file: Path) -> Optional[bytes]:
@@ -210,7 +213,7 @@ class ImageProcessor:
                     file_size=len(processed_data)
                 )
         except Exception as e:
-            print(f"DEBUG: Failed to process image data for {file_path.name}: {e}")
+            logger.debug(f"Failed to process image data for {file_path.name}: {e}")
             return None
 
 
@@ -671,7 +674,7 @@ Describe the variety of content, organization patterns, and overall scope of the
                 
         except Exception as e:
             if self.verbose:
-                print(f"DEBUG: Failed to extract GPS from {file_path.name}: {e}")
+                logger.debug(f"Failed to extract GPS from {file_path.name}: {e}")
         
         return None
     

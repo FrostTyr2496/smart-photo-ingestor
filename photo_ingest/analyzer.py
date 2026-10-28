@@ -1,6 +1,7 @@
 """Photo analysis functionality with comprehensive EXIF extraction."""
 
 import json
+import logging
 import time
 from pathlib import Path
 from collections import Counter, defaultdict
@@ -17,6 +18,8 @@ except ImportError:
 
 from .file_scanner import FileScanner, FileInfo, ScanResult
 from .config import FileTypes, PerformanceConfig
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -163,7 +166,7 @@ class PhotoAnalyzer:
                 failed_count += 1
                 # Debug: Print first few failures
                 if failed_count <= 5:
-                    print(f"DEBUG: Failed to extract metadata from {file_info.path.name} (type: {file_info.file_type})")
+                    logger.debug(f"Failed to extract metadata from {file_info.path.name} (type: {file_info.file_type})")
             
             processed += 1
             
@@ -173,7 +176,7 @@ class PhotoAnalyzer:
         
         # Debug: Print summary
         success_rate = (len(metadata_results) / len(image_files)) * 100 if image_files else 0
-        print(f"DEBUG: EXIF extraction summary: {len(metadata_results)}/{len(image_files)} files ({success_rate:.1f}% success rate)")
+        logger.debug(f"EXIF extraction summary: {len(metadata_results)}/{len(image_files)} files ({success_rate:.1f}% success rate)")
         
         return metadata_results
     
@@ -237,7 +240,7 @@ class PhotoAnalyzer:
                 self._debug_count = 0
             self._debug_count += 1
             if self._debug_count <= 3:
-                print(f"DEBUG: Failed to open {file_path.name}: {e}")
+                logger.debug(f"Failed to open {file_path.name}: {e}")
             return {}
     
     def _extract_detailed_exif(self, file_path: Path) -> Dict[str, Any]:

@@ -364,7 +364,7 @@ class LLMClient:
             prompt = self.build_prompt(exif_stats)
             return self.provider.call_text_api(prompt)
         except Exception as e:
-            print(f"DEBUG: LLM summary generation failed: {e}")
+            logger.debug(f"LLM summary generation failed: {e}")
             return None
     
     def build_prompt(self, exif_stats: Dict[str, Any]) -> str:

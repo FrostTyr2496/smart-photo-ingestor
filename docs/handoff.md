@@ -102,7 +102,7 @@ Severity: 🔴 data-loss or broken core, 🟠 correctness, 🟡 UX / polish.
   command's identical exit-in-except shape was left untouched. F9 (move + raw-backup
   sequencing) is separate and still open.
 
-## 🔴 F3 — `--json` output is not machine-parseable
+## ✅ F3 — `--json` output is not machine-parseable — FIXED (2026-10-28)
 - Where:
   - `photo_ingest/analyzer.py` L166 and L176 — unconditional `print("DEBUG: ...")`
     to stdout on every run that scans photos (fires even with `-q`).
@@ -113,9 +113,11 @@ Severity: 🔴 data-loss or broken core, 🟠 correctness, 🟡 UX / polish.
   parser fails.
 - Fix direction: replace the `print("DEBUG: ...")` calls with `logger.debug(...)`; route
   all human/status output to stderr (or suppress when `--json`). Keep stdout pure JSON.
-- Verify: `analyze --json --exif-only <dir> | python3 -m json.tool` succeeds.
+- Fix applied: `analyzer.py`, `llm_client.py`, `visual_analyzer.py` — all `print("DEBUG: ...")` replaced with `logger.debug(...)` (added module loggers where missing). `cli.py` `analyze` and `ingest` — status/progress/"Using saved config" output gated off when `--json` is set.
+- Verified: `analyze --json --exif-only /tmp/f3check` (one JPEG) exits 0, stderr empty, stdout parses as JSON (`json.load` returned keys `exif_analysis`, `device_breakdown`, `processing_mode`, `total_processing_time`). Piping through `python3 -m json.tool` was not run because the shell hung on pipes.
+- Not covered here: `analyze` on a folder with zero photos still exits 1 and prints "Analysis failed: Exit: 1" (the `ctx.exit()`-inside-`except Exception` shape noted under F2). `ingest --json` was not run end to end.
 
-## 🟠 F4 — Config auto-discovery is implemented but never used
+## ✅ F4 — Config auto-discovery is implemented but never used — FIXED (2026-10-28)
 - Where: `photo_ingest/config.py` — `DEFAULT_CONFIG_LOCATIONS = ["./ingest.yaml",
   "~/.photo-ingest.yaml"]` (L290–292) and `_resolve_config_path` (L326) support these.
   But `cli.py` only uses `--config` or the saved default, then errors at
@@ -125,8 +127,11 @@ Severity: 🔴 data-loss or broken core, 🟠 correctness, 🟡 UX / polish.
 - Fix direction: resolve config in one place with order: `--config` →
   `./ingest.yaml` → `~/.photo-ingest.yaml` → saved default. Reuse
   `ConfigManager._resolve_config_path`.
-- Verify: `cd` into a dir with `ingest.yaml`, run `ingest` with no `--config`, confirm
-  it loads.
+- Fix applied: `cli.py` `ingest` — when no `--config`, calls `ConfigManager._resolve_config_path(None)`
+  (checks `./ingest.yaml`, then `~/.photo-ingest.yaml`) before falling back to the saved default.
+- Verified: from `/tmp/f4` (contains `ingest.yaml`, `HOME=/tmp/f4home`), `ingest --dry-run --event TestF4 --source /tmp/f4/src`
+  loaded the config with no `--config` and planned 1 operation under `/tmp/f4/archive` (exit 0).
+- Not covered here: `analyze` does not use this discovery path. Its `--config` handling is unchanged.
 
 ## 🟠 F5 — Dedupe DB path is relative → breaks under automation
 - Where: `photo_ingest/config.py` L242 — `dedupe_store` defaults to `.hashes.sqlite`,
