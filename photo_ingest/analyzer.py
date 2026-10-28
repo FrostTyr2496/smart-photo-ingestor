@@ -21,6 +21,23 @@ from .config import FileTypes, PerformanceConfig
 
 logger = logging.getLogger(__name__)
 
+# Pillow's getexif() only exposes IFD0. Exposure, lens, and GPS data live in sub-IFDs.
+EXIF_IFD_POINTER = 0x8769
+GPS_IFD_POINTER = 0x8825
+
+try:
+    from exiftool import ExifToolHelper
+    EXIFTOOL_AVAILABLE = True
+except ImportError:
+    EXIFTOOL_AVAILABLE = False
+
+
+def _collect_exif_tags(exif) -> Dict[Any, Any]:
+    """Merge IFD0 with the Exif sub-IFD so ISO, FNumber, LensModel, etc. are visible."""
+    tags = dict(exif)
+    tags.update(exif.get_ifd(EXIF_IFD_POINTER))
+    return tags
+
 
 @dataclass
 class AnalysisResult:
@@ -193,7 +210,7 @@ class PhotoAnalyzer:
                 # Try to get EXIF data
                 exif_dict = img.getexif()
                 if exif_dict:
-                    for tag_id, value in exif_dict.items():
+                    for tag_id, value in _collect_exif_tags(exif_dict).items():
                         tag_name = TAGS.get(tag_id, tag_id)
                         
                         if tag_name == 'Make':
@@ -241,7 +258,7 @@ class PhotoAnalyzer:
             self._debug_count += 1
             if self._debug_count <= 3:
                 logger.debug(f"Failed to open {file_path.name}: {e}")
-            return {}
+            return self._extract_exiftool_exif(file_path)
     
     def _extract_detailed_exif(self, file_path: Path) -> Dict[str, Any]:
         """Extract comprehensive EXIF data using Pillow."""
@@ -249,14 +266,14 @@ class PhotoAnalyzer:
             with Image.open(file_path) as img:
                 exif_dict = img.getexif()
                 if not exif_dict:
-                    return {}
+                    return self._extract_exiftool_exif(file_path)
                 
                 metadata = {}
                 
-                # Extract GPS data if available
+                # Extract GPS data if available (GPS IFD, not an IFD0 string key)
                 gps_info = {}
-                if 'GPSInfo' in exif_dict:
-                    gps_data = exif_dict['GPSInfo']
+                gps_data = exif_dict.get_ifd(GPS_IFD_POINTER)
+                if gps_data:
                     for key, value in gps_data.items():
                         gps_tag = GPSTAGS.get(key, key)
                         gps_info[gps_tag] = value
@@ -279,9 +296,9 @@ class PhotoAnalyzer:
                         except (ValueError, TypeError):
                             pass
                 
-                # Extract all EXIF tags
-                for tag_id, value in exif_dict.items():
-                    if tag_id == 'GPSInfo':
+                # Extract all EXIF tags (IFD0 + Exif sub-IFD)
+                for tag_id, value in _collect_exif_tags(exif_dict).items():
+                    if tag_id == GPS_IFD_POINTER:
                         continue
                         
                     tag_name = TAGS.get(tag_id, f"Tag_{tag_id}")
@@ -401,10 +418,91 @@ class PhotoAnalyzer:
                 metadata['ImageWidth'] = img.width
                 metadata['ImageHeight'] = img.height
                 
+                # Capture time is DateTimeOriginal; IFD0 DateTime is the file-write time
+                if 'DateTimeOriginal' in metadata:
+                    metadata['DateTime'] = metadata['DateTimeOriginal']
+                
                 return metadata
                 
         except Exception:
+            return self._extract_exiftool_exif(file_path)
+    
+    def _extract_exiftool_exif(self, file_path: Path) -> Dict[str, Any]:
+        """Fallback for files Pillow cannot read (e.g. CR3) or that have no EXIF. Uses ExifTool."""
+        if not EXIFTOOL_AVAILABLE:
             return {}
+        try:
+            with ExifToolHelper() as et:
+                rows = et.get_metadata([str(file_path)])
+        except Exception as e:
+            logger.debug(f"ExifTool fallback failed for {file_path.name}: {e}")
+            return {}
+        if not rows:
+            return {}
+        raw = rows[0]
+
+        def first(*keys):
+            for key in keys:
+                value = raw.get(key)
+                if value not in (None, ''):
+                    return value
+            return None
+
+        def as_float(value):
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+
+        metadata: Dict[str, Any] = {}
+        make = first('EXIF:Make')
+        model = first('EXIF:Model')
+        lens = first('EXIF:LensModel', 'EXIF:LensID')
+        serial = first('EXIF:SerialNumber', 'MakerNotes:SerialNumber')
+        if make:
+            metadata['Make'] = str(make).strip()
+        if model:
+            metadata['Model'] = str(model).strip()
+        if lens:
+            metadata['LensModel'] = str(lens).strip()
+        if serial:
+            metadata['CameraSerialNumber'] = str(serial).strip()
+
+        capture = first('EXIF:DateTimeOriginal', 'EXIF:CreateDate')
+        if capture:
+            try:
+                metadata['DateTime'] = datetime.strptime(str(capture), '%Y:%m:%d %H:%M:%S')
+            except ValueError:
+                pass
+
+        iso = as_float(first('EXIF:ISO'))
+        if iso is not None:
+            metadata['ISO'] = int(iso)
+        f_number = as_float(first('EXIF:FNumber'))
+        if f_number is not None:
+            metadata['FNumber'] = f_number
+        focal = as_float(first('EXIF:FocalLength'))
+        if focal is not None:
+            metadata['FocalLength'] = focal
+        exposure = as_float(first('EXIF:ExposureTime'))
+        if exposure:
+            # Numeric mode gives seconds (0.004); format like Pillow path ("1/250").
+            metadata['ExposureTime'] = f"{exposure:g}" if exposure >= 1 else f"1/{round(1 / exposure)}"
+
+        lat = as_float(first('Composite:GPSLatitude', 'EXIF:GPSLatitude'))
+        lon = as_float(first('Composite:GPSLongitude', 'EXIF:GPSLongitude'))
+        if lat is not None and lon is not None:
+            metadata['GPSLatitude'] = lat
+            metadata['GPSLongitude'] = lon
+
+        width = as_float(first('EXIF:ImageWidth', 'File:ImageWidth'))
+        height = as_float(first('EXIF:ImageHeight', 'File:ImageHeight'))
+        if width is not None:
+            metadata['ImageWidth'] = int(width)
+        if height is not None:
+            metadata['ImageHeight'] = int(height)
+
+        return metadata
     
     def _format_gps_coordinate(self, coord_tuple, ref):
         """Format GPS coordinates from EXIF tuple format."""

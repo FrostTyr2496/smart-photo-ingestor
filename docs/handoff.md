@@ -148,7 +148,7 @@ Severity: 🔴 data-loss or broken core, 🟠 correctness, 🟡 UX / polish.
 - Verify: run ingest from two different cwds with one config; confirm the same DB file
   is used.
 
-## 🟠 F6 — Exposure + GPS EXIF fields are never read
+## ✅ F6 — Exposure + GPS EXIF fields are never read — FIXED (2026-10-28)
 - Where: `photo_ingest/analyzer.py`
   - `_extract_detailed_exif` L243: iterates `exif_dict.items()` at L280 — that is only
     IFD0. Confirmed against Pillow 11.3 `Image.getexif()`: ISO, FNumber, FocalLength,
@@ -165,8 +165,37 @@ Severity: 🔴 data-loss or broken core, 🟠 correctness, 🟡 UX / polish.
   enum. Better: use `EXIFProcessor` (see F7).
 - Verify: extract EXIF from a known camera JPEG; assert ISO/FNumber/FocalLength/
   LensModel are populated and GPS count is nonzero for geotagged files.
+- Fix applied: `analyzer.py` — new `_collect_exif_tags(exif)` merges IFD0 with the Exif
+  sub-IFD (0x8769). Used by `_extract_detailed_exif` and `_extract_basic_exif`. GPS now
+  reads `exif.get_ifd(GPS_IFD_POINTER)` (0x8825) instead of the string key. In
+  `_extract_detailed_exif`, `DateTime` is set from `DateTimeOriginal` when present.
+- Verified: JPEG written with exiftool (Make, LensModel, DateTimeOriginal, ISO=400, FNumber=2.8,
+  FocalLength=50, GPS 37.7749 N / 122.4194 W). `_extract_detailed_exif` returns ISO 400,
+  FNumber 2.8, FocalLength 50.0, LensModel, DateTime 2024-05-01 12:30, GPSLatitude and
+  GPSLongitude. `_extract_basic_exif` returns ISO and FNumber too.
+- Not covered here: `ExposureTime` from Pillow is a decimal string (`0.004`) while the F7
+  fallback formats it as `1/250`. Harmonizing them was out of scope. Test
+  `test_extract_detailed_exif_dimensions` now passes.
 
-## 🟠 F7 — ExifTool reader exists but is dead code; RAW support is weak
+## ✅ F7 — ExifTool reader exists but is dead code; RAW support is weak — FIXED (2026-10-28)
+- Fix applied: `analyzer.py` — new `PhotoAnalyzer._extract_exiftool_exif(file_path)` is the
+  ExifTool fallback. It runs when Pillow cannot open the file (CR3, and other RAW that
+  Pillow can't read) and when Pillow finds no EXIF. It maps ExifTool `-G -n` keys to the
+  analyzer schema (Make, Model, LensModel, CameraSerialNumber, DateTime, ISO, FNumber,
+  FocalLength, ExposureTime, GPSLatitude/Longitude, ImageWidth/Height). Both
+  `_extract_detailed_exif` and `_extract_basic_exif` call it. `ingest` uses the detailed path,
+  so the fallback applies there too.
+- Verified: `_extract_exiftool_exif` on the F6 test JPEG returns Make, Model, LensModel, DateTime,
+  ISO 400, FNumber 2.8, FocalLength 50.0, ExposureTime `1/250`, GPS 37.7749 / -122.4194, and
+  dimensions 64x48. `pytest tests/test_analyzer.py -v` → 4 passed, 2 failed. Both failures
+  also fail on clean HEAD (`test_analyze_metadata_resolution_counting` Mock not iterable,
+  `test_analyze_directory_integration` `/test` directory not found).
+- Not covered here: `EXIFProcessor` (`exif_processor.py`) is still not used by ingest or
+  analyze. Its ExifTool path also reads GPS only under `EXIF:`/bare keys, but PyExifTool
+  returns `Composite:GPSLatitude` (not verified against a real GPS file in that module).
+  Adopting it as the primary reader needs a separate change: it does not emit
+  CameraSerialNumber or LensMake, which device detection and dedupe use.
+  Real CR3/NEF files were not tested. Only a JPEG with ExifTool-written tags was used.
 - Where: `photo_ingest/exif_processor.py` defines `EXIFProcessor` (PyExifTool + Pillow +
   filesystem fallback). It is imported only by tests — not by `ingest_command.py` or
   `analyze_command.py` (both use `PhotoAnalyzer`/Pillow). `visual_analyzer.py`
@@ -291,8 +320,8 @@ Suggested additions once F1–F6 are fixed, in order:
 1. ✅ F2 DONE (2026-10-27); F3, F4, F5 DONE (2026-10-28) — small, high-impact, unblock normal + scripted use.
    Files: `cli.py`, `ingest_command.py`, `file_operations.py`, `analyzer.py`, `config.py`.
 2. ✅ F1 — the data-loss guard. DONE (2026-10-27). File: `file_operations.py`.
-3. F6, then F7 — EXIF correctness (do F6 as a quick fix, or jump to F7 if adopting
-   `EXIFProcessor` wholesale). Files: `analyzer.py`, `exif_processor.py`.
+3. ✅ F6, F7 DONE (2026-10-28) — EXIF sub-IFD/GPS reads, plus ExifTool fallback in `analyzer.py`.
+   `EXIFProcessor` is still not the primary reader (see F7 "Not covered").
 4. F11 — scanner hygiene. File: `file_scanner.py`.
 5. F8, F9, F10 — dedupe/dry-run/rerun correctness. Files: `ingest_command.py`,
    `deduplication.py`, `output_generator.py`.
