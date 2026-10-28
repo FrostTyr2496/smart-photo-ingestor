@@ -24,7 +24,7 @@ Severity: 🔴 data-loss or broken core, 🟠 correctness, 🟡 UX / polish.
   Proves the pipeline works with Ollama off/unreachable and with exiftool missing. This replaces
   the old, wrongly-pathed references to `tests/test_without_llm.py`. (`scripts/test_without_llm.py`
   and `scripts/test_verbose_ollama.py` do exist but are manual demo scripts, not pytest tests.)
-- Full suite (`pytest --no-cov`): **438 passed, 17 failed**. The same 17 fail on clean HEAD
+- Full suite (`pytest --no-cov`, 2026-10-28 after F11 + lint): **443 passed, 17 failed**; the 17 are the list below. The same 17 fail on clean HEAD
   (checked with a worktree), so none come from recent work. Causes:
   - `test_analyzer.py::test_analyze_metadata_resolution_counting`, `::test_analyze_directory_integration`,
     `test_analyze_command.py::test_to_dict_with_visual_analysis`,
