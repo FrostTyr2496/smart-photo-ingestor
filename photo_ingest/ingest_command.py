@@ -17,6 +17,15 @@ from .database import DatabaseManager
 from .deduplication import DeduplicationEngine, DuplicateStatus
 from .device_detector import DeviceDetector
 from .dry_run import DryRunPreview
+from .exceptions import (
+    PhotoIngestError,
+    SourceDirectoryError,
+    EXIFProcessingError,
+    FileOperationError,
+    ArchiveDirectoryError,
+    DeduplicationError,
+    format_user_error,
+)
 from .file_operations import (
     FileOperation,
     FileOperationsManager,
@@ -145,10 +154,10 @@ class IngestCommand:
         self._init_components()
 
         # Validate source before entering the error-absorbing try block so that
-        # callers (and tests) receive a real FileNotFoundError instead of having
+        # callers (and tests) receive a typed exception instead of having
         # it swallowed into result.errors.
         if not source.exists():
-            raise FileNotFoundError(f"Source directory not found: {source}")
+            raise SourceDirectoryError(source)
 
         try:
             # 1. Scan
@@ -259,8 +268,8 @@ class IngestCommand:
                 self._dedup_engine.flush_pending_records()
 
         except Exception as exc:
-            msg = f"Ingest pipeline error: {exc}"
-            logger.exception(msg)
+            msg = format_user_error(exc)
+            logger.exception("Ingest pipeline error: %s", exc)
             result.errors.append(msg)
 
         result.processing_time_seconds = time.time() - start_time
@@ -288,7 +297,7 @@ class IngestCommand:
     def _scan(self, source: Path) -> List[Path]:
         """Return list of supported image/video file paths."""
         if not source.exists():
-            raise FileNotFoundError(f"Source directory not found: {source}")
+            raise SourceDirectoryError(source)
         scan_result = self._scanner.scan_directory(source, recursive=True)
         return [f.path for f in scan_result.files if f.file_type in ("raw", "jpeg", "video")]
 
@@ -305,7 +314,7 @@ class IngestCommand:
                 meta = analyzer._extract_detailed_exif(path)
                 metadata_map[path] = meta if meta else {}
             except Exception as exc:
-                logger.warning("EXIF extraction failed for %s: %s", path, exc)
+                logger.warning("EXIF extraction failed for %s: %s — using empty metadata", path, exc)
                 metadata_map[path] = {}
             if self.progress and i % 10 == 0:
                 self._emit("exif", i + 1, total, path.name)

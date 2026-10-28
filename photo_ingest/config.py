@@ -9,6 +9,8 @@ from datetime import datetime
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+# exceptions is imported below (after the class body that references it)
+
 
 class DeviceMapping(BaseModel):
     """Device detection and mapping configuration."""
@@ -278,9 +280,8 @@ def expand_environment_variables(value: str) -> str:
     return pattern.sub(replace_var, value)
 
 
-class ConfigurationError(Exception):
-    """Configuration validation or loading errors."""
-    pass
+# Import from the canonical exceptions module so all callers can use either path.
+from .exceptions import ConfigurationError  # noqa: F401  (re-export)
 
 
 class ConfigManager:

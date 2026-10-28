@@ -20,13 +20,9 @@ from PIL.ExifTags import TAGS
 from .config import IngestConfig, PerformanceConfig
 from .database import DatabaseManager
 from .device_detector import DeviceDetector
+from .exceptions import EXIFProcessingError, MissingDependencyError  # noqa: F401  (re-export for compat)
 
 logger = logging.getLogger(__name__)
-
-
-class EXIFProcessingError(Exception):
-    """EXIF extraction errors."""
-    pass
 
 
 class EXIFProcessor:
@@ -53,7 +49,11 @@ class EXIFProcessor:
     def _check_exiftool(self) -> bool:
         """Check if exiftool is available on the system."""
         if not EXIFTOOL_AVAILABLE:
-            logger.warning("PyExifTool not available - falling back to Pillow")
+            missing = MissingDependencyError(
+                "exiftool",
+                install_hint="brew install exiftool  (macOS) or apt install libimage-exiftool-perl  (Linux)"
+            )
+            logger.warning("%s — falling back to Pillow", missing.user_message)
             return False
         
         try:
@@ -66,7 +66,11 @@ class EXIFProcessor:
         except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
             pass
         
-        logger.warning("ExifTool binary not found - falling back to Pillow")
+        missing = MissingDependencyError(
+            "exiftool",
+            install_hint="brew install exiftool  (macOS) or apt install libimage-exiftool-perl  (Linux)"
+        )
+        logger.warning("%s — falling back to Pillow", missing.user_message)
         return False
     
     def extract_metadata(self, file_path: Path) -> Dict[str, Any]:
