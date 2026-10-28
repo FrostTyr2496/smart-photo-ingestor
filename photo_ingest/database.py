@@ -218,6 +218,31 @@ class DatabaseManager:
             )
             conn.commit()
     
+    def cache_exif_many(self, items: Dict[Path, Dict[str, Any]]):
+        """Cache EXIF data for many files in ONE transaction (one commit per chunk, not per file).
+
+        Used by the batch metadata pass so a large run commits ~once per few hundred files.
+        Files whose mtime cannot be read are skipped.
+        """
+        created_date = datetime.now().isoformat()
+        rows = []
+        for file_path, exif_data in items.items():
+            try:
+                file_mtime = int(file_path.stat().st_mtime)
+            except (OSError, IOError):
+                continue
+            rows.append((str(file_path), file_mtime, json.dumps(exif_data), created_date))
+        if not rows:
+            return
+        with self._get_connection() as conn:
+            conn.executemany(
+                """INSERT OR REPLACE INTO exif_cache
+                   (file_path, file_mtime, exif_data, created_date)
+                   VALUES (?, ?, ?, ?)""",
+                rows
+            )
+            conn.commit()
+    
     def is_directory_changed(self, dir_path: Path) -> bool:
         """Check if directory has changed since last scan.
         

@@ -207,8 +207,11 @@ class RawBackupConfig(BaseModel):
 class PerformanceConfig(BaseModel):
     """Performance optimization settings."""
     
+    # Also sets the number of parallel exiftool processes for metadata reads (capped at 8 in
+    # analyzer.EXIFTOOL_MAX_WORKERS; benchmark showed 4 -> ~286 files/s, 8 -> ~455, no gain after).
     parallel_workers: int = Field(default=4, description="Number of parallel workers")
     batch_size: int = Field(default=100, description="Batch size for database operations")
+    # Caches normalized metadata in SQLite exif_cache keyed by path + mtime (seconds).
     cache_exif: bool = Field(default=True, description="Enable EXIF caching")
     incremental_processing: bool = Field(default=True, description="Enable incremental processing")
     memory_mapped_hashing: bool = Field(default=True, description="Use memory-mapped file hashing")

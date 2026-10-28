@@ -149,6 +149,7 @@ class IngestCommand:
 
         start_time = time.time()
         result = IngestResult(dry_run=dry_run)
+        self._dry_run = dry_run
 
         # --- initialise sub-components ---
         self._init_components()
@@ -302,24 +303,32 @@ class IngestCommand:
         return [f.path for f in scan_result.files if f.file_type in ("raw", "jpeg", "video")]
 
     def _extract_metadata(self, files: List[Path]) -> Dict[Path, Dict[str, Any]]:
-        """Extract EXIF metadata using Pillow fallback."""
+        """Extract EXIF metadata: ExifTool in chunks (cached), Pillow only as per-file fallback.
+
+        See the strategy notes at the top of analyzer.py (why ExifTool, worker/chunk sizing,
+        and why -fast2 must not be used). Every file gets an entry; unreadable ones map to {}.
+        """
         from .analyzer import PhotoAnalyzer
 
-        analyzer = PhotoAnalyzer(self.config.file_types, self.config.performance, detailed=True)
-        metadata_map: Dict[Path, Dict[str, Any]] = {}
+        analyzer = PhotoAnalyzer(
+            self.config.file_types, self.config.performance, detailed=True,
+            # Dry-run must not write anything (see handoff F8), so no cache DB there.
+            db_manager=None if getattr(self, "_dry_run", False) else self._db_manager,
+        )
         total = len(files)
+        last_emit = [0]
 
-        for i, path in enumerate(files):
-            try:
-                meta = analyzer._extract_detailed_exif(path)
-                metadata_map[path] = meta if meta else {}
-            except Exception as exc:
-                logger.warning("EXIF extraction failed for %s: %s — using empty metadata", path, exc)
-                metadata_map[path] = {}
-            if self.progress and i % 10 == 0:
-                self._emit("exif", i + 1, total, path.name)
+        def on_progress(_phase, current, _total, message):
+            # Throttle UI updates: large runs would otherwise emit once per chunk/file.
+            if self.progress and (current - last_emit[0] >= 25 or current == total):
+                last_emit[0] = current
+                self._emit("exif", current, total, message)
 
-        return metadata_map
+        try:
+            return analyzer.extract_metadata_batch(files, on_progress)
+        except Exception as exc:
+            logger.warning("Batch EXIF extraction failed: %s — using empty metadata", exc)
+            return {path: {} for path in files}
 
     def _detect_devices(self, metadata_map: Dict[Path, Dict[str, Any]]) -> Dict[Path, str]:
         """Map each file path to its detected device code."""

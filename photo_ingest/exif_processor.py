@@ -159,6 +159,12 @@ class EXIFProcessor:
         Returns:
             Dictionary containing extracted metadata
         """
+        # NOTE (2026-10-28): this starts a new exiftool process per file and requests ALL tags,
+        # which benchmarked at ~61 files/s vs ~450 files/s for batched/parallel reads. The
+        # ingest/analyze pipeline does NOT use EXIFProcessor; it uses
+        # analyzer.PhotoAnalyzer.extract_metadata_batch (see the strategy notes at the top of
+        # analyzer.py). Do not call this per file in a loop for large runs. This module's
+        # normalizer also lacks CameraSerialNumber/ShutterCount (Nikon dedupe needs them).
         with ExifToolHelper() as et:
             metadata_list = et.get_metadata([str(file_path)])
             if not metadata_list:

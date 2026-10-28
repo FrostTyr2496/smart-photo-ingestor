@@ -2,7 +2,11 @@
 
 import json
 import logging
+import queue
+import shutil
+import threading
 import time
+from functools import lru_cache
 from pathlib import Path
 from collections import Counter, defaultdict
 from datetime import datetime
@@ -37,6 +41,228 @@ def _collect_exif_tags(exif) -> Dict[Any, Any]:
     tags = dict(exif)
     tags.update(exif.get_ifd(EXIF_IFD_POINTER))
     return tags
+
+
+# =============================================================================
+# Metadata reading strategy (research + benchmarks, 2026-10-28; Nikon Z 6 NEF/JPG)
+# =============================================================================
+# ExifTool is the primary reader. Pillow is only a fallback (ExifTool missing/failed).
+#   - Pillow cannot read Nikon MakerNotes: no CameraSerialNumber, ShutterCount, or clean
+#     lens name. It also opens a NEF as its 120x160 embedded thumbnail, so ImageWidth/
+#     ImageHeight are wrong for RAW. ExifTool returns all of these correctly.
+#   - rawpy is NOT needed: it decodes pixels, not metadata, and embedded JPEG previews are
+#     available from ExifTool (`-b -JpgFromRaw`, full size 6048x4024 on Z 6; see
+#     visual_analyzer.extract_raw_preview).
+# Throughput (258 real files on an external SSD, selected tags, wall clock):
+#   one process, all tags 61 files/s | one process, selected tags 88/s |
+#   4 processes 286/s | 8 processes 455/s | 12 processes no further gain (10 CPUs).
+#   Chunk size (25 vs 100 vs all) made no difference; process startup is the fixed cost,
+#   so keep exiftool processes alive for the whole run (never one process per file).
+# DO NOT use `-fast2`: it is ~2x faster but skips MakerNotes, silently dropping
+#   ShutterCount (verified on NEF). `-fast` is safe but gave no speedup here.
+# Memory stays flat because files are processed in chunks and results are cached to
+#   SQLite per chunk; only small normalized dicts are held per file.
+# Read-only: exiftool is only ever asked to read (no -overwrite/-delete), so this is safe
+#   on /Volumes/* sources.
+# ExifTool key names (PyExifTool default common_args is `-G -n`): group0 prefixes
+#   (`EXIF:`, `MakerNotes:`, `Composite:`, `File:`) and numeric values (-n), so enum tags
+#   such as Flash/MeteringMode arrive as ints and are mapped via the tables below.
+# =============================================================================
+
+# Explicit tag list (bare names; ExifTool returns every group's copy, e.g. EXIF:ISO and
+# MakerNotes:ISO). Asking for specific tags is ~30% faster than reading everything.
+EXIFTOOL_TAGS = [
+    "Make", "Model", "LensMake", "LensModel", "LensID", "SerialNumber", "ShutterCount",
+    "DateTimeOriginal", "CreateDate", "ISO", "FNumber", "ExposureTime", "FocalLength",
+    "FocalLengthIn35mmFormat", "ExposureProgram", "MeteringMode", "Flash", "WhiteBalance",
+    "ColorSpace", "ExposureCompensation", "Software", "Artist", "Copyright",
+    "GPSLatitude", "GPSLongitude", "GPSAltitude", "ImageWidth", "ImageHeight",
+]
+EXIFTOOL_CHUNK_SIZE = 200      # files per exiftool call; size does not affect speed, it bounds memory/progress
+EXIFTOOL_MAX_WORKERS = 8       # benchmark showed no gain past 8 (disk/CPU bound)
+# Bump when the normalized schema changes so stale SQLite cache rows are ignored.
+EXIF_CACHE_SCHEMA = "analyzer-v1"
+_DATETIME_KEYS = ("DateTime", "DateTimeOriginal", "DateTimeDigitized")
+
+# EXIF enum code -> label (shared by the Pillow and ExifTool paths).
+EXPOSURE_PROGRAMS = {
+    0: 'Not defined', 1: 'Manual', 2: 'Normal program',
+    3: 'Aperture priority', 4: 'Shutter priority', 5: 'Creative program',
+    6: 'Action program', 7: 'Portrait mode', 8: 'Landscape mode'
+}
+METERING_MODES = {
+    0: 'Unknown', 1: 'Average', 2: 'Center-weighted average',
+    3: 'Spot', 4: 'Multi-spot', 5: 'Pattern', 6: 'Partial'
+}
+FLASH_MODES = {
+    0: 'No flash', 1: 'Flash fired', 5: 'Flash fired, no return',
+    7: 'Flash fired, return detected', 9: 'Flash fired, compulsory',
+    16: 'No flash, compulsory', 24: 'No flash, auto', 25: 'Flash fired, auto'
+}
+WHITE_BALANCE_MODES = {0: 'Auto', 1: 'Manual'}
+COLOR_SPACES = {1: 'sRGB', 65535: 'Uncalibrated'}
+
+
+@lru_cache(maxsize=1)
+def _find_exiftool() -> Optional[str]:
+    """Locate the exiftool binary. Checks PATH, then Homebrew locations, because
+    launchd/Hazel jobs run with a minimal PATH that omits /opt/homebrew/bin."""
+    found = shutil.which("exiftool")
+    if found:
+        return found
+    for candidate in ("/opt/homebrew/bin/exiftool", "/usr/local/bin/exiftool"):
+        if Path(candidate).exists():
+            return candidate
+    return None
+
+
+def _clean_text(value: Any) -> str:
+    """Strip whitespace and NUL padding (Nikon pads some strings with \\x00)."""
+    return str(value).strip('\x00 \t\r\n')
+
+
+def _parse_exif_datetime(value: Any) -> Optional[datetime]:
+    """Parse 'YYYY:MM:DD HH:MM:SS' (ExifTool may append subseconds / timezone)."""
+    try:
+        return datetime.strptime(str(value)[:19], '%Y:%m:%d %H:%M:%S')
+    except ValueError:
+        return None
+
+
+def normalize_exiftool_row(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Map one ExifTool `-G -n` result row to the analyzer's metadata schema.
+
+    Returns {} when the row carries no usable data (e.g. exiftool reported an error),
+    so callers can fall back to Pillow. Empty strings are omitted, so presence checks
+    like files_with_artist count only files that really have a value.
+    """
+    def first(*keys):
+        for key in keys:
+            value = raw.get(key)
+            if value not in (None, ''):
+                return value
+        return None
+
+    def as_float(value):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    metadata: Dict[str, Any] = {}
+
+    for out_key, keys in (
+        ('Make', ('EXIF:Make',)),
+        ('Model', ('EXIF:Model',)),
+        ('LensMake', ('EXIF:LensMake',)),
+        ('LensModel', ('EXIF:LensModel', 'Composite:LensID')),
+        # Nikon: EXIF:SerialNumber (also MakerNotes:SerialNumber). Needed for dedupe tier 2.
+        ('CameraSerialNumber', ('EXIF:SerialNumber', 'MakerNotes:SerialNumber')),
+        ('Software', ('EXIF:Software',)),
+        ('Artist', ('EXIF:Artist',)),
+        ('Copyright', ('EXIF:Copyright',)),
+    ):
+        value = first(*keys)
+        if value is not None:
+            text = _clean_text(value)
+            if text:
+                metadata[out_key] = text
+
+    shutter_count = as_float(first('MakerNotes:ShutterCount'))
+    if shutter_count is not None:
+        metadata['ShutterCount'] = int(shutter_count)
+
+    # Capture time is DateTimeOriginal; CreateDate is the fallback.
+    original = _parse_exif_datetime(first('EXIF:DateTimeOriginal') or '')
+    created = _parse_exif_datetime(first('EXIF:CreateDate') or '')
+    if original:
+        metadata['DateTimeOriginal'] = original
+    if original or created:
+        metadata['DateTime'] = original or created
+
+    iso = as_float(first('EXIF:ISO', 'MakerNotes:ISO'))
+    if iso is not None:
+        metadata['ISO'] = int(iso)
+    f_number = as_float(first('EXIF:FNumber'))
+    if f_number is not None:
+        metadata['FNumber'] = f_number
+    focal = as_float(first('EXIF:FocalLength'))
+    if focal is not None:
+        metadata['FocalLength'] = focal
+    focal35 = as_float(first('EXIF:FocalLengthIn35mmFormat'))
+    if focal35 is not None:
+        metadata['FocalLength35mm'] = int(focal35)
+    # Decimal seconds (0.004), not "1/250": decimals sort/average directly (EXIF stores a
+    # rational; fractions are display-only via _format_shutter_speed).
+    exposure = as_float(first('EXIF:ExposureTime'))
+    if exposure:
+        metadata['ExposureTime'] = exposure
+
+    # With -n these enums arrive as ints.
+    for out_key, key, table in (
+        ('ExposureProgram', 'EXIF:ExposureProgram', EXPOSURE_PROGRAMS),
+        ('MeteringMode', 'EXIF:MeteringMode', METERING_MODES),
+        ('WhiteBalance', 'EXIF:WhiteBalance', WHITE_BALANCE_MODES),
+    ):
+        value = raw.get(key)
+        if isinstance(value, (int, float)):
+            metadata[out_key] = table.get(int(value), f'Unknown ({int(value)})')
+    flash = raw.get('EXIF:Flash')
+    if isinstance(flash, (int, float)):
+        metadata['Flash'] = FLASH_MODES.get(int(flash), f'Flash mode {int(flash)}')
+    # On NEFs ColorSpace exists only in MakerNotes; on JPEGs it is in EXIF.
+    color_space = as_float(first('EXIF:ColorSpace', 'MakerNotes:ColorSpace'))
+    if color_space is not None:
+        metadata['ColorSpace'] = COLOR_SPACES.get(int(color_space), f'Unknown ({int(color_space)})')
+    bias = as_float(first('EXIF:ExposureCompensation'))
+    if bias is not None:
+        metadata['ExposureBias'] = f"{bias:+.1f} EV"
+
+    lat = as_float(first('Composite:GPSLatitude', 'EXIF:GPSLatitude'))
+    lon = as_float(first('Composite:GPSLongitude', 'EXIF:GPSLongitude'))
+    if lat is not None and lon is not None:
+        metadata['GPSLatitude'] = lat
+        metadata['GPSLongitude'] = lon
+        altitude = as_float(first('Composite:GPSAltitude', 'EXIF:GPSAltitude'))
+        if altitude is not None:
+            metadata['GPSAltitude'] = altitude
+
+    # NOTE: for a NEF, EXIF:ImageWidth/Height is the raw sensor area (Z 6: 6064x4040) while
+    # the paired JPEG is the output size (6048x4024). Do not compare them for equality.
+    width = as_float(first('EXIF:ImageWidth', 'File:ImageWidth'))
+    height = as_float(first('EXIF:ImageHeight', 'File:ImageHeight'))
+    if width is not None:
+        metadata['ImageWidth'] = int(width)
+    if height is not None:
+        metadata['ImageHeight'] = int(height)
+
+    return metadata
+
+
+def _meta_to_cache(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """JSON-safe copy for the SQLite cache (datetimes -> ISO strings, schema tag added)."""
+    data = {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in metadata.items()}
+    data['_schema'] = EXIF_CACHE_SCHEMA
+    return data
+
+
+def _meta_from_cache(data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Inverse of _meta_to_cache. Returns None for rows written by another schema.
+
+    The exif_cache table is shared with EXIFProcessor, which stores a different shape;
+    the `_schema` tag keeps the two from reading each other's rows (a collision only
+    costs a cache miss).
+    """
+    if not data or data.get('_schema') != EXIF_CACHE_SCHEMA:
+        return None
+    meta = {k: v for k, v in data.items() if k != '_schema'}
+    for key in _DATETIME_KEYS:
+        if isinstance(meta.get(key), str):
+            try:
+                meta[key] = datetime.fromisoformat(meta[key])
+            except ValueError:
+                del meta[key]
+    return meta
 
 
 @dataclass
@@ -97,7 +323,8 @@ class PhotoAnalyzer:
     def __init__(self, 
                  file_types: Optional[FileTypes] = None,
                  performance_config: Optional[PerformanceConfig] = None,
-                 detailed: bool = True):
+                 detailed: bool = True,
+                 db_manager=None):
         """
         Initialize photo analyzer.
         
@@ -105,10 +332,16 @@ class PhotoAnalyzer:
             file_types: File type configuration
             performance_config: Performance settings
             detailed: Whether to extract detailed EXIF data
+            db_manager: Optional DatabaseManager; when given (and performance_config.cache_exif
+                is on) batch results are cached in its exif_cache table, keyed by path + mtime
         """
         self.file_types = file_types or FileTypes()
         self.performance_config = performance_config or PerformanceConfig()
         self.detailed = detailed
+        self.db_manager = db_manager
+        # Results of extract_metadata_batch(), served by the per-file extractors so callers that
+        # loop file by file (analyze_command) reuse the batch instead of re-reading each file.
+        self._prefetched: Dict[Path, Dict[str, Any]] = {}
         
         if not PILLOW_AVAILABLE:
             raise ImportError("Pillow is required for photo analysis. Install with: pip install Pillow")
@@ -166,39 +399,152 @@ class PhotoAnalyzer:
         )
     
     def _extract_metadata_batch(self, image_files: List[FileInfo], progress_callback=None) -> Dict[Path, Dict[str, Any]]:
-        """Extract metadata from batch of image files."""
-        metadata_results = {}
-        processed = 0
-        failed_count = 0
-        
-        for file_info in image_files:
-            if self.detailed:
-                metadata = self._extract_detailed_exif(file_info.path)
-            else:
-                metadata = self._extract_basic_exif(file_info.path)
-            
-            if metadata:
-                metadata_results[file_info.path] = metadata
-            else:
-                failed_count += 1
-                # Debug: Print first few failures
-                if failed_count <= 5:
-                    logger.debug(f"Failed to extract metadata from {file_info.path.name} (type: {file_info.file_type})")
-            
-            processed += 1
-            
-            if progress_callback:
-                # Show progress every file for better feedback
-                progress_callback("exif", processed, len(image_files), file_info.path.name)
-        
-        # Debug: Print summary
+        """Extract metadata from batch of image files (files with no metadata are omitted)."""
+        results = self.extract_metadata_batch([f.path for f in image_files], progress_callback)
+        metadata_results = {path: meta for path, meta in results.items() if meta}
+
+        failed = [f for f in image_files if f.path not in metadata_results]
+        for file_info in failed[:5]:
+            logger.debug(f"Failed to extract metadata from {file_info.path.name} (type: {file_info.file_type})")
         success_rate = (len(metadata_results) / len(image_files)) * 100 if image_files else 0
         logger.debug(f"EXIF extraction summary: {len(metadata_results)}/{len(image_files)} files ({success_rate:.1f}% success rate)")
-        
         return metadata_results
+
+    def extract_metadata_batch(self, paths: List[Path], progress_callback=None) -> Dict[Path, Dict[str, Any]]:
+        """Read metadata for many files. Primary entry point for large runs.
+
+        Order of preference per file: SQLite cache -> ExifTool (chunked, several long-lived
+        processes, see the strategy notes at the top of this module) -> Pillow per file.
+        Every input path is present in the result; files nothing could read map to {}.
+        Results are also kept in self._prefetched for the per-file extractors.
+        """
+        results: Dict[Path, Dict[str, Any]] = {}
+        total = len(paths)
+
+        todo: List[Path] = []
+        for path in paths:
+            cached = self._cache_get(path)
+            if cached is not None:
+                results[path] = cached
+            else:
+                todo.append(path)
+        if progress_callback and results:
+            progress_callback("exif", len(results), total, "cache")
+
+        if todo and self._exiftool_usable():
+            for chunk_results in self._exiftool_read_chunks(todo):
+                self._cache_put_many(chunk_results)
+                results.update(chunk_results)
+                if progress_callback:
+                    progress_callback("exif", len(results), total, "exiftool")
+
+        # Anything ExifTool could not read (missing binary, error row, unsupported file).
+        for path in todo:
+            if results.get(path):
+                continue
+            try:
+                meta = self._extract_detailed_exif(path) if self.detailed else self._extract_basic_exif(path)
+            except Exception as exc:
+                logger.debug(f"Metadata fallback failed for {path.name}: {exc}")
+                meta = {}
+            results[path] = meta or {}
+            if progress_callback:
+                progress_callback("exif", len(results), total, path.name)
+
+        self._prefetched.update({p: m for p, m in results.items() if m})
+        return results
+
+    def prefetch_metadata(self, paths: List[Path]) -> None:
+        """Batch-read paths so later per-file _extract_*_exif calls are served from memory."""
+        self.extract_metadata_batch(paths)
+
+    @staticmethod
+    def _exiftool_usable() -> bool:
+        return EXIFTOOL_AVAILABLE and _find_exiftool() is not None
+
+    def _exiftool_read_chunks(self, paths: List[Path]):
+        """Yield {path: normalized metadata} per chunk, read by parallel exiftool processes.
+
+        Each worker thread owns ONE exiftool process for the whole run (process startup is the
+        dominant cost) and pulls chunks from a shared queue. Workers use check_execute=False so
+        one unreadable file does not discard the other files in its chunk. Paths a worker could
+        not read are simply absent from the yielded dict; the caller falls back to Pillow.
+        """
+        wanted_workers = max(1, min(self.performance_config.parallel_workers, EXIFTOOL_MAX_WORKERS))
+        # Shrink chunks for small runs so every worker gets one (258 files / chunk 200 would
+        # otherwise use only 2 of 4 workers). Floor of 10 keeps per-call overhead negligible.
+        chunk_size = max(10, min(EXIFTOOL_CHUNK_SIZE, -(-len(paths) // wanted_workers)))
+        chunks = [paths[i:i + chunk_size] for i in range(0, len(paths), chunk_size)]
+        workers = min(wanted_workers, len(chunks))
+        work: "queue.Queue[List[Path]]" = queue.Queue()
+        for chunk in chunks:
+            work.put(chunk)
+        out: "queue.Queue" = queue.Queue()
+        executable = _find_exiftool()
+
+        def worker():
+            try:
+                with ExifToolHelper(executable=executable, check_execute=False) as et:
+                    while True:
+                        try:
+                            chunk = work.get_nowait()
+                        except queue.Empty:
+                            return
+                        try:
+                            rows = et.get_tags([str(p) for p in chunk], EXIFTOOL_TAGS)
+                        except Exception as exc:
+                            logger.debug(f"exiftool chunk of {len(chunk)} files failed: {exc}")
+                            rows = []
+                        by_source = {row.get('SourceFile'): row for row in rows}
+                        parsed = {}
+                        for path in chunk:
+                            row = by_source.get(str(path))
+                            meta = normalize_exiftool_row(row) if row else {}
+                            if meta:
+                                parsed[path] = meta
+                        out.put(parsed)
+            except Exception as exc:  # exiftool failed to start; leftover chunks go to Pillow
+                logger.debug(f"exiftool worker stopped: {exc}")
+            finally:
+                out.put(None)  # sentinel: this worker is done
+
+        threads = [threading.Thread(target=worker, daemon=True) for _ in range(workers)]
+        for thread in threads:
+            thread.start()
+        finished = 0
+        while finished < workers:
+            item = out.get()
+            if item is None:
+                finished += 1
+            else:
+                yield item
+        for thread in threads:
+            thread.join()
+
+    def _cache_get(self, path: Path) -> Optional[Dict[str, Any]]:
+        if not (self.db_manager and self.performance_config.cache_exif):
+            return None
+        try:
+            return _meta_from_cache(self.db_manager.get_cached_exif(path))
+        except Exception as exc:
+            logger.debug(f"EXIF cache read failed for {path.name}: {exc}")
+            return None
+
+    def _cache_put_many(self, chunk_results: Dict[Path, Dict[str, Any]]) -> None:
+        """Persist one chunk in a single transaction so a crash keeps completed chunks."""
+        if not (self.db_manager and self.performance_config.cache_exif and chunk_results):
+            return
+        try:
+            self.db_manager.cache_exif_many({p: _meta_to_cache(m) for p, m in chunk_results.items()})
+        except Exception as exc:
+            logger.warning(f"EXIF cache write failed ({len(chunk_results)} files): {exc}")
     
     def _extract_basic_exif(self, file_path: Path) -> Dict[str, Any]:
         """Extract basic EXIF data using Pillow."""
+        # Served from extract_metadata_batch()/prefetch_metadata() when available (ExifTool-read).
+        prefetched = self._prefetched.get(file_path)
+        if prefetched is not None:
+            return prefetched
         try:
             with Image.open(file_path) as img:
                 metadata = {}
@@ -214,11 +560,11 @@ class PhotoAnalyzer:
                         tag_name = TAGS.get(tag_id, tag_id)
                         
                         if tag_name == 'Make':
-                            metadata['Make'] = str(value).strip()
+                            metadata['Make'] = str(value).strip('\x00 \t\r\n')
                         elif tag_name == 'Model':
-                            metadata['Model'] = str(value).strip()
+                            metadata['Model'] = str(value).strip('\x00 \t\r\n')
                         elif tag_name == 'LensModel':
-                            metadata['LensModel'] = str(value).strip()
+                            metadata['LensModel'] = str(value).strip('\x00 \t\r\n')
                         elif tag_name in ['DateTime', 'DateTimeOriginal']:
                             try:
                                 dt = datetime.strptime(str(value), '%Y:%m:%d %H:%M:%S')
@@ -239,7 +585,10 @@ class PhotoAnalyzer:
                             except Exception:
                                 pass
                         elif tag_name == 'ExposureTime':
-                            metadata['ExposureTime'] = str(value)
+                            try:
+                                metadata['ExposureTime'] = float(value)
+                            except (TypeError, ValueError):
+                                pass
                         elif tag_name == 'FocalLength':
                             try:
                                 if isinstance(value, tuple) and len(value) == 2:
@@ -262,6 +611,10 @@ class PhotoAnalyzer:
     
     def _extract_detailed_exif(self, file_path: Path) -> Dict[str, Any]:
         """Extract comprehensive EXIF data using Pillow."""
+        # Served from extract_metadata_batch()/prefetch_metadata() when available (ExifTool-read).
+        prefetched = self._prefetched.get(file_path)
+        if prefetched is not None:
+            return prefetched
         try:
             with Image.open(file_path) as img:
                 exif_dict = img.getexif()
@@ -305,15 +658,15 @@ class PhotoAnalyzer:
                     
                     # Camera and lens information
                     if tag_name == 'Make':
-                        metadata['Make'] = str(value).strip()
+                        metadata['Make'] = str(value).strip('\x00 \t\r\n')
                     elif tag_name == 'Model':
-                        metadata['Model'] = str(value).strip()
+                        metadata['Model'] = str(value).strip('\x00 \t\r\n')
                     elif tag_name == 'LensModel':
-                        metadata['LensModel'] = str(value).strip()
+                        metadata['LensModel'] = str(value).strip('\x00 \t\r\n')
                     elif tag_name == 'LensMake':
-                        metadata['LensMake'] = str(value).strip()
+                        metadata['LensMake'] = str(value).strip('\x00 \t\r\n')
                     elif tag_name == 'SerialNumber':
-                        metadata['CameraSerialNumber'] = str(value).strip()
+                        metadata['CameraSerialNumber'] = str(value).strip('\x00 \t\r\n')
                     
                     # Date and time
                     elif tag_name in ['DateTime', 'DateTimeOriginal', 'DateTimeDigitized']:
@@ -340,7 +693,10 @@ class PhotoAnalyzer:
                         except Exception:
                             pass
                     elif tag_name == 'ExposureTime':
-                        metadata['ExposureTime'] = str(value)
+                        try:
+                            metadata['ExposureTime'] = float(value)
+                        except (TypeError, ValueError):
+                            pass
                     elif tag_name == 'FocalLength':
                         try:
                             if isinstance(value, tuple) and len(value) == 2:
@@ -357,28 +713,13 @@ class PhotoAnalyzer:
                     
                     # Exposure settings
                     elif tag_name == 'ExposureProgram':
-                        programs = {
-                            0: 'Not defined', 1: 'Manual', 2: 'Normal program',
-                            3: 'Aperture priority', 4: 'Shutter priority', 5: 'Creative program',
-                            6: 'Action program', 7: 'Portrait mode', 8: 'Landscape mode'
-                        }
-                        metadata['ExposureProgram'] = programs.get(value, f'Unknown ({value})')
+                        metadata['ExposureProgram'] = EXPOSURE_PROGRAMS.get(value, f'Unknown ({value})')
                     elif tag_name == 'MeteringMode':
-                        metering_modes = {
-                            0: 'Unknown', 1: 'Average', 2: 'Center-weighted average',
-                            3: 'Spot', 4: 'Multi-spot', 5: 'Pattern', 6: 'Partial'
-                        }
-                        metadata['MeteringMode'] = metering_modes.get(value, f'Unknown ({value})')
+                        metadata['MeteringMode'] = METERING_MODES.get(value, f'Unknown ({value})')
                     elif tag_name == 'Flash':
-                        flash_modes = {
-                            0: 'No flash', 1: 'Flash fired', 5: 'Flash fired, no return',
-                            7: 'Flash fired, return detected', 9: 'Flash fired, compulsory',
-                            16: 'No flash, compulsory', 24: 'No flash, auto', 25: 'Flash fired, auto'
-                        }
-                        metadata['Flash'] = flash_modes.get(value, f'Flash mode {value}')
+                        metadata['Flash'] = FLASH_MODES.get(value, f'Flash mode {value}')
                     elif tag_name == 'WhiteBalance':
-                        wb_modes = {0: 'Auto', 1: 'Manual'}
-                        metadata['WhiteBalance'] = wb_modes.get(value, f'Unknown ({value})')
+                        metadata['WhiteBalance'] = WHITE_BALANCE_MODES.get(value, f'Unknown ({value})')
                     
                     # Image properties
                     elif tag_name == 'ImageWidth':
@@ -392,16 +733,15 @@ class PhotoAnalyzer:
                         except Exception:
                             pass
                     elif tag_name == 'ColorSpace':
-                        color_spaces = {1: 'sRGB', 65535: 'Uncalibrated'}
-                        metadata['ColorSpace'] = color_spaces.get(value, f'Unknown ({value})')
+                        metadata['ColorSpace'] = COLOR_SPACES.get(value, f'Unknown ({value})')
                     
                     # Software and metadata
                     elif tag_name == 'Software':
-                        metadata['Software'] = str(value).strip()
+                        metadata['Software'] = str(value).strip('\x00 \t\r\n')
                     elif tag_name == 'Artist':
-                        metadata['Artist'] = str(value).strip()
+                        metadata['Artist'] = str(value).strip('\x00 \t\r\n')
                     elif tag_name == 'Copyright':
-                        metadata['Copyright'] = str(value).strip()
+                        metadata['Copyright'] = str(value).strip('\x00 \t\r\n')
                     
                     # Exposure compensation
                     elif tag_name == 'ExposureBiasValue':
@@ -428,81 +768,17 @@ class PhotoAnalyzer:
             return self._extract_exiftool_exif(file_path)
     
     def _extract_exiftool_exif(self, file_path: Path) -> Dict[str, Any]:
-        """Fallback for files Pillow cannot read (e.g. CR3) or that have no EXIF. Uses ExifTool."""
-        if not EXIFTOOL_AVAILABLE:
+        """Single-file ExifTool read (starts its own process; use extract_metadata_batch for
+        more than a handful of files). Used when Pillow cannot read a file (e.g. CR3)."""
+        if not self._exiftool_usable():
             return {}
         try:
-            with ExifToolHelper() as et:
-                rows = et.get_metadata([str(file_path)])
+            with ExifToolHelper(executable=_find_exiftool(), check_execute=False) as et:
+                rows = et.get_tags([str(file_path)], EXIFTOOL_TAGS)
         except Exception as e:
             logger.debug(f"ExifTool fallback failed for {file_path.name}: {e}")
             return {}
-        if not rows:
-            return {}
-        raw = rows[0]
-
-        def first(*keys):
-            for key in keys:
-                value = raw.get(key)
-                if value not in (None, ''):
-                    return value
-            return None
-
-        def as_float(value):
-            try:
-                return float(value)
-            except (TypeError, ValueError):
-                return None
-
-        metadata: Dict[str, Any] = {}
-        make = first('EXIF:Make')
-        model = first('EXIF:Model')
-        lens = first('EXIF:LensModel', 'EXIF:LensID')
-        serial = first('EXIF:SerialNumber', 'MakerNotes:SerialNumber')
-        if make:
-            metadata['Make'] = str(make).strip()
-        if model:
-            metadata['Model'] = str(model).strip()
-        if lens:
-            metadata['LensModel'] = str(lens).strip()
-        if serial:
-            metadata['CameraSerialNumber'] = str(serial).strip()
-
-        capture = first('EXIF:DateTimeOriginal', 'EXIF:CreateDate')
-        if capture:
-            try:
-                metadata['DateTime'] = datetime.strptime(str(capture), '%Y:%m:%d %H:%M:%S')
-            except ValueError:
-                pass
-
-        iso = as_float(first('EXIF:ISO'))
-        if iso is not None:
-            metadata['ISO'] = int(iso)
-        f_number = as_float(first('EXIF:FNumber'))
-        if f_number is not None:
-            metadata['FNumber'] = f_number
-        focal = as_float(first('EXIF:FocalLength'))
-        if focal is not None:
-            metadata['FocalLength'] = focal
-        exposure = as_float(first('EXIF:ExposureTime'))
-        if exposure:
-            # Numeric mode gives seconds (0.004); format like Pillow path ("1/250").
-            metadata['ExposureTime'] = f"{exposure:g}" if exposure >= 1 else f"1/{round(1 / exposure)}"
-
-        lat = as_float(first('Composite:GPSLatitude', 'EXIF:GPSLatitude'))
-        lon = as_float(first('Composite:GPSLongitude', 'EXIF:GPSLongitude'))
-        if lat is not None and lon is not None:
-            metadata['GPSLatitude'] = lat
-            metadata['GPSLongitude'] = lon
-
-        width = as_float(first('EXIF:ImageWidth', 'File:ImageWidth'))
-        height = as_float(first('EXIF:ImageHeight', 'File:ImageHeight'))
-        if width is not None:
-            metadata['ImageWidth'] = int(width)
-        if height is not None:
-            metadata['ImageHeight'] = int(height)
-
-        return metadata
+        return normalize_exiftool_row(rows[0]) if rows else {}
     
     def _format_gps_coordinate(self, coord_tuple, ref):
         """Format GPS coordinates from EXIF tuple format."""

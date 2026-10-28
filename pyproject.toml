@@ -109,6 +109,9 @@ testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+markers = [
+    "offline: must-pass checks that the pipeline works with Ollama off/unreachable (run: pytest -m offline)",
+]
 addopts = [
     "--strict-markers",
     "--strict-config",

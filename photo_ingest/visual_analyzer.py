@@ -161,8 +161,16 @@ class ImageProcessor:
         except Exception:
             pass
         
-        # TODO: In a full implementation, we could use rawpy or similar
-        # libraries to extract embedded previews from RAW files
+        # TODO (researched 2026-10-28, Nikon Z 6 NEF; not yet implemented): do NOT add rawpy.
+        # Pillow only sees the NEF's tiny thumbnail (120x160), so the Pillow branch above is
+        # not a usable preview for Nikon RAW. ExifTool already ships the embedded JPEGs:
+        #   exiftool -b -JpgFromRaw  file.NEF  -> 6048x4024 full-size (~1 MB)  <- best for visual analysis
+        #   exiftool -b -OtherImage  file.NEF  -> 1620x1080
+        #   exiftool -b -PreviewImage file.NEF -> 640x424
+        # Pass the tag list as an argument vector (never shell-interpolate the path), read
+        # stdout bytes, and keep this optional/time-limited like the rest of the LLM path.
+        # Other brands differ (e.g. Canon CR2 uses PreviewImage for the large JPEG), so try
+        # JpgFromRaw, then OtherImage, then PreviewImage.
         return None
     
     def downscale_image(self, image: Image.Image, target_resolution: int) -> Image.Image:

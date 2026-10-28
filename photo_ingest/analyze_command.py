@@ -250,6 +250,9 @@ class AnalyzeCommand:
             'aperture_range': [None, None]
         })
         
+        # One chunked ExifTool pass; the per-file calls below are then served from memory.
+        self.analyzer.prefetch_metadata([f.path for f in image_files])
+
         # Process each image file
         for file_info in image_files:
             # Extract basic metadata for device detection
@@ -340,6 +343,9 @@ class AnalyzeCommand:
         image_files = [f for f in scan_result.files if f.file_type in ['raw', 'jpeg']]
         
         device_groups = defaultdict(list)
+        
+        # One chunked ExifTool pass; the per-file calls below are then served from memory.
+        self.analyzer.prefetch_metadata([f.path for f in image_files])
         
         for file_info in image_files:
             # Extract metadata for device detection
