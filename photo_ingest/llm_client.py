@@ -1,10 +1,9 @@
 """LLM client with extensible provider support and vision capabilities."""
 
-import json
 import time
 import base64
 import logging
-from typing import Dict, Any, Optional, Protocol
+from typing import TYPE_CHECKING, Dict, Any, Optional
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 
@@ -15,7 +14,10 @@ except ImportError:
     REQUESTS_AVAILABLE = False
 
 from .config import LLMConfig
-# ProcessedImage will be imported when needed to avoid circular import
+
+if TYPE_CHECKING:
+    # Type-only import: avoids a runtime import cycle with visual_analyzer.
+    from .visual_analyzer import ProcessedImage
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -201,7 +203,7 @@ class OllamaProvider(LLMProvider):
                     processing_time=processing_time
                 )
                 
-            except requests.exceptions.Timeout as e:
+            except requests.exceptions.Timeout:
                 if self.verbose:
                     logger.warning(f"Vision API timeout after {self.vision_timeout}s on attempt {attempt + 1}")
                 

@@ -244,8 +244,8 @@ class OutputGenerator:
         # File counts
         lines.append("## Files")
         lines.append("")
-        lines.append(f"| Metric | Count |")
-        lines.append(f"|--------|-------|")
+        lines.append("| Metric | Count |")
+        lines.append("|--------|-------|")
         lines.append(f"| Total files processed | {d.total_files:,} |")
         if d.files_copied:
             lines.append(f"| Files copied | {d.files_copied:,} |")

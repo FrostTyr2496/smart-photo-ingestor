@@ -19,25 +19,18 @@ from .deduplication import DeduplicationEngine, DuplicateStatus
 from .device_detector import DeviceDetector
 from .dry_run import DryRunPreview
 from .exceptions import (
-    PhotoIngestError,
     SourceDirectoryError,
-    EXIFProcessingError,
-    FileOperationError,
-    ArchiveDirectoryError,
-    DeduplicationError,
     format_user_error,
 )
 from .file_operations import (
     FileOperation,
     FileOperationsManager,
-    OperationResults,
     RawBackupResult,
 )
 from .file_scanner import FileScanner
 from .output_generator import (
     IngestSummaryData,
     ManifestRecord,
-    OutputFiles,
     OutputGenerator,
     build_manifest_record,
 )

@@ -8,10 +8,10 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from .deduplication import DuplicateStatus
-from .file_operations import FileOperation, OperationType
+from .file_operations import FileOperation
 from .output_generator import IngestSummaryData, OutputGenerator
 
 logger = logging.getLogger(__name__)
@@ -195,7 +195,7 @@ class DryRunPreview:
             for u in ("B", "KB", "MB", "GB"):
                 if n < 1024:
                     return f"{n:.1f} {u}"
-                n //= 1024
+                n /= 1024
             return f"{n:.1f} TB"
 
         summary_text = (
@@ -238,7 +238,6 @@ class DryRunPreview:
                 else "[bold green]NEW[/bold green]"
             )
             dest = str(op.dest_path or op.raw_backup_path or "")
-            self._console.print  # satisfy linter
             tbl.add_row(
                 op.source_path.name,
                 Path(dest).name if dest else "—",

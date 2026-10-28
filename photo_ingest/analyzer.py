@@ -1,6 +1,5 @@
 """Photo analysis functionality with comprehensive EXIF extraction."""
 
-import json
 import logging
 import queue
 import shutil
@@ -8,7 +7,7 @@ import threading
 import time
 from functools import lru_cache
 from pathlib import Path
-from collections import Counter, defaultdict
+from collections import Counter
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, asdict

@@ -3,7 +3,7 @@ archive_root: "${HOME}/Photos/Archive"
 
 # LLM Configuration for Visual Analysis
 llm:
-  enabled: true
+  enabled: false  # Off by default; enable only after LLM hardening (see docs/handoff.md)
   provider: "ollama"
   endpoint: "http://localhost:11434/api/generate"
   model: "llama3.1:8b"
@@ -15,7 +15,7 @@ llm:
 peek:
   enabled: true
   include_exif_summary: true
-  include_visual_analysis: true
+  include_visual_analysis: false  # Requires llm.enabled: true (config validator)
   sample_count: 5
   max_resolution: 1024
   supported_formats: ["jpg", "jpeg", "heic", "nef", "cr3", "dng"]

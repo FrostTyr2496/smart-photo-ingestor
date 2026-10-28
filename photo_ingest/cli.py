@@ -1,14 +1,11 @@
 """CLI interface for the Photo Ingest Tool."""
 
 import click
-import sys
 from pathlib import Path
 from typing import Optional
 
-from .analyzer import PhotoAnalyzer
-from .analyze_command import AnalyzeCommand, EnhancedAnalysisResult
+from .analyze_command import AnalyzeCommand
 from .visual_analyzer import VisualContentAnalyzer
-from .output_formatter import AnalysisFormatter
 from .output_manager import OutputManager
 from .config import FileTypes, PerformanceConfig, ConfigManager, ConfigurationError, PeekConfig, LLMConfig
 from .exceptions import PhotoIngestError, format_user_error
@@ -224,7 +221,7 @@ def show():
         config_path = Path(saved_config)
         if config_path.exists():
             click.echo(f"📁 Default config: {saved_config}")
-            click.echo(f"✅ Status: Found")
+            click.echo("✅ Status: Found")
             
             # Show some basic config info
             try:
@@ -236,7 +233,7 @@ def show():
                 click.echo("⚠️  Config file has errors")
         else:
             click.echo(f"📁 Default config: {saved_config}")
-            click.echo(f"❌ Status: File not found")
+            click.echo("❌ Status: File not found")
     else:
         click.echo("📁 No default config set")
         click.echo("💡 Use 'photo-ingest config set <file>' to set one")

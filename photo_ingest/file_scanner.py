@@ -3,7 +3,7 @@
 import os
 import logging
 from pathlib import Path
-from typing import List, Dict, Set, Optional, Callable, Iterator, Tuple
+from typing import List, Dict, Optional, Callable, Iterator, Tuple
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime

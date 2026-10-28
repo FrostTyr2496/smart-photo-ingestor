@@ -258,7 +258,7 @@ Run the test suite to verify functionality:
 python simple_test.py
 
 # Test with dummy EXIF data (requires piexif)
-python test_without_llm.py
+python scripts/test_without_llm.py
 
 # Demo all features
 python demo_enhanced_analyze.py
@@ -290,7 +290,7 @@ python -m photo_ingest.cli -vv analyze /path/to/photos --peek
 ### **Test Ollama Setup**
 ```bash
 # Test Ollama integration with verbose logging
-python test_verbose_ollama.py
+python scripts/test_verbose_ollama.py
 ```
 
 ## 🎊 **Success!**

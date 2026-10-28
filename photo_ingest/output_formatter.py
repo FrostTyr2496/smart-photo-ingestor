@@ -1,7 +1,6 @@
 """Output formatting for analysis results."""
 
 import json
-from typing import Dict, Any, List, Tuple
 from .analyzer import AnalysisResult, format_size
 
 

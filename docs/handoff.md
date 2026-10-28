@@ -209,23 +209,29 @@ short pointers are in `visual_analyzer.py`, `exif_processor.py`, `config.py`. Su
 - Verify: scan a tree containing `._*` files and `.Trashes/`; confirm they're excluded.
 
 ## 🟡 F12 — Smaller correctness + UX issues
-- `Summary.md` uses import date, not capture date (ingest_command.py L442). (Related F10.)
-- Manifest `raw_backup_path` is populated from each file's own folder and is written even
-  when raw backup is off (file_operations.py `plan_operations` L143).
-- `analyze --config X` saves X as the new default because it compares a `Path` to a
-  `str` (cli.py L87 `config != settings_manager.get_config_path()` is always True),
-  silently clobbering any previously saved default.
-- Dead/half-wired CLI flags (cli.py L37–L39): `--summary` is unused; `--basic` only
-  changes a log message; `--workers` only used without config. `-v` does not enable
-  logging for `ingest` (only `analyze` sets up logging).
-- `config set` exits 0 even when the config file is invalid.
-- No `--version` option anywhere.
-- Dry-run size formatter uses integer division (`n //= 1024`, dry_run.py L193) so sizes
-  lose precision; there's a no-op `self._console.print  # satisfy linter` at L236.
-- `get_files_by_perceptual_hash` (database.py L324) ignores its threshold and matches
-  exactly. `migrate_database` (database.py) is a logging placeholder.
-- `usage_guide.md` / `SETUP_GUIDE.md` tell users to run `python test_without_llm.py` /
-  `python test_verbose_ollama.py` from the repo root; those scripts live in `scripts/`.
+- ✅ FIXED (2026-10-28) pyflakes lint pass in `photo_ingest/`: unused imports, placeholder-less
+  f-strings, unused `except ... as e` / `osm_type`, and undefined `ProcessedImage` annotations
+  (`llm_client.py` now imports it under `TYPE_CHECKING`). Changed: analyze_command, analyzer, cli,
+  database, deduplication, dry_run, exif_processor, file_scanner, ingest_command, llm_client,
+  location_service, output_formatter, output_generator, output_manager.
+  Verify: `flake8 photo_ingest --exclude=photo_ingest/venv --select=F,E9` → no output;
+  `pytest -m offline` → 5 passed; touched-module tests → 16 failed, all in the pre-existing list above.
+  Left out: pycodestyle style (E5xx/W2xx, project line length is 100 per black config) and `tests/`.
+- ✅ FIXED (2026-10-28) dry-run size formatter divides (`n /= 1024`, dry_run.py); no-op
+  `satisfy linter` line removed.
+- ✅ FIXED (2026-10-28) `usage_guide.md` / `SETUP_GUIDE.md` now run `scripts/test_without_llm.py` /
+  `scripts/test_verbose_ollama.py`.
+- ✅ FIXED (2026-10-28) `example_config.yaml`: `llm.enabled: false` and `peek.include_visual_analysis: false`
+  (the config validator rejects visual analysis when the LLM is off). Loads cleanly via `ConfigManager`.
+- Stale, verified in code (2026-10-28): `Summary.md` uses the capture date (F10 change, `_build_summary_data`);
+  manifest `raw_backup_path` is only planned when raw backup is enabled (`file_operations.py` `plan_operations`
+  defaults to ORGANIZED_ONLY; only an explicit raw-only run plans it).
+- Deferred to the CLI/UX analysis (user decision, 2026-10-28): `analyze --config X` saves X as default
+  (cli.py L87, `Path` vs `str` compare is always True, so the save runs on every explicit `--config`;
+  whether that save is wanted is a design call); dead/half-wired flags (`--summary`, `--basic`, `--workers`);
+  `-v` not enabling logging for `ingest`; `config set` exit code; no `--version`.
+- Left out, not CLI: `get_files_by_perceptual_hash` (database.py) ignores its threshold and matches exactly
+  (needs a real Hamming-distance search); `migrate_database` is a logging placeholder.
 
 ---
 
@@ -241,8 +247,7 @@ Missing for "easy to invoke" / unattended use (spec task 18, not started):
 - No wrapper script, launchd plist, macOS notification, or volume-mount trigger. Confirmed
   absent: no `osascript`, `plistlib`, `launchctl`, `xattr`, Spotlight, or notification code.
 - README over-claims macOS notifications + Spotlight preservation that don't exist.
-- `example_config.yaml` sets `llm.enabled: true` → copying it as-is sends every ingest to
-  Ollama. A safe default config should disable the LLM.
+- ✅ FIXED (2026-10-28) `example_config.yaml` now ships with `llm.enabled: false` (see F12).
 - `photo_ingest/venv/` is a full virtualenv committed inside the package (gitignored, but
   present) — confirm it isn't swept into a build.
 

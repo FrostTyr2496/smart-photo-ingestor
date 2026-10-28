@@ -3,15 +3,12 @@
 import json
 from pathlib import Path
 from typing import Dict, List, Any, Optional
-from datetime import datetime
 
 try:
     from rich.console import Console
     from rich.table import Table
-    from rich.progress import Progress, TaskID, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
     from rich.panel import Panel
-    from rich.text import Text
-    from rich.tree import Tree
     from rich import box
     RICH_AVAILABLE = True
 except ImportError:
@@ -540,13 +537,13 @@ class OutputManager:
         
         # Display device breakdown
         if results.device_breakdown:
-            print(f"\n=== Device Breakdown ===")
+            print("\n=== Device Breakdown ===")
             for device_code, stats in results.device_breakdown.items():
                 print(f"{device_code}: {stats['file_count']:,} files, {self._format_size(stats['total_size'])}")
         
         # Display visual analysis
         if results.visual_analysis:
-            print(f"\n=== Visual Analysis ===")
+            print("\n=== Visual Analysis ===")
             if results.visual_analysis.overall_summary:
                 print(f"Overall Summary: {results.visual_analysis.overall_summary}")
             
@@ -555,13 +552,13 @@ class OutputManager:
                     print(f"{device_code}: {analysis.device_summary}")
         
         # Processing summary
-        print(f"\n=== Processing Summary ===")
+        print("\n=== Processing Summary ===")
         print(f"Mode: {results.processing_mode}")
         print(f"Total Time: {results.total_processing_time:.2f}s")
     
     def _display_plain_analyze_results(self, results: AnalysisResult):
         """Display analysis results in plain text format."""
-        print(f"\n=== Analysis Summary ===")
+        print("\n=== Analysis Summary ===")
         print(f"Total Files: {results.total_files:,}")
         print(f"Images Analyzed: {results.image_files_analyzed:,}")
         print(f"Total Size: {self._format_size(results.total_size)}")
@@ -572,12 +569,12 @@ class OutputManager:
             print(f"Date Range: {results.date_range[0]} to {results.date_range[1]}")
         
         if results.cameras:
-            print(f"\n=== Cameras ===")
+            print("\n=== Cameras ===")
             for camera, count in sorted(results.cameras.items(), key=lambda x: x[1], reverse=True):
                 print(f"  {camera}: {count:,} files")
         
         if results.lenses:
-            print(f"\n=== Lenses ===")
+            print("\n=== Lenses ===")
             for lens, count in sorted(results.lenses.items(), key=lambda x: x[1], reverse=True)[:5]:
                 print(f"  {lens}: {count:,} files")
         
@@ -603,7 +600,7 @@ class OutputManager:
         print(f"Duplicates: {duplicates:,}")
         
         # Show sample operations
-        print(f"\n=== Sample Operations ===")
+        print("\n=== Sample Operations ===")
         for i, op in enumerate(operations[:5]):
             status = "DUPLICATE" if op.duplicate_status == DuplicateStatus.DUPLICATE else "NEW"
             dest = op.dest_path or op.raw_backup_path
@@ -614,7 +611,7 @@ class OutputManager:
     
     def _display_plain_ingest_results(self, results: OperationResults):
         """Display ingest results in plain text format."""
-        print(f"\n=== Ingest Results ===")
+        print("\n=== Ingest Results ===")
         print(f"Files Processed: {results.files_processed:,}")
         print(f"Files Copied: {results.files_copied:,}")
         print(f"Files Moved: {results.files_moved:,}")
@@ -628,7 +625,7 @@ class OutputManager:
                     print(f"  - {error}")
         
         if results.raw_backup_result:
-            print(f"\n=== Raw Backup Results ===")
+            print("\n=== Raw Backup Results ===")
             print(f"Backup Directory: {results.raw_backup_result.backup_directory}")
             print(f"Files Backed Up: {results.raw_backup_result.files_backed_up:,}")
             print(f"Total Size: {self._format_size(results.raw_backup_result.total_size)}")

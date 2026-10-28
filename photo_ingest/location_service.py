@@ -215,7 +215,6 @@ class LocationService:
             Place type string or None
         """
         # Check for specific place types in the response
-        osm_type = data.get('osm_type', '')
         category = data.get('category', '')
         place_type = data.get('type', '')
         

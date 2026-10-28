@@ -1,7 +1,6 @@
 """EXIF processing engine with fallback support and caching."""
 
 import logging
-import shutil
 import subprocess
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -17,7 +16,7 @@ except ImportError:
 from PIL import Image
 from PIL.ExifTags import TAGS
 
-from .config import IngestConfig, PerformanceConfig
+from .config import IngestConfig
 from .database import DatabaseManager
 from .device_detector import DeviceDetector
 from .exceptions import EXIFProcessingError, MissingDependencyError  # noqa: F401  (re-export for compat)

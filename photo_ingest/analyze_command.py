@@ -9,7 +9,7 @@ from collections import defaultdict
 from .analyzer import PhotoAnalyzer, AnalysisResult
 from .visual_analyzer import VisualContentAnalyzer, PeekResults
 from .device_detector import DeviceDetector
-from .config import IngestConfig, FileTypes, PerformanceConfig, PeekConfig, LLMConfig
+from .config import IngestConfig, FileTypes, PerformanceConfig
 from .file_scanner import FileScanner
 
 

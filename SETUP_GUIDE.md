@@ -150,7 +150,7 @@ python test_folder_analysis.py
 ### **Test AI Integration**
 ```bash
 # Test Ollama connection and verbose logging
-python test_verbose_ollama.py
+python scripts/test_verbose_ollama.py
 
 # Demo all features with sample data
 python demo_enhanced_analyze.py
