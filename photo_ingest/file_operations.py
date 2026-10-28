@@ -196,7 +196,11 @@ class FileOperationsManager:
         
         # Execute raw backup operations first
         if raw_backup_ops:
-            raw_backup_result = self._execute_raw_backup_operations(raw_backup_ops, copy_mode)
+            # With a BOTH op, the organized step moves the source last, so the raw backup must copy.
+            raw_copy = copy_mode or any(
+                op.operation_type == OperationType.BOTH for op in raw_backup_ops
+            )
+            raw_backup_result = self._execute_raw_backup_operations(raw_backup_ops, raw_copy)
             results.raw_backup_result = raw_backup_result
             results.errors.extend(raw_backup_result.errors)
         

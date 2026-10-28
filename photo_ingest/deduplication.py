@@ -245,7 +245,8 @@ class DeduplicationEngine:
     def store_file_record(self, file_path: Path, hashes: FileHashes, 
                          dest_path: Optional[Path] = None,
                          raw_backup_path: Optional[Path] = None,
-                         metadata: Optional[Dict] = None):
+                         metadata: Optional[Dict] = None,
+                         file_mtime: Optional[int] = None):
         """Store file record in database.
         
         Args:
@@ -254,12 +255,14 @@ class DeduplicationEngine:
             dest_path: Destination path (for organized import)
             raw_backup_path: Raw backup path
             metadata: Additional metadata
+            file_mtime: Source mtime captured before the file was moved; read from disk if None
         """
-        try:
-            file_mtime = int(file_path.stat().st_mtime)
-        except (OSError, IOError):
-            logger.error(f"Cannot access file {file_path}")
-            return
+        if file_mtime is None:
+            try:
+                file_mtime = int(file_path.stat().st_mtime)
+            except (OSError, IOError):
+                logger.error(f"Cannot access file {file_path}")
+                return
         
         from datetime import datetime
         

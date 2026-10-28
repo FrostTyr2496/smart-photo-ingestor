@@ -18,3 +18,4 @@ inclusion: always
 - Deterministic heuristics (EXIF, file size, partial SHA-256) ALWAYS run before any LLM/visual call.
 - Pipeline must degrade gracefully when Ollama is offline (`pytest -m offline`, i.e. `tests/test_offline_degradation.py`, must always pass).
 - Never mutate or delete source files on mounted volumes (`/Volumes/*`) during dry-run or scan phases.
+- Always go and update the handoff doc inspecting the contents for what has been done, updating those items.

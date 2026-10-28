@@ -95,6 +95,7 @@ class DryRunPreview:
         operations: List[FileOperation],
         summary_data: IngestSummaryData,
         include_notes: bool = False,
+        duplicates_found: Optional[int] = None,
     ) -> DryRunResult:
         """Build and display the dry-run preview.
 
@@ -102,6 +103,8 @@ class DryRunPreview:
             operations:    Planned FileOperation list (from FileOperationsManager).
             summary_data:  Aggregated stats for the Summary.md preview.
             include_notes: Whether to show the LLM prompt preview.
+            duplicates_found: Real duplicate count; plan_operations drops DUPLICATE ops,
+                so counting from `operations` would always give 0.
 
         Returns:
             DryRunResult with counts and planned paths.
@@ -112,6 +115,8 @@ class DryRunPreview:
         duplicate_files = sum(
             1 for op in operations if op.duplicate_status == DuplicateStatus.DUPLICATE
         )
+        if duplicates_found is not None:
+            duplicate_files = duplicates_found
         total_size = sum(
             op.source_path.stat().st_size
             for op in operations

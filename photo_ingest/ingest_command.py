@@ -6,6 +6,7 @@ Requirements: 15.7, 15.8, 8.4
 from __future__ import annotations
 
 import logging
+import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -114,6 +115,8 @@ class IngestCommand:
         # Lazy-initialised in run() so tests can swap them via dependency injection
         self._db_manager: Optional[DatabaseManager] = None
         self._dedup_engine: Optional[DeduplicationEngine] = None
+        # path -> (own FileHashes, source mtime), filled by _check_duplicates before any move
+        self._dedup_cache: Dict[Path, tuple] = {}
         self._scanner: Optional[FileScanner] = None
         self._device_detector: Optional[DeviceDetector] = None
         self._file_ops: Optional[FileOperationsManager] = None
@@ -217,8 +220,14 @@ class IngestCommand:
                     event_name=event_name,
                     archive_root=self.config.archive_root,
                     quiet=self.progress is None,
+                    llm_client=self._make_llm_client(),
                 )
-                dry_result = preview.preview(operations, summary_data)
+                dry_result = preview.preview(
+                    operations,
+                    summary_data,
+                    include_notes=self.config.llm.enabled,
+                    duplicates_found=result.duplicates_found,
+                )
                 result.manifest_path = dry_result.manifest_path
                 result.summary_path = dry_result.summary_path
                 result.notes_path = dry_result.notes_path
@@ -228,6 +237,11 @@ class IngestCommand:
                 result.total_size_bytes = dry_result.total_size_bytes
                 result.processing_time_seconds = time.time() - start_time
                 return result
+
+            # Built before execution: move mode removes the sources afterwards.
+            manifest_records = self._build_manifest_records(
+                operations, metadata_map, dedup_results
+            )
 
             # 6b. Execute
             self._emit("copy", 0, len(operations), "Executing file operations…")
@@ -248,9 +262,6 @@ class IngestCommand:
             # 7. Output files
             summary_data = self._build_summary_data(
                 event_name, operations, metadata_map, result
-            )
-            manifest_records = self._build_manifest_records(
-                operations, metadata_map, dedup_results
             )
             notes_content = self._generate_notes(summary_data)
 
@@ -283,7 +294,13 @@ class IngestCommand:
     def _init_components(self) -> None:
         """Lazy-initialise sub-components (allows test injection)."""
         if self._db_manager is None:
-            self._db_manager = DatabaseManager(self.config.dedupe_store)
+            db_path = self.config.dedupe_store
+            if getattr(self, "_dry_run", False) and not Path(db_path).exists():
+                # Dry-run must not create the dedupe DB (handoff F8); use a throwaway
+                # temp DB so every file is checked against an empty index.
+                self._dry_run_tmpdir = tempfile.TemporaryDirectory(prefix="photo_ingest_dry_")
+                db_path = str(Path(self._dry_run_tmpdir.name) / "dry_run.sqlite")
+            self._db_manager = DatabaseManager(db_path)
         if self._dedup_engine is None:
             self._dedup_engine = DeduplicationEngine(
                 self._db_manager, self.config.performance
@@ -340,13 +357,32 @@ class IngestCommand:
     def _check_duplicates(
         self, files: List[Path]
     ) -> Dict[Path, DuplicateStatus]:
-        """Run deduplication check on all files."""
+        """Run deduplication check on all files.
+
+        Hashes are computed once here and cached, because move mode removes the
+        sources before dedupe records and the manifest are written. A NEW file whose
+        SHA-256 matches an earlier NEW file in this run is marked DUPLICATE.
+        """
         results: Dict[Path, DuplicateStatus] = {}
+        self._dedup_cache = {}
+        seen_sha: Dict[str, Path] = {}
         total = len(files)
         for i, path in enumerate(files):
             try:
                 check = self._dedup_engine.check_duplicate(path)
-                results[path] = check.status
+                status = check.status
+                own_hashes = check.hashes
+                if status == DuplicateStatus.SIMILAR:
+                    # SIMILAR hashes belong to the matched file, so hash this file itself.
+                    own_hashes = self._dedup_engine.calculate_hashes(path)
+                if own_hashes is not None:
+                    if status == DuplicateStatus.NEW:
+                        if own_hashes.sha256 in seen_sha:
+                            status = DuplicateStatus.DUPLICATE
+                        else:
+                            seen_sha[own_hashes.sha256] = path
+                    self._dedup_cache[path] = (own_hashes, int(path.stat().st_mtime))
+                results[path] = status
             except Exception as exc:
                 logger.warning("Dedup check failed for %s: %s", path, exc)
                 results[path] = DuplicateStatus.NEW
@@ -484,6 +520,7 @@ class IngestCommand:
         for op in operations:
             meta = metadata_map.get(op.source_path, {})
             status = dedup_results.get(op.source_path, DuplicateStatus.NEW)
+            cached = self._dedup_cache.get(op.source_path)
             rec = build_manifest_record(
                 source_path=op.source_path,
                 dest_path=op.dest_path,
@@ -491,9 +528,22 @@ class IngestCommand:
                 metadata=meta,
                 operation_type=op.operation_type.value,
                 duplicate_status=status.value,
+                sha256_hash=cached[0].sha256 if cached else "",
             )
             records.append(rec)
         return records
+
+    def _make_llm_client(self):
+        """Return an LLMClient for prompt preview, or None if LLM is disabled/unavailable."""
+        if not self.config.llm.enabled:
+            return None
+        try:
+            from .llm_client import LLMClient
+
+            return LLMClient(self.config.llm)
+        except Exception as exc:
+            logger.warning("LLM client unavailable for dry-run preview: %s", exc)
+            return None
 
     def _generate_notes(self, summary_data: IngestSummaryData) -> Optional[str]:
         """Generate LLM notes if enabled; return None if disabled or failed."""
@@ -528,14 +578,19 @@ class IngestCommand:
             if dedup_results.get(op.source_path) != DuplicateStatus.NEW:
                 continue
             meta = metadata_map.get(op.source_path, {})
+            cached = self._dedup_cache.get(op.source_path)
+            if cached is None:
+                logger.warning("No cached hashes for %s; dedupe record skipped", op.source_path)
+                continue
+            hashes, mtime = cached
             try:
-                hashes = self._dedup_engine.calculate_hashes(op.source_path)
                 self._dedup_engine.store_file_record(
                     file_path=op.source_path,
                     hashes=hashes,
                     dest_path=op.dest_path,
                     raw_backup_path=op.raw_backup_path,
                     metadata=meta,
+                    file_mtime=mtime,
                 )
             except Exception as exc:
                 logger.warning(

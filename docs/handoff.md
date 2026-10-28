@@ -95,7 +95,20 @@ short pointers are in `visual_analyzer.py`, `exif_processor.py`, `config.py`. Su
 
 # Open findings
 
-## 🟠 F8 — Dry-run writes to disk and misreports
+## ✅ FIXED (2026-10-28) F8 — Dry-run writes to disk and misreports
+- **Status/changes:** `ingest_command.py`: `_init_components` uses a throwaway temp-dir DB when
+  dry-run and the dedupe DB doesn't exist (analyzer cache already skipped in dry-run);
+  added `_make_llm_client`; dry-run now calls `preview(..., include_notes=config.llm.enabled,
+  duplicates_found=result.duplicates_found)` with `llm_client` wired. `dry_run.py`: `preview`
+  takes `duplicates_found` to override the always-0 count from `operations`.
+- **Verified:** dry-run on a fresh config left no `h.sqlite` in the target dir;
+  `pytest -m offline` 5 passed; `tests/test_ingest_command.py` + `tests/test_dry_run.py`:
+  35 passed, 1 failed (`TestSourceValidation::test_missing_source_raises`, fails identically
+  before my change, so pre-existing/stale).
+- **Not verified/out of scope:** duplicate count and LLM prompt output against a live Ollama or a
+  populated DB were not run; if the DB already exists, dry-run still opens it and
+  `CREATE IF NOT EXISTS` runs against it.
+- Original finding:
 - Where: `photo_ingest/ingest_command.py`
   - `_init_components` (L282) always constructs `DatabaseManager`, and
     `DatabaseManager.__init__` (database.py L70) calls `_init_database` (L80) which
@@ -111,7 +124,27 @@ short pointers are in `visual_analyzer.py`, `exif_processor.py`, `config.py`. Su
 - Verify: dry-run on a fresh config does not create `hashes.sqlite`, shows correct
   duplicate count, and prints the LLM prompt when LLM is enabled.
 
-## 🟠 F9 — Duplicate + move handling is incomplete
+## ✅ FIXED (2026-10-28) F9 — Duplicate + move handling is incomplete
+- **Status/changes:** `ingest_command.py`: `_check_duplicates` hashes each file once and caches
+  `(hashes, mtime)` in `self._dedup_cache`; a NEW file matching an earlier NEW file's SHA-256 in the same
+  run becomes DUPLICATE; SIMILAR files get their own hashes via `calculate_hashes` (the matched file's
+  hashes were returned before). `run` builds manifest records before execution; `_build_manifest_records`
+  and `_store_dedup_records` use the cache, so move mode no longer re-reads removed sources.
+  `deduplication.py`: `store_file_record` takes optional `file_mtime`. `file_operations.py`:
+  `execute_operations` copies raw backups for `BOTH` ops in move mode, so the organized move keeps its source.
+- **Verified:** throwaway fixture in `/tmp` (2 identical files + 1 unique), HOME overridden.
+  Copy mode: 1 duplicate detected, manifest has real hashes/sizes, dedupe DB has 2 rows.
+  Move mode with raw backup on: 2 files moved, raw copies written, manifest hashes/sizes populated,
+  DB has 2 rows, duplicate left in source. `pytest tests/test_ingest_command.py tests/test_deduplication.py
+  tests/test_file_operations.py`: 70 passed, 2 failed (both pre-existing: `test_missing_source_raises`,
+  `test_find_similar_images`, see stale list). `pytest -m offline`: 5 passed.
+  Rerun before commit: `pytest tests/test_ingest_command.py tests/test_deduplication.py tests/test_file_operations.py tests/test_dry_run.py`: 91 passed, 2 failed (same two pre-existing).
+- **Not verified/out of scope:** SIMILAR files are still not written to the dedupe DB (only NEW is stored;
+  policy unchanged). The size pre-filter still hashes every file, now once instead of 3×. Dedupe tier 2
+  (`DateTimeOriginal` + `CameraSerialNumber`) is not implemented. Raw-only + move still moves sources into
+  the backup. `result.total_size_bytes` stats sources after execution, so it reads 0 in move mode.
+  Dedupe records set `operation_type='organized'` for BOTH ops (derived from `dest_path`).
+- Original finding:
 - Where: `photo_ingest/ingest_command.py` + `deduplication.py` + `file_operations.py`
   - DB records are written only at the end (`_store_dedup_records` L511; only NEW stored,
     L519), so identical files **within one import** are all copied (no in-run dedupe).
@@ -210,7 +243,7 @@ Suggested additions, in order:
 1. Larger-drive run of the metadata pass (`analyze --json --exif-only`): check throughput, worker count, cache
    re-run, and whether the SSD benchmark numbers hold on the real drive.
 2. F11 — scanner hygiene (small; `._*` files appear on the real volume). File: `file_scanner.py`.
-3. F8, F9, F10 — dedupe/dry-run/rerun correctness, including dedupe tier 2 with `CameraSerialNumber`.
+3. F10 (F8 and F9 fixed; dedupe tier 2 with `CameraSerialNumber` still missing) — rerun correctness.
    Files: `ingest_command.py`, `deduplication.py`, `output_generator.py`.
 4. Clean up the 17 stale tests above (mostly fixtures/strings that drifted from the code).
 5. F12 polish pass; then the invocation additions; sync `tasks.md` and the guides to match the code
