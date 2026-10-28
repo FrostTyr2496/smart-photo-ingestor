@@ -111,9 +111,9 @@ class OutputGenerator:
         """
         result = OutputFiles()
 
-        manifest_path = self.event_dir / "manifest.csv"
-        summary_path = self.event_dir / "Summary.md"
-        notes_path = self.event_dir / "Notes.md" if notes_content else None
+        manifest_path = self._unique_path(self.event_dir / "manifest.csv")
+        summary_path = self._unique_path(self.event_dir / "Summary.md")
+        notes_path = self._unique_path(self.event_dir / "Notes.md") if notes_content else None
 
         if dry_run:
             result.manifest_path = manifest_path
@@ -127,6 +127,18 @@ class OutputGenerator:
             result.notes_path = self._write_notes(notes_path, notes_content, result)
 
         return result
+
+    @staticmethod
+    def _unique_path(path: Path) -> Path:
+        """Return path, or the next free numbered sibling (name_2.ext, ...) so nothing is overwritten (F10)."""
+        if not path.exists():
+            return path
+        n = 2
+        while True:
+            candidate = path.with_name(f"{path.stem}_{n}{path.suffix}")
+            if not candidate.exists():
+                return candidate
+            n += 1
 
     # ------------------------------------------------------------------
     # manifest.csv

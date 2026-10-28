@@ -259,20 +259,24 @@ class IngestCommand:
                 p.stat().st_size for p in image_files if p.exists()
             )
 
-            # 7. Output files
-            summary_data = self._build_summary_data(
-                event_name, operations, metadata_map, result
-            )
-            notes_content = self._generate_notes(summary_data)
+            # 7. Output files. Skipped when nothing new was imported so a re-run
+            # writes no header-only manifest or Summary into a stray folder (F10).
+            if operations:
+                summary_data = self._build_summary_data(
+                    event_name, operations, metadata_map, result
+                )
+                notes_content = self._generate_notes(summary_data)
 
-            gen = OutputGenerator(event_dir)
-            out = gen.generate_all(
-                manifest_records, summary_data, notes_content=notes_content
-            )
-            result.manifest_path = out.manifest_path
-            result.summary_path = out.summary_path
-            result.notes_path = out.notes_path
-            result.errors.extend(out.errors)
+                gen = OutputGenerator(event_dir)
+                out = gen.generate_all(
+                    manifest_records, summary_data, notes_content=notes_content
+                )
+                result.manifest_path = out.manifest_path
+                result.summary_path = out.summary_path
+                result.notes_path = out.notes_path
+                result.errors.extend(out.errors)
+            else:
+                logger.info("No new files to import; skipping output generation")
 
             # 8. Flush dedup DB (only for real runs, not dry-run; not raw-only per Req 4.7)
             if not raw_only:
@@ -484,7 +488,7 @@ class IngestCommand:
 
         return IngestSummaryData(
             event_name=event_name,
-            event_date=datetime.now().strftime("%Y-%m-%d"),
+            event_date=date_range[0] if date_range else datetime.now().strftime("%Y-%m-%d"),
             archive_root=self.config.archive_root,
             total_files=result.total_files,
             files_copied=result.files_copied,

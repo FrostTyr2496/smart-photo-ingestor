@@ -165,7 +165,18 @@ short pointers are in `visual_analyzer.py`, `exif_processor.py`, `config.py`. Su
 - Verify: import a batch with internal duplicates in both copy and move modes; check
   manifest hashes/sizes and dedupe DB contents.
 
-## 🟠 F10 — Re-running an import writes stray output + risks overwrite
+## 🟠 F10 — Re-running an import writes stray output + risks overwrite — ✅ FIXED (2026-10-28)
+- Changed: `ingest_command.py` `run()` step 7 now runs only when `operations` is non-empty;
+  `_build_summary_data` sets `event_date` from the earliest capture date. `output_generator.py`
+  `generate_all` uses new `_unique_path` so existing manifest/Summary/Notes are never overwritten
+  (writes `manifest_2.csv`, `Summary_2.md`, ...).
+- Verified: `pytest tests/test_ingest_command.py tests/test_output_generator.py --no-cov` →
+  44 passed, 1 failed (`test_missing_source_raises`, pre-existing). `pytest -m offline` → 5 passed.
+  Real files: 5 NEF + 5 JPG from `/Volumes/X9 Pro` copied to `testdata/x9_sample/card`; ingest run 1
+  copied 10, run 2 (same event) reported 10 duplicates and wrote no new folder or manifest rows
+  (manifest stayed at 11 lines). Overwrite guard checked with two `generate_all` calls in `/tmp`.
+- Left out of scope: `_resolve_event_dir` fallback still uses today's date when no operation has a
+  `dest_path` (raw-only runs). `testdata/` is not in `.gitignore`.
 - Where: `photo_ingest/ingest_command.py` `_resolve_event_dir` (L348) falls back to a
   folder named for *today*; `_build_summary_data` sets `event_date=datetime.now()`
   (L442) rather than capture date.
@@ -243,7 +254,7 @@ Suggested additions, in order:
 1. Larger-drive run of the metadata pass (`analyze --json --exif-only`): check throughput, worker count, cache
    re-run, and whether the SSD benchmark numbers hold on the real drive.
 2. F11 — scanner hygiene (small; `._*` files appear on the real volume). File: `file_scanner.py`.
-3. F10 (F8 and F9 fixed; dedupe tier 2 with `CameraSerialNumber` still missing) — rerun correctness.
+3. ~~F10~~ ✅ FIXED (2026-10-28). Dedupe tier 2 with `CameraSerialNumber` still missing.
    Files: `ingest_command.py`, `deduplication.py`, `output_generator.py`.
 4. Clean up the 17 stale tests above (mostly fixtures/strings that drifted from the code).
 5. F12 polish pass; then the invocation additions; sync `tasks.md` and the guides to match the code
