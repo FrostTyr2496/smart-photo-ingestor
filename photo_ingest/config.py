@@ -316,7 +316,13 @@ class ConfigManager:
         
         try:
             config_data = cls._load_yaml_file(config_file)
-            return IngestConfig(**config_data)
+            config = IngestConfig(**config_data)
+            # Relative dedupe_store resolves against the config file's directory, not cwd
+            store = Path(config.dedupe_store).expanduser()
+            if not store.is_absolute():
+                store = config_file.parent / store
+            config.dedupe_store = str(store)
+            return config
         except yaml.YAMLError as e:
             raise ConfigurationError(f"Invalid YAML in config file {config_file}: {e}")
         except Exception as e:

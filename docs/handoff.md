@@ -133,7 +133,12 @@ Severity: 🔴 data-loss or broken core, 🟠 correctness, 🟡 UX / polish.
   loaded the config with no `--config` and planned 1 operation under `/tmp/f4/archive` (exit 0).
 - Not covered here: `analyze` does not use this discovery path. Its `--config` handling is unchanged.
 
-## 🟠 F5 — Dedupe DB path is relative → breaks under automation
+## ✅ F5 — Dedupe DB path is relative → breaks under automation — FIXED (2026-10-28)
+- Fix applied: `config.py` `ConfigManager.load_config` — a relative `dedupe_store` (after `~` expansion) is resolved against the config file's directory.
+- Verified: `load_config('/tmp/f5a/c.yaml')` run from cwd `/tmp/f5a` and `/tmp/f5b` both return `/private/tmp/f5a/.hashes.sqlite`; `pytest tests/test_config.py -v` → 46 passed.
+- Not covered here: other relative paths in config were not changed; `ConfigManager.create_default_config`/defaults without a config file still use cwd.
+
+(Original finding:)
 - Where: `photo_ingest/config.py` L242 — `dedupe_store` defaults to `.hashes.sqlite`,
   resolved against the current working directory.
 - Problem: a launchd/Hazel job without an explicit working directory runs in `/`, where
@@ -283,7 +288,7 @@ Suggested additions once F1–F6 are fixed, in order:
 
 # Suggested execution order
 
-1. ✅ F2 DONE (2026-10-27); F3, F4, F5 remaining — small, high-impact, unblock normal + scripted use.
+1. ✅ F2 DONE (2026-10-27); F3, F4, F5 DONE (2026-10-28) — small, high-impact, unblock normal + scripted use.
    Files: `cli.py`, `ingest_command.py`, `file_operations.py`, `analyzer.py`, `config.py`.
 2. ✅ F1 — the data-loss guard. DONE (2026-10-27). File: `file_operations.py`.
 3. F6, then F7 — EXIF correctness (do F6 as a quick fix, or jump to F7 if adopting
