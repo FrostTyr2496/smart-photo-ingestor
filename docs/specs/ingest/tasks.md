@@ -9,7 +9,7 @@ Rules:
 - Commit as `feat(ing-N): …  [ing-N]`.
 - Tests use `tmp_path` dirs as "cards" and "drives", never `/Volumes`.
 
-- [ ] 1. Hashing
+- [x] 1. Hashing
   - ID: ing-1
   - Create `photovault/hashing.py`:
     - `CHUNK = 8 * 1024 * 1024`.
@@ -23,6 +23,7 @@ Rules:
       a byte outside every window changes;
     - identical files → identical hashes.
   - Verify: `uv run pytest tests/test_hashing.py -q`
+  - Result (2026-11-11): `uv run pytest tests/test_hashing.py -q` → 12 passed; `uv run pytest -q` → 168 passed.
   - _Design:_ system-design §3 (hashing); audit §2.2 tiers
 
 - [ ] 2. Verified copy engine
