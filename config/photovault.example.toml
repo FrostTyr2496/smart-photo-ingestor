@@ -1,0 +1,34 @@
+## PhotoVault example config. Copy to <home>/config.toml to use it. Every value below is the default.
+## Lines starting "## " are notes. Lines starting "# " are settings, shown commented out with their defaults.
+## Home is $PHOTOVAULT_HOME, or else ~/Library/Application Support/PhotoVault. Contains no serials or UUIDs.
+
+## [ingest]: where imports go, under the WORKING volume.
+[ingest]
+## Folder under the WORKING volume root that receives imports.
+# working_subdir = "Photography/Imports"
+
+## [naming]: file and folder names (system-design §6).
+[naming]
+## Stem template. Must contain {body} and {ident}.
+# template = "M{num:04d}_{date}-{time}-{subsec}_{body}_{ident}"
+## Shoot dates use the noon boundary by default: shots before this hour belong to the previous day. 0-23.
+# day_boundary_hour = 12
+
+## [policy]: how many verified copies per volume role before a card is safe to format (D-003).
+## Keys: WORKING, MASTER, LEGACY. Each count is at least 1. Setting this table replaces the default.
+[policy]
+# required = { WORKING = 1 }
+
+## [bodies]: camera body nicknames, keyed by the EXIF Model string. Entries here merge over the defaults.
+[bodies]
+# "NIKON Z 6" = "Z6"
+# "NIKON Z 6_2" = "Z6II"
+# "NIKON Z 8" = "Z8"
+# "FC3411" = "AIR2S"
+# "iPhone 14 Pro" = "IP14P"
+# "HERO10 Black" = "HERO10"
+
+## [performance]: concurrency.
+[performance]
+## ExifTool worker processes. 1-8.
+# exiftool_workers = 4

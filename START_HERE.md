@@ -24,8 +24,8 @@ Reference docs:
 - `docs/legacy/handoff-v0.md`: v0 findings, including the ExifTool benchmarks.
 
 ## Now (2026-11-11)
-- `main` was reset (D-007). Only the scaffold, hooks, docs and a redacted EXIF fixture exist;
-  `uv run pytest -q` → 51 passed.
+- `main` was reset (D-007). The scaffold, hooks, docs, a redacted EXIF fixture and the config loader
+  (fnd-1, `photovault/config.py`) exist; `uv run pytest -q` → 77 passed.
 - The old v0 code is on local branch `archive/v0-cli-2026-11-11`. Port from it with
   `git show archive/v0-cli-2026-11-11:photo_ingest/<file>` (fnd-5 ports `analyzer.py`).
 - Hooks are live:
@@ -53,18 +53,15 @@ task's commit:
 ```
 
 ## Next
-1. **Phase 1, three parallel lanes:**
-   - A: fnd-1 config;
+1. **Phase 1, two parallel lanes left:**
    - B: fnd-2 → fnd-3 → fnd-4;
-   - C: fnd-5 metadata reader (adds PyExifTool).
+   - C: fnd-5 metadata reader (adds PyExifTool). fnd-6 (A) then waits for fnd-4.
 2. **Phase 2 early lanes**, which can run alongside Phase 1: ing-1 → ing-2 (hashing, copy engine); ing-3
    scanner.
 3. **Fixture-only work** that can start any time: seq-1 (runs and bursts).
 4. After that, fnd-6 then ing-4 → ing-5 → ing-6. ing-7 and ing-10 are **[stronger]**.
 
 ## Waiting on user
-- **Confirm the naming template** (D-005), e.g. `M0781_20261027-181442-81_Z6_0084022.NEF`. Should the `M`
-  token stay first?
 - **Push the archive branch?** Run `git push -u origin archive/v0-cli-2026-11-11` if you want it on GitHub;
   push `main` when you're happy with the reset.
 - **fnd-7:** copy a small sample corpus into `testdata/corpus/` (the list is in the task).
@@ -72,11 +69,11 @@ task's commit:
 - Phase 3: close Lightroom before indexing Flats 1, and plug in the 4 TB (D-006).
 
 ## Recent decisions
+- D-014 (agent): config details the spec left open (unknown keys rejected; policy table replaces default).
 - D-013 (agent): LEGACY volumes get no marker; they are identified by UUID only.
 - D-012 (agent): no perceptual hashes or LLM in ingest; LLM enrichment is backlog.
 - D-011 (agent): public repo; private facts in `docs/private/` and `testdata/`; fixtures redacted.
 - D-010 (agent): `/Volumes` guard hook and SessionStart pre-flight.
-- D-009 (agent): no attribution trailers (as in mimir).
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

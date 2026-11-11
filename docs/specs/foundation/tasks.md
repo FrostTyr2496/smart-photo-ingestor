@@ -21,7 +21,7 @@ Rules:
   - Result (2026-11-11): `uv run pytest -q` → 51 passed. The hook was pipe-tested with the configured command:
     rm on /Volumes → exit 2, ls /Volumes → exit 0.
 
-- [ ] 1. Config loader
+- [x] 1. Config loader
   - ID: fnd-1
   - Create `photovault/config.py` with these frozen dataclasses:
     - `IngestConfig(working_subdir: str = "Photography/Imports")`
@@ -49,6 +49,10 @@ Rules:
     - each validation error.
   - Verify: `uv run pytest tests/test_config.py -q`
   - _Design:_ system-design §3 (config), §6, §9; decisions D-003, D-004, D-005
+  - Result (2026-11-11): `uv run pytest tests/test_config.py -q` → 26 passed; `uv run pytest -q` → 77 passed.
+    Extra checks, from the agent's reading (D-014): unknown keys inside a known section raise too; `[policy]
+    required` replaces the default table rather than merging; `catalog_path` is always `home/catalog.sqlite`
+    (no key). The example test uncomments `# key = value` lines and checks they load to the defaults.
 
 - [ ] 2. Catalog connection and migration runner
   - ID: fnd-2
