@@ -25,7 +25,8 @@ Reference docs:
 
 ## Now (2026-11-11)
 - `main` was reset (D-007). The scaffold, hooks, docs, a redacted EXIF fixture, the config loader (fnd-1) and
-  the ExifTool metadata reader (fnd-5, `photovault/metadata.py`) exist; `uv run pytest -q` → 89 passed, 1 skipped.
+  the ExifTool metadata reader (fnd-5, `photovault/metadata.py`) and the local sample corpus (fnd-7, 10 files
+  in `testdata/corpus/flats1/`) exist; `uv run pytest -q` → 92 passed.
 - The old v0 code is on local branch `archive/v0-cli-2026-11-11`. Port from it with
   `git show archive/v0-cli-2026-11-11:photo_ingest/<file>` (fnd-5 ports `analyzer.py`).
 - Hooks are live:
@@ -53,7 +54,7 @@ task's commit:
 ```
 
 ## Next
-1. **Phase 1, lane B left:** fnd-2 → fnd-3 → fnd-4. fnd-6 waits for fnd-4. fnd-7's agent part follows the user's copy.
+1. **Phase 1, lane B left:** fnd-2 → fnd-3 → fnd-4. fnd-6 waits for fnd-4. Lanes A, C and D are done.
 2. **Phase 2 early lanes**, which can run alongside Phase 1: ing-1 → ing-2 (hashing, copy engine); ing-3
    scanner.
 3. **Fixture-only work** that can start any time: seq-1 (runs and bursts).
@@ -62,17 +63,18 @@ task's commit:
 ## Waiting on user
 - **Push the archive branch?** Run `git push -u origin archive/v0-cli-2026-11-11` if you want it on GitHub;
   push `main` when you're happy with the reset.
-- **fnd-7:** copy the sample shoot from the X9 Pro into `testdata/corpus/x9/Raw/` (the commands are in the chat;
-  the agent then writes the corpus inventory to `docs/private/`).
+- **Corpus gaps (fnd-7):** the wish list still lacks a Z6II pair, a night run, a GoPro set and an iPhone
+  HEIC+AAE (`docs/private/CORPUS.md`). Copy them when you can.
+- **X9 sample:** should `testdata/x9_sample/` move into `testdata/corpus/x9/` (D-017)?
 - The exFAT answer looked cut off ("honestly considering…"). Tell us if you are weighing APFS after all.
 - Phase 3: close Lightroom before indexing Flats 1, and plug in the 4 TB (D-006).
 
 ## Recent decisions
+- D-019 (user): commit messages follow the mimir shape (template in `task-execution.md` §4).
+- D-018 (user): no Z8 owned yet; struck from fnd-7 and the audit.
+- D-017 (agent): corpus layout `testdata/corpus/<source>/<original path>`.
 - D-016 (agent): metadata reader details (capture time as `DateTimeOriginal` + `CaptureTimeSource`).
 - D-015 (user): PyExifTool approved for fnd-5.
-- D-014 (agent): config details the spec left open (unknown keys rejected; policy table replaces default).
-- D-013 (agent): LEGACY volumes get no marker; they are identified by UUID only.
-- D-012 (agent): no perceptual hashes or LLM in ingest; LLM enrichment is backlog.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

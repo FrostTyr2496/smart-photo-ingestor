@@ -195,13 +195,13 @@ Rules:
   - Verify: `uv run pytest tests/test_cli.py -q`
   - _Design:_ system-design §3 (protocol), §10
 
-- [ ] 7. **[user + agent]** Local sample corpus for real-file tests
+- [x] 7. **[user + agent]** Local sample corpus for real-file tests
   - ID: fnd-7
   - User:
     - Copy a small set of real files (≈ 1–2 GB) into `testdata/corpus/` (gitignored), keeping each source's
       folder structure, with `cp` or Finder from the cards and drives.
     - Wanted:
-      - Z6, Z6II and Z8 NEF+JPG pairs;
+      - Z6 and Z6II NEF+JPG pairs; ~~Z8 NEF+JPG pairs~~ (struck: no Z8 owned yet);
       - one NEF with a Lightroom `.xmp`, plus a `-Edit.tif` and a `-HDR.dng`;
       - ~10 consecutive night frames with a framing shot in the middle, and a same-second burst;
       - DJI `DJI_xxxx.JPG` + `.MP4` + `.SRT`, plus one `PANORAMA/100_xxxx/` folder (3 DNGs);
@@ -216,3 +216,8 @@ Rules:
       git.
   - Verify: `uv run pytest tests/realfiles -q -m realfiles`
   - _Design:_ vault-rules 10; audit §6 Phase 0
+  - Result (2026-11-11): `uv run pytest tests/realfiles -q -m realfiles` → 2 passed on the 10-file corpus
+    (`testdata/corpus/flats1/`); `uv run pytest -q` → 92 passed. Inventory: `docs/private/CORPUS.md`.
+    Left out of scope (partial user copy): Z6II pair, night run and burst, `-Edit.tif`/`-HDR.dng` in the corpus
+    (they are in `testdata/x9_sample/`, not copied), GoPro MP4+LRV+THM, iPhone HEIC+AAE. Z8 struck: not owned.
+    Layout choice (D-017): `testdata/corpus/<source>/<original path>`.

@@ -28,7 +28,7 @@ Goal: config, catalog, volume identity, the metadata reader and the CLI skeleton
 | P1.4 | fnd-4 volumes | fnd-3 | B | — |
 | P1.5 | fnd-5 metadata reader (adds PyExifTool) (**done 2026-11-11**) | — | C | — |
 | P1.6 | fnd-6 protocol + CLI skeleton | fnd-1, fnd-4 | A | — |
-| P1.7 | fnd-7 sample corpus | — (agent part after fnd-5) | D | **[user]** copy the sample files |
+| P1.7 | fnd-7 sample corpus (**done 2026-11-11, partial copy**; gaps in `START_HERE.md`) | — (agent part after fnd-5) | D | **[user]** copy the sample files |
 
 Notes:
 - Lanes A, B and C can start at once.
