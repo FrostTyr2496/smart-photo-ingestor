@@ -42,7 +42,10 @@ Reference docs:
 - Policy: one verified copy on WORKING = safe to format (D-003).
 
 ## In progress
-- Task: none.
+- Task: parallel batch ing-1, ing-3, seq-3 (verified, being committed one by one) and seq-1 (held) (started 2026-11-11, Sonnet)
+- Files touched: photovault/hashing.py, scan.py, preview.py, sequences.py, their tests; pyproject.toml + uv.lock (Pillow, for seq-3)
+- Last verified: `uv run pytest -q` → 168 passed (with all five tasks' files in the tree)
+- Notes: seq-1 is implemented but NOT committed: the spec's gap rule (60 s) and the audit §5.4 rule (5 s) both fail the survey runs, and the agent added `max_gap_s=150`. Needs the user's call before commit.
 
 When you start a task, replace `none` with this block before your first edit, and set it back to `none` in the
 task's commit:

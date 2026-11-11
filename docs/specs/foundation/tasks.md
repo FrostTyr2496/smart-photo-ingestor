@@ -54,7 +54,7 @@ Rules:
     required` replaces the default table rather than merging; `catalog_path` is always `home/catalog.sqlite`
     (no key). The example test uncomments `# key = value` lines and checks they load to the defaults.
 
-- [ ] 2. Catalog connection and migration runner
+- [x] 2. Catalog connection and migration runner
   - ID: fnd-2
   - Create `photovault/catalog/__init__.py` (empty), `photovault/catalog/migrations.py` and
     `photovault/catalog/db.py`.
@@ -66,13 +66,17 @@ Rules:
       `BEGIN; <sql>; PRAGMA user_version=n; COMMIT;`. On error it rolls back and re-raises.
     - `snapshot(conn, dest)` runs `VACUUM INTO`, and raises `FileExistsError` if `dest` exists.
   - Create `tests/test_catalog_db.py` covering:
-    - a fresh DB migrates to 1, and all 11 tables exist;
+    - a fresh DB migrates to 1, and all 10 tables exist;
     - a second `migrate` is a no-op;
     - WAL is on;
     - a foreign-key violation raises (an instance with an unknown `volume_id`);
     - a bad role is rejected by CHECK;
     - the snapshot opens and has the same tables.
   - Verify: `uv run pytest tests/test_catalog_db.py -q`
+  - Result (2026-11-11): `uv run pytest tests/test_catalog_db.py -q` → 10 passed; `uv run pytest -q` → 168 passed.
+    The task text said 11 tables; system-design §5 defines 10, so the text was corrected and V1 stays verbatim
+    (D-020). Extras beyond the task: `migrate` refuses a DB newer than the engine, and `connect` raises if WAL
+    cannot be enabled.
   - _Design:_ system-design §3 (catalog/db), §5
 
 - [ ] 3. Catalog repository: volumes, bodies, assets, instances, jobs

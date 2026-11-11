@@ -23,7 +23,7 @@ Goal: config, catalog, volume identity, the metadata reader and the CLI skeleton
 |---|---|---|---|---|
 | P1.0 | fnd-0 scaffold, hooks, process (**done 2026-11-11**) | — | — | — |
 | P1.1 | fnd-1 config (**done 2026-11-11**) | — | A | — |
-| P1.2 | fnd-2 catalog db + migrations | — | B | — |
+| P1.2 | fnd-2 catalog db + migrations (**done 2026-11-11**) | — | B | — |
 | P1.3 | fnd-3 repository | fnd-2 | B | — |
 | P1.4 | fnd-4 volumes | fnd-3 | B | — |
 | P1.5 | fnd-5 metadata reader (adds PyExifTool) (**done 2026-11-11**) | — | C | — |
