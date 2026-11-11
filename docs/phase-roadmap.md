@@ -44,7 +44,7 @@ Policy: one verified copy on WORKING (D-003).
 |---|---|---|---|---|
 | P2.1 | ing-1 hashing (**done 2026-11-11**) | — | E | — |
 | P2.2 | ing-2 copy engine | ing-1 | E | — |
-| P2.3 | ing-3 scanner | — | F | — |
+| P2.3 | ing-3 scanner (**done 2026-11-11**) | — | F | — |
 | P2.4 | ing-4 groups | ing-3, fnd-5 | F | — |
 | P2.5 | ing-5 naming | ing-4, fnd-1 | F | — |
 | P2.6 | ing-6 plan | fnd-3, fnd-4, fnd-5, fnd-6, ing-3, ing-4, ing-5 | G | — |

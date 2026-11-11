@@ -55,7 +55,7 @@ Rules:
   - Verify: `uv run pytest tests/test_copy_engine.py -q`
   - _Design:_ system-design §3; vault-rules 3, 8
 
-- [ ] 3. Scanner and file kinds
+- [x] 3. Scanner and file kinds
   - ID: ing-3
   - Create `photovault/scan.py` with `FileEntry`, `classify(name)` and
     `walk(root, *, include_ignored=False)`. Kinds, skips and the derivative-stem rule are as in system-design §8.
@@ -68,6 +68,8 @@ Rules:
     - `DSC_0850-Edit.tif`, `IMG_0001.HEIC` + `.AAE` + `.MOV`, `GX010020.MP4` + `.LRV`.
     Assert the exact yielded `rel_path`s and kinds, and that `include_ignored` adds only the ignored ones.
   - Verify: `uv run pytest tests/test_scan.py -q`
+  - Result (2026-11-11): `uv run pytest tests/test_scan.py -q` → 25 passed; `uv run pytest -q` → 168 passed.
+    Choices the spec left open are in D-021 (sidecar beats derivative, dot-directories, non-regular files).
   - _Design:_ system-design §8
 
 - [ ] 4. Capture groups and sidecars
