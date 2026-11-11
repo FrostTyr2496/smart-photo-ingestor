@@ -25,8 +25,9 @@ Reference docs:
 
 ## Now (2026-11-11)
 - `main` was reset (D-007). The scaffold, hooks, docs, a redacted EXIF fixture, the config loader (fnd-1) and
-  the ExifTool metadata reader (fnd-5, `photovault/metadata.py`) and the local sample corpus (fnd-7, 10 files
-  in `testdata/corpus/flats1/`) exist; `uv run pytest -q` → 92 passed.
+  the ExifTool metadata reader (fnd-5, `photovault/metadata.py`), the local sample corpus (fnd-7, 10 files
+  in `testdata/corpus/flats1/`), the catalog db and migrations (fnd-2), hashing (ing-1), the scanner (ing-3)
+  and preview luminance (seq-3, Pillow added) exist; `uv run pytest -q` → 151 passed, 168 with seq-1's files.
 - The old v0 code is on local branch `archive/v0-cli-2026-11-11`. Port from it with
   `git show archive/v0-cli-2026-11-11:photo_ingest/<file>` (fnd-5 ports `analyzer.py`).
 - Hooks are live:
@@ -42,10 +43,13 @@ Reference docs:
 - Policy: one verified copy on WORKING = safe to format (D-003).
 
 ## In progress
-- Task: parallel batch seq-3 (verified, being committed) and seq-1 (held) (started 2026-11-11, Sonnet)
-- Files touched: photovault/preview.py, sequences.py, their tests; pyproject.toml + uv.lock (Pillow, for seq-3)
-- Last verified: `uv run pytest -q` → 168 passed (with all five tasks' files in the tree)
-- Notes: seq-1 is implemented but NOT committed: the spec's gap rule (60 s) and the audit §5.4 rule (5 s) both fail the survey runs, and the agent added `max_gap_s=150`. Needs the user's call before commit.
+- Task: seq-1 (started 2026-11-11, Sonnet), implemented but NOT committed, held for the user's call
+- Files touched: photovault/sequences.py, tests/test_sequences.py (untracked)
+- Last verified: `uv run pytest tests/test_sequences.py -q` → 17 passed
+- Notes: the spec's gap rule (`exposure + max(60 s, exposure)`) and the audit §5.4 rule (`max(5 s, 0.5 x
+  exposure)`) both fail 3 of the 5 survey runs (gaps of 138, 144 and 108 s). The agent added
+  `detect_runs(max_gap_s=150.0)` (60 s kept across a tolerated outlier) and a `card` filter on `load_fixture`.
+  Decide the rule, record a decision row, fix the task text and the audit, then tick seq-1.
 
 When you start a task, replace `none` with this block before your first edit, and set it back to `none` in the
 task's commit:
@@ -57,11 +61,11 @@ task's commit:
 ```
 
 ## Next
-1. **Phase 1, lane B left:** fnd-2 → fnd-3 → fnd-4. fnd-6 waits for fnd-4. Lanes A, C and D are done.
-2. **Phase 2 early lanes**, which can run alongside Phase 1: ing-1 → ing-2 (hashing, copy engine); ing-3
-   scanner.
-3. **Fixture-only work** that can start any time: seq-1 (runs and bursts).
-4. After that, fnd-6 then ing-4 → ing-5 → ing-6. ing-7 and ing-10 are **[stronger]**.
+1. **Phase 1, lane B left:** fnd-3 → fnd-4. fnd-6 waits for fnd-4. Lanes A, C and D are done.
+2. **Phase 2 early lanes**, which can run alongside Phase 1: ing-2 (copy engine); ing-3 → ing-4 → ing-5 (groups,
+   naming).
+3. **Fixture-only work:** finish seq-1 (see In progress), then seq-2.
+4. After that, fnd-6 then ing-6. ing-7 and ing-10 are **[stronger]**.
 
 ## Waiting on user
 - **Push the archive branch?** Run `git push -u origin archive/v0-cli-2026-11-11` if you want it on GitHub;
@@ -73,11 +77,11 @@ task's commit:
 - Phase 3: close Lightroom before indexing Flats 1, and plug in the 4 TB (D-006).
 
 ## Recent decisions
+- D-022 (agent): preview luminance details (flat = luma > 100 with stddev <= 25, to tune in seq-4).
+- D-021 (agent): scanner details (sidecar beats derivative; dot-dirs and non-regular files skipped).
+- D-020 (agent): fnd-2 spec said 11 tables, §5 has 10; text corrected, schema unchanged.
 - D-019 (user): commit messages follow the mimir shape (template in `task-execution.md` §4).
 - D-018 (user): no Z8 owned yet; struck from fnd-7 and the audit.
-- D-017 (agent): corpus layout `testdata/corpus/<source>/<original path>`.
-- D-016 (agent): metadata reader details (capture time as `DateTimeOriginal` + `CaptureTimeSource`).
-- D-015 (user): PyExifTool approved for fnd-5.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

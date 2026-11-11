@@ -51,7 +51,7 @@ Rules:
       `burst`/`unknown`, not a calibration kind without seq-3.
   - Verify: `uv run pytest tests/test_sequences.py -q`
 
-- [ ] 3. Preview luminance (adds Pillow)
+- [x] 3. Preview luminance (adds Pillow)
   - ID: seq-3
   - Approves the dependency: run `uv add Pillow`.
   - Create `photovault/preview.py`:
@@ -62,6 +62,9 @@ Rules:
   - A candidate is confirmed as dark/bias when luma < 8, and as flat when luma > 100 with low variance.
   - Tests: synthetic black, white and gradient JPEGs made with Pillow; a `realfiles` test on corpus NEFs.
   - Verify: `uv run pytest tests/test_preview.py -q`
+  - Result (2026-11-11): `uv run pytest tests/test_preview.py -q` → 12 passed; `uv run pytest tests/test_preview.py
+    -q -m realfiles` → 1 passed on the local corpus; `uv run pytest -q` → 168 passed. `uv add Pillow` → pillow
+    13.0.0. Added `luma_stats`, `is_dark`, `is_flat` and the threshold constants (D-022).
 
 - [ ] 4. **[stronger]** Persist sequences and shoots; astro layout at plan time
   - ID: seq-4

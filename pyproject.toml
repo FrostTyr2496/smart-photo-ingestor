@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 # Approved runtime dependencies are listed in docs/steering/vault-rules.md. Add one only in the task
 # that approves it (fnd-5 adds PyExifTool, seq-3 adds Pillow).
 dependencies = [
+    "pillow>=13.0.0",
     "pyexiftool>=0.5.6",
 ]
 

@@ -76,7 +76,7 @@ Notes:
 |---|---|---|---|---|
 | P4.1 | seq-1 runs and bursts | — (can start any time) | J | — |
 | P4.2 | seq-2 classification | seq-1 | J | — |
-| P4.3 | seq-3 preview luminance (adds Pillow) | — | K | — |
+| P4.3 | seq-3 preview luminance (adds Pillow) (**done 2026-11-11**) | — | K | — |
 | P4.4 | seq-4 persist + astro layout **[stronger]** | seq-2, seq-3, ing-10 | J | **[user]** approve the naming-spec change |
 | P4.5 | seq-5 relabel | seq-4 | J | — |
 
