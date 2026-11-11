@@ -1,76 +1,39 @@
-# Photo Ingest Tool
+# smart-photo-ingestor → PhotoVault
 
-A command-line Python application designed to organize photography imports on macOS. The tool serves as the first step in a larger photo workflow (Imports → Staging → Catalog/Exports) and provides two main functions:
+PhotoVault is a personal photo vault for macOS. Plug in a camera card and it copies everything to a working
+SSD, checking every byte. It records each file in a local SQLite catalog, which knows which drives hold
+verified copies. It tells you when a card is safe to format, and it later reconciles everything onto an
+offline 12 TB master drive.
 
-1. **Analyze**: Extract EXIF metadata summaries and optional visual content analysis
-2. **Ingest**: Organize photos into structured archive with deduplication and optional AI-generated notes
+**Status:** being rebuilt (November 2026). `main` holds the new design and a clean scaffold. The previous CLI
+(`photo-ingest analyze/ingest`) is preserved on branch `archive/v0-cli-2026-11-11`.
 
-## Features
+## Design in one paragraph
 
-- **Enhanced Analysis**: Analyze photo folders with EXIF metadata extraction and optional visual content analysis using vision-capable LLMs
-- **Smart Organization**: Automatically organize photos by date, event, and camera/device
-- **Deduplication**: Detect duplicate and similar files using SHA-256 and perceptual hashing
-- **Raw Backup**: Create timestamped raw backups preserving original structure
-- **macOS Integration**: Native macOS features including notifications and Spotlight metadata preservation
-- **Performance Optimized**: Parallel processing, caching, and incremental updates for large photo sets
+A headless Python engine (`photovault`, driven over JSON-lines) does all the file and catalog work. A thin
+SwiftUI menu-bar app (Phase 5) watches for mounted volumes and shows progress. The engine:
+- never writes to source media;
+- copies through a single verified writer: temp file → sync → uncached re-read → SHA-256 compare → rename;
+- identifies files only by their SHA-256;
+- groups RAW, JPEG, sidecar and derivative files into captures;
+- names files deterministically so camera number rollover can't collide.
 
-## Installation
-
-```bash
-pip install -e .
-```
-
-## Usage
-
-### Analyze Command
-
-```bash
-# Basic EXIF analysis
-photo-ingest analyze /path/to/photos
-
-# Include visual content analysis
-photo-ingest analyze /path/to/photos --peek
-
-# JSON output for automation
-photo-ingest analyze /path/to/photos --json
-```
-
-### Ingest Command
-
-```bash
-# Basic ingest with configuration
-photo-ingest ingest --config ingest.yaml --source /path/to/photos --event "Vacation 2024"
-
-# Dry run to preview operations
-photo-ingest ingest --config ingest.yaml --source /path/to/photos --event "Vacation 2024" --dry-run
-
-# Raw backup only
-photo-ingest ingest --config ingest.yaml --source /path/to/photos --event "Vacation 2024" --raw-only
-```
-
-## Requirements
-
-- Python 3.8+
-- macOS (optimized for M1/M3 Macs)
-- ExifTool (for comprehensive EXIF extraction)
+Details:
+- [`docs/ARCHITECTURE_AUDIT_AND_ROADMAP.md`](docs/ARCHITECTURE_AUDIT_AND_ROADMAP.md): the reasoning.
+- [`docs/steering/system-design.md`](docs/steering/system-design.md): the contract.
+- [`docs/phase-roadmap.md`](docs/phase-roadmap.md): the plan.
 
 ## Development
 
 ```bash
-# Install development dependencies
-pip install -e ".[dev]"
-
-# Run tests
-pytest
-
-# Format code
-black photo_ingest/
-isort photo_ingest/
-
-# Type checking
-mypy photo_ingest/
+uv sync
+uv run pytest -q
 ```
+
+Needs Python ≥ 3.12, [uv](https://docs.astral.sh/uv/), and `exiftool` (`brew install exiftool`).
+Contributors (human or agent): start with [`START_HERE.md`](START_HERE.md) and
+[`docs/steering/task-execution.md`](docs/steering/task-execution.md).
 
 ## License
 
-MIT License
+MIT

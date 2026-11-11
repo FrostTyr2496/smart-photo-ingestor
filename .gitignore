@@ -195,3 +195,12 @@ ingest.yaml
 test_photos/
 sample_config/
 testdata/
+
+# --- PhotoVault (2026-11-11) ---
+# Public repo: real-drive facts and real photos stay local.
+docs/private/
+testdata/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+.claude/settings.local.json

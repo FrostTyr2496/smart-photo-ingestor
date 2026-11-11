@@ -1,0 +1,49 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run pytest *)",
+      "Bash(uv sync)",
+      "Bash(git status *)",
+      "Bash(git log *)",
+      "Bash(git diff *)",
+      "Bash(git check-ignore *)",
+      "Bash(git show archive/v0-cli-2026-11-11:*)",
+      "Bash(ls /Volumes*)",
+      "Bash(diskutil info *)",
+      "Bash(diskutil list*)"
+    ],
+    "deny": [
+      "Edit(//Volumes/**)"
+    ]
+  },
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|Write|NotebookEdit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard_volumes.py\"",
+            "timeout": 10,
+            "onFailure": "block"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/preflight.sh\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
