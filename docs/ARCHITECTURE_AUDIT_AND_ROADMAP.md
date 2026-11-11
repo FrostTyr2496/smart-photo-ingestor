@@ -444,7 +444,7 @@ get a trustworthy green light".
 - Disable `--move` when the source is on a removable/external volume (or remove `--move` entirely).
 - Delete `exif_processor.py`, `output_formatter.py`; fix or delete the 17 stale tests.
 - Build a **golden fixture corpus** (`tests/fixtures/`, git-LFS or local-only): ~20 real files —
-  Z6, Z6II and Z8 NEF+JPG pairs, a NEF with LR `.xmp`, an LR `-Edit.tif`/`-HDR.dng`, a short night run with
+  Z6, Z6II and ~~Z8~~ NEF+JPG pairs, a NEF with LR `.xmp`, an LR `-Edit.tif`/`-HDR.dng`, a short night run with
   a framing shot in the middle, a same-second burst, a DJI JPG+MP4+SRT and a 3-frame PANORAMA DNG folder,
   GoPro MP4+LRV+THM, iPhone HEIC+AAE+Live MOV — with expected hashes, groups and sequence labels.
 - Gate: `pytest -m offline` + new fixture tests green.
@@ -507,8 +507,8 @@ get a trustworthy green light".
 
 ## 7. Practical recommendations about the drives (from the survey)
 
-- **Bodies are a Z6, a Z6II and a Z8** (each with a distinct serial), plus DJI Air 2S, GoPro HERO10 and iPhone 14 Pro.
-  The Z8's 45 MP NEFs make the larger-file case real, but the hash budget in §2.2 still holds — it's I/O-bound.
+- **Bodies are a Z6 and a Z6II** (each with a distinct serial), plus DJI Air 2S, GoPro HERO10 and iPhone 14 Pro.
+  ~~A Z8 (45 MP NEFs) would make the larger-file case real~~ (no Z8 owned yet). The hash budget in §2.2 still holds — it's I/O-bound.
 - **Flats 1 already holds ≈ 113 GB of likely duplicate imports** (same name + size in ≥ 2 folders; 2/2 sampled
   pairs byte-identical) and two Lightroom catalogs. Only 3 `.xmp` files exist across 16,266 NEFs: **edits live
   in the `.lrcat` files**, which makes Phase 3's "never move files Lightroom references" rule the critical one.
