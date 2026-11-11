@@ -55,9 +55,23 @@ the hard rules are in `vault-rules.md` and the system map is in `system-design.m
      newest 5 decisions, and respect the caps.
    - `docs/phase-roadmap.md`: the item's status.
 2. Run `/close-the-loop`.
-3. One commit per task: `feat(<task-id>): …  [<task-id>]` (`docs(…)` or `chore(…)` where it fits).
+3. One commit per task. The message follows the mimir shape (D-019):
+
+   ```
+   feat(fnd-5): ExifTool metadata reader ported from v0  [fnd-5]
+
+   Ports the archive's reader and normalisation, drops Pillow and the cache, and sets the capture-time
+   precedence. Spec: docs/specs/foundation/tasks.md (fnd-5). Decisions: D-016.
+   Open: the realfiles check needs the corpus (see fnd-7).
+   ```
+
+   - **Subject:** `<type>(<task-id>): <what changed, in plain words>  [<task-id>]`. `type` is `feat` for a
+     task, and `docs`, `chore` or `fix` where it fits. Keep it under about 72 characters.
+   - **Body:** 1–4 lines. Say what the commit does and why, in plain words. Point to the spec with its path
+     and task ID, and to the decision rows by ID. Name anything still open. Don't repeat the subject, don't
+     list file names the diff already shows, and don't copy the `Result` line from `tasks.md`.
+   - **No** attribution trailers (D-009). **No** commit hashes in the docs.
    - Stage specific paths with `git add <paths>`.
-   - No attribution trailers (D-009).
    - Never use `--no-verify`, never amend after a hook failure, and don't push unless asked.
 4. End with an empty `git status --short`, or describe what is left under "In progress".
 

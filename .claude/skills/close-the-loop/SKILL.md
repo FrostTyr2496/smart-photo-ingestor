@@ -11,5 +11,6 @@ End-of-task state check for PhotoVault. If you changed no files this session, sa
 4. `docs/phase-roadmap.md` and `docs/steering/system-design.md` still match reality (task status, module map, schema, signatures) if this session changed them.
 5. Privacy (this repo is PUBLIC): `git diff --cached --stat` adds nothing under `testdata/` or `docs/private/`, and no staged text contains camera serial numbers, volume UUIDs, GPS coordinates, real trip/location names, or real photos. `git check-ignore -v testdata docs/private` reports both ignored.
 6. `uv run pytest -q` passes (the count is above zero), and `git status --short` is empty after the commit or every remaining change is named under "In progress".
+7. The commit message matches `docs/steering/task-execution.md` §4.3 (D-019): subject `type(<task-id>): summary  [<task-id>]`; a 1–4 line body that points to the spec path and decision IDs, names anything still open, and has no file lists, no copied `Result` line and no attribution trailer.
 
 Report one line per item (ok / fixed / not applicable). Then stop. Don't start new work.
