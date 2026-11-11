@@ -5,7 +5,9 @@ description = "Verified photo ingest and multi-drive vault catalog: the engine b
 requires-python = ">=3.12"
 # Approved runtime dependencies are listed in docs/steering/vault-rules.md. Add one only in the task
 # that approves it (fnd-5 adds PyExifTool, seq-3 adds Pillow).
-dependencies = []
+dependencies = [
+    "pyexiftool>=0.5.6",
+]
 
 [dependency-groups]
 dev = ["pytest>=8"]

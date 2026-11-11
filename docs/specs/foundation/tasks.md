@@ -135,7 +135,7 @@ Rules:
   - Verify: `uv run pytest tests/test_volumes.py -q`
   - _Design:_ system-design §3 (volumes), §7; vault-rules 1
 
-- [ ] 5. Metadata reader (port from the archive)
+- [x] 5. Metadata reader (port from the archive)
   - ID: fnd-5
   - Approves the dependency: run `uv add PyExifTool`.
   - Create `photovault/metadata.py` by porting from `git show archive/v0-cli-2026-11-11:photo_ingest/analyzer.py`:
@@ -171,6 +171,10 @@ Rules:
       CameraSerialNumber, ShutterCount and DateTimeOriginal (skips if absent).
   - Verify: `uv run pytest tests/test_metadata.py -q`
   - _Design:_ system-design §3 (metadata); `docs/legacy/handoff-v0.md` "Metadata reading"
+  - Result (2026-11-11): `uv run pytest tests/test_metadata.py -q` → 12 passed, 1 skipped (realfiles: no corpus
+    yet, skips as designed); `uv run pytest -q` → 89 passed, 1 skipped. `uv add PyExifTool` → pyexiftool 0.5.6.
+    Left out of scope: the Pillow fallback, the SQLite cache, the analytics code. The old `DateTime` key is
+    replaced by `DateTimeOriginal` + `CaptureTimeSource` (D-016).
 
 - [ ] 6. Protocol emitter and CLI skeleton
   - ID: fnd-6
