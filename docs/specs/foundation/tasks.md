@@ -113,7 +113,7 @@ Rules:
     (BEGIN IMMEDIATE, COMMIT or ROLLBACK) and use it where this spec says `with conn:` (D-025).
   - _Design:_ system-design §3, §5
 
-- [ ] 4. Volumes: probe, card detection, markers, registration
+- [x] 4. Volumes: probe, card detection, markers, registration
   - ID: fnd-4
   - Blocks on: fnd-3
   - Create `photovault/volumes.py` with everything in system-design §3 (volumes), plus the exceptions
@@ -140,6 +140,8 @@ Rules:
     - cases: card detection, marker round trip, refusal on a card, matching by UUID, a rename keeps the id,
       `UnknownVolume`.
   - Verify: `uv run pytest tests/test_volumes.py -q`
+  - Result (2026-11-11): `uv run pytest tests/test_volumes.py -q` → 15 passed; `uv run pytest -q` → 195 passed.
+    Choices the spec left open are in D-026. Left out of scope: `volumes assign` and the CLI (fnd-6).
   - _Design:_ system-design §3 (volumes), §7; vault-rules 1
 
 - [x] 5. Metadata reader (port from the archive)
