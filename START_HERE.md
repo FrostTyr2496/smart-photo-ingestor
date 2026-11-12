@@ -27,7 +27,7 @@ Reference docs:
 ## Now (2026-11-11)
 - **Card milestone built:** the CLI imports a card onto WORKING with verified copies and answers
   `card-status`. Commands: `drives`, `volumes assign`, `ingest [--dry-run]`, `resume`, `card-status`, `jobs`.
-  User guide: `docs/user/CARD_WORKFLOW.md`. `uv run pytest -q` → 286 passed, 2 skipped (`live`).
+  User guides: `docs/user/CARD_WORKFLOW.md` (cards) and `docs/user/INDEX_WORKFLOW.md` (old drives). `uv run pytest -q` → 286 passed, 2 skipped (`live`).
 - Index modules done: idx-1 index, idx-2 baseline hash, idx-3 Lightroom reader (`lrcat mark`, schema unverified until idx-5),
   idx-4 duplicate and coverage report (`report duplicates`, writes Markdown to `<home>/reports/`).
 - Fault suite done (ing-10): resume retries failed items, re-queues files gone from the target, sweeps partials (D-034).
@@ -38,8 +38,8 @@ Reference docs:
 - Hooks: `guard_volumes.py` blocks agent writes and engine runs on `/Volumes`; `preflight.sh` prints the
   pre-flight. Live tests read mounts only under `-m live` (vault-rules 2, D-028, D-031).
 - The repo is public. Real-drive facts and photos stay in `docs/private/` and `testdata/` (gitignored).
-- Drives: cards exFAT; X9 Pro (1 TB exFAT) is WORKING; Flats 1 (1 TB APFS, 98 % full) is LEGACY; the 4 TB is not
-  available yet; the 12 TB is offline.
+- Drives: cards exFAT; X9 Pro (1 TB exFAT) is WORKING; Flats 1 (1 TB APFS, 98 % full) is LEGACY (indexing and hashing now, user-run); the 4 TB
+  (PP 1, 4.0 TB APFS, LEGACY) is plugged in and not yet registered; the 12 TB is offline.
 - Policy: one verified copy on WORKING = safe to format (D-003).
 
 ## In progress
@@ -58,7 +58,8 @@ task's commit:
 1. **[user] ing-11:** the first real import (commands in `docs/user/CARD_WORKFLOW.md`), then paste back the
    timings, `sync_method` and counts.
 2. **[user] idx-5** (idx-1 to idx-4 done): the Flats 1 index, hash, `lrcat mark` and `report duplicates` run
-   (pulled forward per `docs/UTILITY_ASSESSMENT.md`). Paste back the report summary; the agent compares it with the ~113 GB survey estimate.
+   (pulled forward per `docs/UTILITY_ASSESSMENT.md`; guide: `docs/user/INDEX_WORKFLOW.md`). Running now. Paste back the
+   report summary; the agent compares it with the ~113 GB survey estimate. idx-6 (PP 1) follows, and may run in parallel.
 3. **eval-1 [stronger]:** sequencing approaches; seq-2 (classification) as fixture-only work.
 4. Backlog items from this milestone: rental bodies and variants, shoot names from geo or a local LLM, video
    body inference (`docs/specs/backlog.md`).
@@ -71,14 +72,15 @@ task's commit:
   HEIC+AAE (`docs/private/CORPUS.md`). Copy them when you can.
 - **X9 sample:** should `testdata/x9_sample/` move into `testdata/corpus/x9/` (D-017)?
 - The exFAT answer looked cut off ("honestly considering…"). Tell us if you are weighing APFS after all.
-- Phase 3: close Lightroom before indexing Flats 1, and plug in the 4 TB (D-006).
+- Phase 3: keep Lightroom closed while Flats 1 is hashed. Then register, index and hash PP 1 (idx-6; commands in
+  `docs/user/INDEX_WORKFLOW.md`), and paste back the `report duplicates` summary.
 
 ## Recent decisions
+- D-041 (user): the 4 TB is PP 1 (LEGACY); Flats 1 runs as is, no cleanup first; the two may run in parallel.
 - D-040 (agent): duplicate report (idx-4): verified non-CARD copies only; unhashed files listed; output never under `/Volumes`.
 - D-039 (user): `--force-exit` (idx-8): gracefully quit Lightroom on command; no kill, no lock deletion.
 - D-038 (agent): lrcat reader (idx-3): refuses on a lock file or running Lightroom; marking is additive.
 - D-037 (agent): baseline hash details (idx-2): MB = 10^6, re-run resumes, changed files skipped.
-- D-036 (agent): ingest skips a dup only when its copies meet the policy (a LEGACY copy alone does not).
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

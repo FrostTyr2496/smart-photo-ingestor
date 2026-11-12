@@ -1,6 +1,6 @@
 # Spec: index (Phase 3) — legacy drives, Lightroom coexistence, dedupe report
 
-Goal: teach the catalog what is already on Flats 1 and the 4 TB (D-006: the 4 TB arrives this phase) without
+Goal: teach the catalog what is already on Flats 1 and the 4 TB, now called PP 1 (D-006, D-041), without
 writing a byte to them, find the duplicates, and plan consolidation without breaking Lightroom.
 
 Rules:
@@ -94,6 +94,8 @@ Rules:
 - [ ] 5. **[user]** Index and hash Flats 1
   - ID: idx-5
   - Blocks on: idx-4
+  - Guide for the user: `docs/user/INDEX_WORKFLOW.md` (added with this task). Flats 1 runs as it is, with no
+    cleanup or dedupe first (D-041).
   - The user:
     1. Closes Lightroom.
     2. Runs `photovault volumes assign "/Volumes/Flats 1" --role LEGACY --label FLATS1`.
@@ -105,11 +107,14 @@ Rules:
     `docs/private/`.
   - Verify: the report file exists and `photovault jobs` shows the jobs `done`.
 
-- [ ] 6. **[user]** Plug in, re-survey and index the 4 TB SSD
+- [ ] 6. **[user]** Re-survey and index the 4 TB SSD ("PP 1")
   - ID: idx-6
   - Blocks on: idx-5
+  - The 4 TB is plugged in and is called PP 1 (D-041). It was mounted as `Backup` on 2026-11-11 until the user
+    renames it.
   - The agent re-runs the read-only survey (as in the 2026-11-11 audit) into `docs/private/STORAGE_LAYOUT.md`.
-  - The user then runs the idx-5 commands for the 4 TB with `--label 4TB_SSD`.
+  - The user then runs the idx-5 commands for it with `--label "PP 1"`. The user may run its `index` and `hash`
+    in a second terminal while idx-5 runs (the catalog is safe for that; see the guide).
   - Verify: as idx-5.
 
 - [ ] 7. **[stronger]** Consolidation plan (design only, user approval required)

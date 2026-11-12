@@ -16,7 +16,7 @@ as task-execution §6 describes.
   - `CARD`: camera media. Read-only, ephemeral.
   - `WORKING`: the 1 TB exFAT SSD.
   - `MASTER`: the 12 TB exFAT drive.
-  - `LEGACY`: Flats 1, the 4 TB. Indexed in place, read-only.
+  - `LEGACY`: an existing drive (Flats 1, PP 1) indexed in place, read-only, no marker.
 
 ## 2. Module map
 

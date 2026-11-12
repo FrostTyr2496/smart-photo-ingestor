@@ -24,5 +24,8 @@ These items are not tasks yet. Promote one into a spec with full task text befor
 - **Shoot names from geo or a local LLM.** `--name` is typed by hand today. Derive a suggested name from GPS
   (offline geocoding, above) or a local model (for example via Ollama) on a representative frame, shown in the
   dry-run plan for the user to accept. Never sent to a public service.
+- **Index or hash one folder of a drive (`--path-prefix`).** `index` and `hash` always take a whole registered
+  drive, so a time trial on a small subset is not possible; the user reads the rate and the total from the first
+  lines of `hash` instead (D-041). Proposal only: it changes the CLI, so it needs the user's approval first.
 - **Infer the body of model-less videos** more precisely (QuickTime Make/Model tags) instead of the folder vote
   used today (D-032).

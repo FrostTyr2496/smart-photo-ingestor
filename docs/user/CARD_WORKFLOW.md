@@ -46,3 +46,7 @@ a rented one, gets its model name without spaces (`NIKONZ9`) and a warning in th
 
 The catalog lives at `~/Library/Application Support/PhotoVault/catalog.sqlite`. Set `PHOTOVAULT_HOME` to keep a
 separate one, for example for a trial run.
+
+## Old drives and duplicates
+
+To index an existing drive and find duplicates (`index`, `hash`, `report duplicates`), see `INDEX_WORKFLOW.md`.

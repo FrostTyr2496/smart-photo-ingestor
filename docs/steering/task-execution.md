@@ -23,6 +23,9 @@ the hard rules are in `vault-rules.md` and the system map is in `system-design.m
 5. Before your first edit, write the "In progress" block in `START_HERE.md` (format given there).
 
 ## 2. While implementing
+- Shell tricks to avoid: `guard_volumes.py` blocks any Bash call that mixes `/Volumes` with a command
+  substitution, a heredoc, or a non-read verb such as `uv` or `-name`, even when nothing is written. Write files
+  with the Write or Edit tools, and split reads of `/Volumes` into their own plain calls.
 - Create or edit only the files the task names. If another file is needed, add it to the task text and say
   why in the Result line.
 - Make the smallest change that meets the acceptance criteria. Use the signatures in `system-design.md` §3
