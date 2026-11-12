@@ -4,7 +4,17 @@ Written for future agents and for the user, to help map out tasks. It is a snaps
 section against `docs/phase-roadmap.md` before relying on it. Exact numbers from the user's drives are in
 `docs/private/LIVE_SURVEY.md` (local only); this file keeps rounded figures and no identifiers (vault-rules 10).
 
-## Verdict
+## Update (later on 2026-11-11): the card milestone is built
+
+The CLI now does basic card management: `drives`, `volumes assign`, `ingest --dry-run`, a verified `ingest`
+with resume, `card-status` and `jobs` (fnd-6, ing-2 to ing-9; user guide `docs/user/CARD_WORKFLOW.md`). A live
+dry run planned both real cards (about 5,800 and 2,400 files) without errors. **The verdict below is out of
+date:** the app is now useful for importing a card and deciding whether it is safe to format, once the user
+runs the first real import (ing-11). Still missing for hands-off tiered backup: indexing the legacy drive
+(idx-1 to idx-5), the 12 TB master (rep-*), automatic triggering on mount (app), and the remaining ing-10
+fault scenarios.
+
+## Verdict (as first written)
 
 **Not yet, for the user's real workflow.** Everything built so far is a set of verified parts. None of them can
 be run by the user to import a card, verify a copy or answer "is this card safe to format?". The parts do work

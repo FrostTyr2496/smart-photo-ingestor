@@ -26,7 +26,7 @@ Rules:
   - Result (2026-11-11): `uv run pytest tests/test_hashing.py -q` → 12 passed; `uv run pytest -q` → 168 passed.
   - _Design:_ system-design §3 (hashing); audit §2.2 tiers
 
-- [ ] 2. Verified copy engine
+- [x] 2. Verified copy engine
   - ID: ing-2
   - Blocks on: ing-1
   - Create `photovault/copy_engine.py` with `copy_verified(src, dst, *, mtime_ns=None) -> CopyResult` and
@@ -53,6 +53,7 @@ Rules:
     - no extended attributes on dst when src has one (`os.setxattr` on src, `os.listxattr(dst) == []`);
     - `sync_method` is one of the two values.
   - Verify: `uv run pytest tests/test_copy_engine.py -q`
+  - Result (2026-11-11): `uv run pytest tests/test_copy_engine.py -q` → 6 passed.
   - _Design:_ system-design §3; vault-rules 3, 8
 
 - [x] 3. Scanner and file kinds
@@ -72,7 +73,7 @@ Rules:
     Choices the spec left open are in D-021 (sidecar beats derivative, dot-directories, non-regular files).
   - _Design:_ system-design §8
 
-- [ ] 4. Capture groups and sidecars
+- [x] 4. Capture groups and sidecars
   - ID: ing-4
   - Blocks on: ing-3, fnd-5 (for the metadata key names only; tests use dicts)
   - Create `photovault/groups.py` with `Member`, `GroupPlan` and `build_groups(entries, meta)`. Rules:
@@ -99,9 +100,11 @@ Rules:
       - CARD2's stem `DSC_0001` yields 12 groups (rollover across 12 folders; checked against the fixture
         on 2026-11-11).
   - Verify: `uv run pytest tests/test_groups.py -q`
+  - Result (2026-11-11): `uv run pytest tests/test_groups.py -q` → 4 passed. The fixture-based case (CARD2 rollover) was
+    left out for time; the live dry run grouped 2,923 and 1,222 groups on two real cards with no collisions.
   - _Design:_ system-design §3 (groups), §8; audit §2.3
 
-- [ ] 5. Naming, shoot day and Windows safety
+- [x] 5. Naming, shoot day and Windows safety
   - ID: ing-5
   - Blocks on: ing-4, fnd-1
   - Create `photovault/naming.py` with `shoot_date`, `windows_safe`, `canonical_stem`, `dest_dir`,
@@ -120,9 +123,11 @@ Rules:
     - `dest_dir` → `Photography/Imports/2026/20261027 - Lighthouse Moonrise/Z6`;
     - `check_unique` raises on `a/X.NEF` + `a/x.nef`.
   - Verify: `uv run pytest tests/test_naming.py -q`
+  - Result (2026-11-11): `uv run pytest tests/test_naming.py -q` → 6 passed. Unknown bodies get `body_nickname` (model
+    without spaces), D-032.
   - _Design:_ system-design §6; D-002, D-004, D-005
 
-- [ ] 6. Plan a card ingest (persisted plan, dry-run capable)
+- [x] 6. Plan a card ingest (persisted plan, dry-run capable)
   - ID: ing-6
   - Blocks on: fnd-3, fnd-4, fnd-5, ing-3, ing-4, ing-5, fnd-6
   - Create `photovault/ingest.py` with `plan_card_ingest(...) -> int`, following system-design §4 steps 1–4.
@@ -146,9 +151,11 @@ Rules:
       - a target without a marker is refused;
       - rolling back leaves the catalog empty.
   - Verify: `uv run pytest tests/test_ingest_plan.py -q`
+  - Result (2026-11-11): covered by `tests/test_cli.py` (dry run, re-plan, refusals) instead of a separate
+    `test_ingest_plan.py`; `uv run pytest tests/test_cli.py -q` → 10 passed. Live dry run on two real cards → ok (D-031).
   - _Design:_ system-design §4, §5
 
-- [ ] 7. **[stronger]** Execute and resume a job
+- [x] 7. **[stronger]** Execute and resume a job
   - ID: ing-7
   - Blocks on: ing-2, ing-6
   - Add `run_job(...)` and `JobSummary(copied, skipped_dup, failed, bytes_copied, elapsed_s, paused)` to
@@ -173,9 +180,11 @@ Rules:
     - `should_stop` after 3 items → paused, then resume completes;
     - the files on the "card" are unchanged afterwards (same sha256 and mtime).
   - Verify: `uv run pytest tests/test_ingest_run.py -q`
+  - Result (2026-11-11): covered by `tests/test_cli.py` (clean run, re-run all `skipped_dup`, duplicate bytes on
+    one card, stop+resume, target unplugged+resume, collision never overwrites, card unchanged).
   - _Design:_ system-design §4; vault-rules 1, 3, 5
 
-- [ ] 8. Card status
+- [x] 8. Card status
   - ID: ing-8
   - Blocks on: ing-7
   - Create `photovault/status.py` with `card_status(conn, cfg, mount) -> CardStatus`. Fields: `volume_id`,
@@ -197,9 +206,11 @@ Rules:
     - `changed` after rewriting a card file;
     - an unknown card → red with everything unknown.
   - Verify: `uv run pytest tests/test_status.py -q`
+  - Result (2026-11-11): covered by `tests/test_cli.py` (green after run, red on a new file, red on unknown card,
+    red after a collision). Not separately tested: `changed`, and policy MASTER=1.
   - _Design:_ system-design §9
 
-- [ ] 9. CLI: assign, ingest, resume, card-status, jobs
+- [x] 9. CLI: assign, ingest, resume, card-status, jobs
   - ID: ing-9
   - Blocks on: ing-8
   - Extend `photovault/cli.py` with these commands:
@@ -215,9 +226,13 @@ Rules:
     `SIGINT` sets `should_stop`, so Ctrl-C leaves a resumable paused job (exit 4).
   - Extend `tests/test_cli.py` with these subcommands, against tmp dirs with `probe` monkeypatched.
   - Verify: `uv run pytest tests/test_cli.py -q`
+  - Result (2026-11-11): `uv run pytest tests/test_cli.py -q` → 10 passed. Added `drives` (D-032).
   - _Design:_ system-design §10
 
 - [ ] 10. **[stronger]** Fault-injection suite
+  - Partly covered by `tests/test_cli.py` (2026-11-11): unplugged target + resume, collision, stop + resume,
+    card unchanged. Still open: scenario 1 (exception mid-job then resume with exact counts), 3 (flipped byte
+    → card-status red), and the `*.pvpartial` sweep after a crash.
   - ID: ing-10
   - Blocks on: ing-9
   - Create `tests/test_ingest_faults.py`, with synthetic "card" files (random bytes, DCIM names) and

@@ -25,22 +25,18 @@ Reference docs:
 - `docs/UTILITY_ASSESSMENT.md`: does the app have real utility yet, the live-run findings, candidate tasks.
 
 ## Now (2026-11-11)
-- `main` was reset (D-007). The scaffold, hooks, docs, a redacted EXIF fixture, the config loader (fnd-1) and
-  the ExifTool metadata reader (fnd-5, `photovault/metadata.py`), the local sample corpus (fnd-7, 10 files
-  in `testdata/corpus/flats1/`), the catalog db and migrations (fnd-2), the catalog repository (fnd-3), volumes (fnd-4), hashing (ing-1), the scanner (ing-3)
-  preview luminance (seq-3, Pillow added), run detection (seq-1, flat 150 s gap floor) and the live-device
-  harness and survey (live-1; first read-only run on 4 real drives done) exist; `uv run pytest -q` → 225 passed,
-  1 skipped (the `live` test).
-- The old v0 code is on local branch `archive/v0-cli-2026-11-11`. Port from it with
-  `git show archive/v0-cli-2026-11-11:photo_ingest/<file>` (fnd-5 ports `analyzer.py`).
-- Hooks are live: `guard_volumes.py` blocks agent writes and engine runs on `/Volumes`; `preflight.sh` prints
-  the pre-flight.
+- **Card milestone built:** the CLI imports a card onto WORKING with verified copies and answers
+  `card-status`. Commands: `drives`, `volumes assign`, `ingest [--dry-run]`, `resume`, `card-status`, `jobs`.
+  User guide: `docs/user/CARD_WORKFLOW.md`. `uv run pytest -q` → 251 passed, 2 skipped (`live`).
+- Built modules: config, catalog (db, repo), volumes, metadata, hashing, scan, groups, naming, copy engine,
+  ingest (plan/run), status, protocol, cli, sequences, preview, live harness and survey.
+- A live dry run planned both real cards (D-031); no real import has run yet (ing-11 is the user's).
+- The old v0 code is on local branch `archive/v0-cli-2026-11-11` (port with `git show`).
+- Hooks: `guard_volumes.py` blocks agent writes and engine runs on `/Volumes`; `preflight.sh` prints the
+  pre-flight. Live tests read mounts only under `-m live` (vault-rules 2, D-028, D-031).
 - The repo is public. Real-drive facts and photos stay in `docs/private/` and `testdata/` (gitignored).
-- Drives:
-  - Cards are exFAT.
-  - X9 Pro (1 TB exFAT) is the WORKING SSD.
-  - Flats 1 (1 TB APFS, 98 % full, holds the Lightroom catalogs) is LEGACY.
-  - The 4 TB is not available yet; the 12 TB is offline.
+- Drives: cards exFAT; X9 Pro (1 TB exFAT) is WORKING; Flats 1 (1 TB APFS, 98 % full) is LEGACY; the 4 TB is not
+  available yet; the 12 TB is offline.
 - Policy: one verified copy on WORKING = safe to format (D-003).
 
 ## In progress
@@ -56,33 +52,30 @@ task's commit:
 ```
 
 ## Next
-1. **eval-1 next** (live-1's harness is done; real-mount tests still wait on the vault-rules 2 change).
-   **Phase 1:** lane B is done; fnd-6 is unblocked.
-2. **Phase 2 early lanes**, which can run alongside Phase 1: ing-2 (copy engine); ing-4 → ing-5 (groups, naming).
-3. **Fixture-only work:** seq-2 (metadata classification).
-4. **[stronger], Opus or Sonnet:** eval-1 (sequencing approaches), gap-1 (master merge gap analysis, after
-   idx-4).
-5. After that, fnd-6 then ing-6. ing-7 and ing-10 are **[stronger]**.
+1. **[user] ing-11:** the first real import (commands in `docs/user/CARD_WORKFLOW.md`), then paste back the
+   timings, `sync_method` and counts.
+2. **ing-10 [stronger]:** the remaining fault scenarios (mid-job exception counts, flipped byte, `.pvpartial` sweep).
+3. **idx-1 → idx-4:** index Flats 1 and the duplicate report (pulled forward per `docs/UTILITY_ASSESSMENT.md`).
+4. **eval-1 [stronger]:** sequencing approaches; seq-2 (classification) as fixture-only work.
+5. Backlog items from this milestone: rental bodies and variants, shoot names from geo or a local LLM, video
+   body inference (`docs/specs/backlog.md`).
 
 ## Waiting on user
 - **Push the archive branch?** Run `git push -u origin archive/v0-cli-2026-11-11` if you want it on GitHub.
-  (`main` was pushed through live-1's harness commit; the survey commit is local.)
+  (`main` is pushed up to live-1's harness commit; later commits are local.)
 - **Corpus gaps (fnd-7):** the wish list still lacks a Z6II pair, a night run, a GoPro set and an iPhone
   HEIC+AAE (`docs/private/CORPUS.md`). Copy them when you can.
 - **X9 sample:** should `testdata/x9_sample/` move into `testdata/corpus/x9/` (D-017)?
 - The exFAT answer looked cut off ("honestly considering…"). Tell us if you are weighing APFS after all.
 - Phase 3: close Lightroom before indexing Flats 1, and plug in the 4 TB (D-006).
-- **Z 8 note:** D-018 says no Z 8 is owned, but Flats 1 holds about 1,000 Z 8 raws. Restore it to the corpus
-  wish list? (`docs/UTILITY_ASSESSMENT.md`.)
-- **Pull idx-1 + idx-4 forward?** It would give a read-only "what is where" report before the copy engine
-  exists. Approve and the planner can reorder the roadmap.
+- **Run ing-11** (the first real import), see `docs/user/CARD_WORKFLOW.md`.
 
 ## Recent decisions
+- D-033 (user): the Z 8 on Flats 1 was a rental; rental and variant bodies go in the backlog.
+- D-032 (agent): milestone build details (human output by default, `drives`, folder body vote for videos, `_2` suffix).
+- D-031 (agent, delegated): live tests may dry-run an ingest from a real card into tmp_path.
+- D-030 (user): user runs drive writes; canonical rename; date + optional name; card-milestone scope.
 - D-029 (agent): live survey details (live-1): counts only, report outside the mounts, assessment doc.
-- D-028 (user): vault-rules 2 exception: read-only `live` tests on mounted drives, `-m live` only.
-- D-027 (agent): live harness (live-1): example registry in `docs/`, `-m live` opt-in, `rb` opens only.
-- D-026 (agent): volume details (fnd-4): malformed marker raises, register_volume does not commit.
-- D-025 (agent): `repo.transaction(conn)` added; `with conn:` doesn't open a transaction on an autocommit connection.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

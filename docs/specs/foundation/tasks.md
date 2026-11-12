@@ -185,7 +185,7 @@ Rules:
     Left out of scope: the Pillow fallback, the SQLite cache, the analytics code. The old `DateTime` key is
     replaced by `DateTimeOriginal` + `CaptureTimeSource` (D-016).
 
-- [ ] 6. Protocol emitter and CLI skeleton
+- [x] 6. Protocol emitter and CLI skeleton
   - ID: fnd-6
   - Blocks on: fnd-1, fnd-4
   - Create `photovault/protocol.py`:
@@ -202,6 +202,8 @@ Rules:
   - Create `tests/test_cli.py`: `main([...])` with `capsys`, `PHOTOVAULT_HOME=tmp_path`, and
     `volumes.probe` monkeypatched; parse the JSON lines and assert the events and exit codes.
   - Verify: `uv run pytest tests/test_cli.py -q`
+  - Result (2026-11-11): `uv run pytest tests/test_cli.py -q` → 10 passed (also covers ing-9). Human output is
+    the default and `--json` gives protocol v1 (D-032).
   - _Design:_ system-design §3 (protocol), §10
 
 - [x] 7. **[user + agent]** Local sample corpus for real-file tests

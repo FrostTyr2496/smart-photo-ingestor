@@ -98,7 +98,7 @@ def dest_dir(cfg: Config, shoot: date, shoot_name: str, body: str) -> PurePosixP
 def check_unique(rel_paths: Iterable[str]) -> None          # raises NameCollision (case-insensitive, NFC)
 
 # ingest.py
-def plan_card_ingest(conn, cfg: Config, *, source: Path, target: Path, shoot_name: str, emit: Emitter) -> int
+def plan_card_ingest(conn, cfg: Config, *, source: Path, target: Path, shoot_name: str | None, emit: Emitter) -> int
 def run_job(conn, cfg: Config, job_id: int, *, emit: Emitter, should_stop=lambda: False) -> JobSummary
 
 # status.py

@@ -24,10 +24,10 @@ Goal: config, catalog, volume identity, the metadata reader and the CLI skeleton
 | P1.0 | fnd-0 scaffold, hooks, process (**done 2026-11-11**) | — | — | — |
 | P1.1 | fnd-1 config (**done 2026-11-11**) | — | A | — |
 | P1.2 | fnd-2 catalog db + migrations (**done 2026-11-11**) | — | B | — |
-| P1.3 | fnd-3 repository | fnd-2 | B | — |
-| P1.4 | fnd-4 volumes | fnd-3 | B | — |
+| P1.3 | fnd-3 repository (**done 2026-11-11**) | fnd-2 | B | — |
+| P1.4 | fnd-4 volumes (**done 2026-11-11**) | fnd-3 | B | — |
 | P1.5 | fnd-5 metadata reader (adds PyExifTool) (**done 2026-11-11**) | — | C | — |
-| P1.6 | fnd-6 protocol + CLI skeleton | fnd-1, fnd-4 | A | — |
+| P1.6 | fnd-6 protocol + CLI skeleton (**done 2026-11-11**) | fnd-1, fnd-4 | A | — |
 | P1.7 | fnd-7 sample corpus (**done 2026-11-11, partial copy**; gaps in `START_HERE.md`) | — (agent part after fnd-5) | D | **[user]** copy the sample files |
 
 Notes:
@@ -43,15 +43,15 @@ Policy: one verified copy on WORKING (D-003).
 | Item | Task | Blocks on | Lane | Gate |
 |---|---|---|---|---|
 | P2.1 | ing-1 hashing (**done 2026-11-11**) | — | E | — |
-| P2.2 | ing-2 copy engine | ing-1 | E | — |
+| P2.2 | ing-2 copy engine (**done 2026-11-11**) | ing-1 | E | — |
 | P2.3 | ing-3 scanner (**done 2026-11-11**) | — | F | — |
-| P2.4 | ing-4 groups | ing-3, fnd-5 | F | — |
-| P2.5 | ing-5 naming | ing-4, fnd-1 | F | — |
-| P2.6 | ing-6 plan | fnd-3, fnd-4, fnd-5, fnd-6, ing-3, ing-4, ing-5 | G | — |
-| P2.7 | ing-7 run/resume **[stronger]** | ing-2, ing-6 | G | — |
-| P2.8 | ing-8 card status | ing-7 | G | — |
-| P2.9 | ing-9 CLI wiring | ing-8 | G | — |
-| P2.10 | ing-10 fault suite **[stronger]** | ing-9 | G | — |
+| P2.4 | ing-4 groups (**done 2026-11-11**) | ing-3, fnd-5 | F | — |
+| P2.5 | ing-5 naming (**done 2026-11-11**) | ing-4, fnd-1 | F | — |
+| P2.6 | ing-6 plan (**done 2026-11-11**) | fnd-3, fnd-4, fnd-5, fnd-6, ing-3, ing-4, ing-5 | G | — |
+| P2.7 | ing-7 run/resume **[stronger]** (**done 2026-11-11**) | ing-2, ing-6 | G | — |
+| P2.8 | ing-8 card status (**done 2026-11-11**) | ing-7 | G | — |
+| P2.9 | ing-9 CLI wiring (**done 2026-11-11**) | ing-8 | G | — |
+| P2.10 | ing-10 fault suite **[stronger]** (partly covered) | ing-9 | G | — |
 | P2.11 | ing-11 acceptance | ing-10 | G | **[user]** real card → X9 Pro |
 
 Notes:

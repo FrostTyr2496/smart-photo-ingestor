@@ -278,3 +278,72 @@ def set_job_state(conn: sqlite3.Connection, job_id: int, state: str) -> None:
     )
     if cur.rowcount != 1:
         raise KeyError(f"no job {job_id}")
+
+
+# --- shoots and capture groups (ing-6) ----------------------------------------------------------------------
+
+
+def get_or_create_shoot(conn: sqlite3.Connection, *, name: str, shoot_date: str, folder_rel: str) -> int:
+    """Return the ``shoot_id`` for ``(shoot_date, name)``, creating it if new."""
+    conn.execute(
+        "INSERT OR IGNORE INTO shoots (name, shoot_date, folder_rel, created_at) VALUES (?, ?, ?, ?)",
+        (name, shoot_date, folder_rel, utcnow()),
+    )
+    row = conn.execute("SELECT shoot_id FROM shoots WHERE shoot_date = ? AND name = ?", (shoot_date, name)).fetchone()
+    return int(row["shoot_id"])
+
+
+def find_group(conn: sqlite3.Connection, body_id: int | None, shutter_count: int | None) -> Row | None:
+    """The capture group for ``(body_id, shutter_count)``; None when either is unknown or there is no row."""
+    if body_id is None or shutter_count is None:
+        return None
+    return conn.execute(
+        "SELECT * FROM capture_groups WHERE body_id = ? AND shutter_count = ?", (body_id, shutter_count)
+    ).fetchone()
+
+
+def insert_group(
+    conn: sqlite3.Connection,
+    *,
+    body_id: int | None,
+    shutter_count: int | None,
+    capture_time: str | None,
+    capture_offset: str | None,
+    time_source: str,
+    canonical_stem: str,
+    original_stem: str,
+    original_num: int | None,
+    shoot_id: int | None,
+) -> int:
+    """Insert a capture group and return its id."""
+    cur = conn.execute(
+        """
+        INSERT INTO capture_groups (body_id, shutter_count, capture_time, capture_offset, time_source,
+                                    canonical_stem, original_stem, original_num, shoot_id, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (body_id, shutter_count, capture_time, capture_offset, time_source, canonical_stem, original_stem,
+         original_num, shoot_id, utcnow()),
+    )
+    return int(cur.lastrowid)
+
+
+def get_job(conn: sqlite3.Connection, job_id: int) -> Row | None:
+    return conn.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+
+
+def list_jobs(conn: sqlite3.Connection, limit: int = 20) -> list[Row]:
+    return conn.execute(
+        """
+        SELECT j.*, COUNT(i.seq) AS items,
+               SUM(i.state = 'committed') AS committed, SUM(i.state = 'skipped_dup') AS skipped_dup,
+               SUM(i.state = 'failed') AS failed, SUM(i.state IN ('planned', 'copying')) AS pending
+        FROM jobs j LEFT JOIN job_items i ON i.job_id = j.job_id
+        GROUP BY j.job_id ORDER BY j.job_id DESC LIMIT ?
+        """,
+        (limit,),
+    ).fetchall()
+
+
+def list_volumes(conn: sqlite3.Connection) -> list[Row]:
+    return conn.execute("SELECT * FROM volumes ORDER BY role, label").fetchall()

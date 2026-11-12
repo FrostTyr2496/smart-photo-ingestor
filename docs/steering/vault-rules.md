@@ -10,9 +10,10 @@ Imported by `CLAUDE.md`. These hold for every task. Changing one is a proposal t
    command for the user. Tests use `tmp_path`, never `/Volumes`.
    **Exception (D-028, user-approved):** tests marked `@pytest.mark.live` may READ the mounts listed in the live
    registry, only when run with `-m live`, and only through `photovault/live_harness.py` (`"rb"` opens). They
-   may scan, read metadata and hash a few files for throughput. They never write, never open a Lightroom
-   catalog, never touch the catalog DB with real-drive rows, and never call ingest, `register_volume` or
-   `write_marker`. Reports go to `docs/private/`.
+   may scan, read metadata and hash a few files for throughput. They never write to a mount, never open a
+   Lightroom catalog, and never put real-drive rows in the user's catalog. A live test may run an ingest
+   `--dry-run` into a `tmp_path` target with a `tmp_path` catalog (D-031); it never runs a real ingest or writes
+   a marker on a mount. Reports go to `docs/private/`.
 3. **One writer for media bytes:** `photovault/copy_engine.py`. It writes `.<name>.pvpartial`, syncs, re-reads
    uncached, compares SHA-256, then renames. It never overwrites an existing file.
 4. **No deletes in the engine** (Phases 1–4). Clearing a card means the user formats it in camera after
