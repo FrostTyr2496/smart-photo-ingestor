@@ -30,7 +30,7 @@ the hard rules are in `vault-rules.md` and the system map is in `system-design.m
 - Write Python 3.12 with type hints on public functions. Handle errors at boundaries (disk, SQLite,
   subprocess) with a specific message. Don't swallow exceptions.
 - Tests:
-  - Make no network calls and never touch `/Volumes`.
+  - Make no network calls and never touch `/Volumes`, except read-only `@pytest.mark.live` tests (vault-rules 2).
   - Use `tmp_path` and set `PHOTOVAULT_HOME` to it.
   - Use `monkeypatch` for `diskutil` and `exiftool` unless the test is `@pytest.mark.realfiles`.
 - Follow the privacy rule (vault-rules 10) in code, tests, fixtures, docs and commit messages.

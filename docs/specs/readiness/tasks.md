@@ -46,6 +46,9 @@ Rules:
     - `@pytest.mark.live` (registered in `pyproject.toml`) and `tests/conftest.py`: live tests run only with
       `-m live`, and the `live_sources`/`live_source` fixtures skip when no registry is present or the mount
       path is absent.
+    - `photovault/live_survey.py` and `tests/test_live_survey.py` (added 2026-11-11, D-029): a read-only survey
+      (scan, metadata, runs, bursts, a three-file hash throughput probe) with a `live` test that writes
+      `docs/private/LIVE_SURVEY.md`; its unit tests use `tmp_path`.
     - `tests/test_live_harness.py`: uses only `tmp_path` and a fake registry. It checks the skip paths and that
       the harness never opens a file for writing.
   - **Blocker:** `vault-rules` 2 says tests never touch `/Volumes`, and the guard hook blocks engine runs there.
@@ -58,6 +61,10 @@ Rules:
     Built the harness and its `tmp_path` tests only. Left out of scope until the user approves the vault-rules 2
     change: any `@pytest.mark.live` test that reads a real mount, and the real `live_sources.toml`.
     Milestone pulls stay a [user] command (none written).
+  - Result, live run (2026-11-11, after the user approved the vault-rules 2 exception, D-028):
+    `uv run pytest -m live -q -s tests/test_live_survey.py` → 1 passed in 178 s on 4 mounted drives (2 cards, the
+    working SSD, Flats 1). Redacted summary in `docs/UTILITY_ASSESSMENT.md`; exact numbers in
+    `docs/private/LIVE_SURVEY.md`. Nothing was written to any drive.
   - [user] after approval: `uv run pytest -m live -q` with the drives plugged in.
   - _Design:_ vault-rules 2, 10; system-design §8 (scan)
 

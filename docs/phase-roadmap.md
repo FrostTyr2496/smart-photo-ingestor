@@ -103,7 +103,7 @@ Note: seq-1 to seq-3 are pure and fixture-driven, so they make good parallel Hai
 | Item | Task | Blocks on | Gate |
 |---|---|---|---|
 | P4.6 | eval-1 sequencing approaches **[stronger]** | seq-1 | **[user]** approve the chosen approach |
-| P4.7 | live-1 live-device harness **[stronger]** (**harness done 2026-11-11**; real-mount tests wait on approval) | ing-3, fnd-4, seq-1 | **[user]** approve the vault-rules 2 change first |
+| P4.7 | live-1 live-device harness **[stronger]** (**done 2026-11-11**; first live survey run, D-028) | ing-3, fnd-4, seq-1 | **[user]** approve the vault-rules 2 change first |
 | P6.G | gap-1 master gap analysis **[stronger]** | idx-4, live-1 | **[user]** review the verdict before any merge |
 
 ## Phase 7: backlog

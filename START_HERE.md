@@ -22,13 +22,15 @@ Reference docs:
 - `docs/ARCHITECTURE_AUDIT_AND_ROADMAP.md`: why the design is what it is.
 - `docs/private/STORAGE_LAYOUT.md`: the real drives. Local only, never committed.
 - `docs/legacy/handoff-v0.md`: v0 findings, including the ExifTool benchmarks.
+- `docs/UTILITY_ASSESSMENT.md`: does the app have real utility yet, the live-run findings, candidate tasks.
 
 ## Now (2026-11-11)
 - `main` was reset (D-007). The scaffold, hooks, docs, a redacted EXIF fixture, the config loader (fnd-1) and
   the ExifTool metadata reader (fnd-5, `photovault/metadata.py`), the local sample corpus (fnd-7, 10 files
   in `testdata/corpus/flats1/`), the catalog db and migrations (fnd-2), the catalog repository (fnd-3), volumes (fnd-4), hashing (ing-1), the scanner (ing-3)
   preview luminance (seq-3, Pillow added), run detection (seq-1, flat 150 s gap floor) and the live-device
-  harness (live-1, `tmp_path` tests only) exist; `uv run pytest -q` → 220 passed.
+  harness and survey (live-1; first read-only run on 4 real drives done) exist; `uv run pytest -q` → 225 passed,
+  1 skipped (the `live` test).
 - The old v0 code is on local branch `archive/v0-cli-2026-11-11`. Port from it with
   `git show archive/v0-cli-2026-11-11:photo_ingest/<file>` (fnd-5 ports `analyzer.py`).
 - Hooks are live: `guard_volumes.py` blocks agent writes and engine runs on `/Volumes`; `preflight.sh` prints
@@ -63,23 +65,24 @@ task's commit:
 5. After that, fnd-6 then ing-6. ing-7 and ing-10 are **[stronger]**.
 
 ## Waiting on user
-- **Push the archive branch?** Run `git push -u origin archive/v0-cli-2026-11-11` if you want it on GitHub;
-  push `main` when you're happy with the reset.
+- **Push the archive branch?** Run `git push -u origin archive/v0-cli-2026-11-11` if you want it on GitHub.
+  (`main` was pushed through live-1's harness commit; the survey commit is local.)
 - **Corpus gaps (fnd-7):** the wish list still lacks a Z6II pair, a night run, a GoPro set and an iPhone
   HEIC+AAE (`docs/private/CORPUS.md`). Copy them when you can.
 - **X9 sample:** should `testdata/x9_sample/` move into `testdata/corpus/x9/` (D-017)?
 - The exFAT answer looked cut off ("honestly considering…"). Tell us if you are weighing APFS after all.
 - Phase 3: close Lightroom before indexing Flats 1, and plug in the 4 TB (D-006).
-- **vault-rules 2 change for live tests:** relax it to "tests may read mounted drives read-only, only under
-  `@pytest.mark.live` and `-m live`". Approve or refuse. If approved, copy `docs/live_sources.example.toml`
-  to `docs/private/live_sources.toml` with your real mounts (D-027).
+- **Z 8 note:** D-018 says no Z 8 is owned, but Flats 1 holds about 1,000 Z 8 raws. Restore it to the corpus
+  wish list? (`docs/UTILITY_ASSESSMENT.md`.)
+- **Pull idx-1 + idx-4 forward?** It would give a read-only "what is where" report before the copy engine
+  exists. Approve and the planner can reorder the roadmap.
 
 ## Recent decisions
+- D-029 (agent): live survey details (live-1): counts only, report outside the mounts, assessment doc.
+- D-028 (user): vault-rules 2 exception: read-only `live` tests on mounted drives, `-m live` only.
 - D-027 (agent): live harness (live-1): example registry in `docs/`, `-m live` opt-in, `rb` opens only.
 - D-026 (agent): volume details (fnd-4): malformed marker raises, register_volume does not commit.
 - D-025 (agent): `repo.transaction(conn)` added; `with conn:` doesn't open a transaction on an autocommit connection.
-- D-024 (user): new readiness tasks eval-1, live-1 and gap-1 (all [stronger]).
-- D-023 (user): run gap rule is a flat 150 s floor for now (seq-1); eval-1 evaluates alternatives.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.
