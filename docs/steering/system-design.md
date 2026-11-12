@@ -39,6 +39,7 @@ as task-execution §6 describes.
 | `photovault/lrcat.py` | `referenced_paths`, `mark_lr_referenced` (read-only Lightroom catalog reader) | idx-3 |
 | `photovault/report.py` | `duplicates`, `coverage`, `write_markdown` (duplicate and coverage report) | idx-4 |
 | `photovault/sequences.py` | `detect_runs`, `classify_run`, `detect_bursts` | seq-1, seq-2 |
+| `photovault/sequence_eval.py` | `segment_flat`, `segment_exposure`, `segment_burst`, `segment_search`, `score` (evaluation harness, not used by the engine) | eval-1 |
 | `photovault/preview.py` | `preview_luma` | seq-3 |
 | `photovault/live_harness.py` | `load_registry`, `iter_entries`, `iter_all`, `open_rb` (read-only live sources, test-only) | live-1 |
 

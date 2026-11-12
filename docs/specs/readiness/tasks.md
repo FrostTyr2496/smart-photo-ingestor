@@ -9,7 +9,7 @@ Rules:
 - Real-drive facts go in `docs/private/` (gitignored). Real photos stay in `testdata/` (gitignored).
 - Agents only READ `/Volumes`. Real-drive runs are **[user]** steps: print the command, don't run it.
 
-- [ ] 1. **[stronger]** Evaluate sequencing approaches (bracket and burst cases)
+- [x] 1. **[stronger]** Evaluate sequencing approaches (bracket and burst cases)
   - ID: eval-1
   - Blocks on: seq-1
   - Context: the flat 150 s gap floor (D-023) is the baseline. Real shooting breaks it in two ways:
@@ -30,6 +30,15 @@ Rules:
   - Do not change the default of `detect_runs` or any §3 signature. Output is a recommendation with a
     decision proposal, for the user to approve.
   - Verify: `uv run pytest tests/test_sequence_eval.py -q`
+  - Result (2026-11-11): `uv run pytest tests/test_sequence_eval.py -q` → 31 passed, 2 skipped (`live`). Also
+    created `photovault/sequence_eval.py` (the four segmenters, a scorer and a synthetic scene builder) and added
+    two `live` tests that read the mounts read-only and cache real frames and the camera's own shooting-mode
+    flags under `docs/private/`. Summary: approach 4 (search) is exact on 9 of 9 synthetic cases (flat 1, exposure
+    7, burst 6) and, with approach 2, finds 99.9 % precision / 84 % recall of the camera-flagged bracket frames
+    on 14,864 real frames (flat 0.2 %, burst chaining 14 %). 51 % of real frames are exposure-bracketed, and
+    Nikon records that in `ShootingMode`/`ExposureBracketValue`. Recommendation and the four questions for the
+    user are in `docs/reviews/2026-11-11-eval-1-sequencing.md`; the user's approval is pending, so `detect_runs`
+    and every §3 signature are unchanged. Real numbers stay in `docs/private/SEQUENCE_EVAL_FINDINGS.md`.
   - _Design:_ audit §5.4; seq-1; D-023
 
 - [x] 2. **[stronger]** Live-device test harness (read-only, no local copies needed)

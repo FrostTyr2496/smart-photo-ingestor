@@ -27,19 +27,21 @@ Reference docs:
 ## Now (2026-11-11)
 - **Card milestone built:** the CLI imports a card onto WORKING with verified copies and answers
   `card-status`. Commands: `drives`, `volumes assign`, `ingest [--dry-run]`, `resume`, `card-status`, `jobs`.
-  User guides: `docs/user/CARD_WORKFLOW.md` (cards) and `docs/user/INDEX_WORKFLOW.md` (old drives). `uv run pytest -q` → 286 passed, 2 skipped (`live`).
-- Index modules done: idx-1 index, idx-2 baseline hash, idx-3 Lightroom reader (`lrcat mark`, schema unverified until idx-5),
-  idx-4 duplicate and coverage report (`report duplicates`, writes Markdown to `<home>/reports/`).
-- Fault suite done (ing-10): resume retries failed items, re-queues files gone from the target, sweeps partials (D-034).
+  User guides: `docs/user/CARD_WORKFLOW.md` (cards) and `docs/user/INDEX_WORKFLOW.md` (old drives). `uv run pytest -q` → 317 passed, 4 skipped (`live`).
+- Index modules done: idx-1 to idx-4. Flats 1 is indexed and hashed (27,326 files, 956 GB, 45 min); the duplicate
+  report found 113.5 GB reclaimable, matching the ~113 GB survey estimate (`docs/private/IDX5_FLATS1_RESULTS.md`).
+  `lrcat mark` is still not run on a real catalog, so the idx-3 schema stays unverified.
+- eval-1 done: search segmentation and the camera's bracket flag beat the flat floor; recommendation awaits the
+  user (`docs/reviews/2026-11-11-eval-1-sequencing.md`).
 - Built modules: config, catalog (db, repo), volumes, metadata, hashing, scan, groups, naming, copy engine,
-  ingest (plan/run), status, index, report, protocol, cli, sequences, preview, live harness and survey.
+  ingest (plan/run), status, index, report, protocol, cli, sequences, preview, live harness and survey, sequence_eval (evaluation only).
 - A live dry run planned both real cards (D-031); no real import has run yet (ing-11 is the user's).
 - The old v0 code is on local branch `archive/v0-cli-2026-11-11` (port with `git show`).
 - Hooks: `guard_volumes.py` blocks agent writes and engine runs on `/Volumes`; `preflight.sh` prints the
   pre-flight. Live tests read mounts only under `-m live` (vault-rules 2, D-028, D-031).
 - The repo is public. Real-drive facts and photos stay in `docs/private/` and `testdata/` (gitignored).
-- Drives: cards exFAT; X9 Pro (1 TB exFAT) is WORKING; Flats 1 (1 TB APFS, 98 % full) is LEGACY (indexing and hashing now, user-run); the 4 TB
-  (PP 1, 4.0 TB APFS, LEGACY) is plugged in and not yet registered; the 12 TB is offline.
+- Drives: cards exFAT; X9 Pro (1 TB exFAT) is WORKING; Flats 1 (1 TB APFS, 98 % full) is LEGACY, indexed and hashed; the 4 TB
+  (PP 1, 4.0 TB APFS, LEGACY) is registered and its index is running (user-run), not hashed yet; the 12 TB is offline.
 - Policy: one verified copy on WORKING = safe to format (D-003).
 
 ## In progress
@@ -59,10 +61,9 @@ task's commit:
    stem; fix first, and ing-13 stops a double card read. Then:
 2. **[user] ing-11:** the first real import (commands in `docs/user/CARD_WORKFLOW.md`), after ing-12, then paste back the
    timings, `sync_method` and counts.
-3. **[user] idx-5** (idx-1 to idx-4 done): the Flats 1 index, hash, `lrcat mark` and `report duplicates` run
-   (pulled forward per `docs/UTILITY_ASSESSMENT.md`; guide: `docs/user/INDEX_WORKFLOW.md`). Running now. Paste back the
-   report summary; the agent compares it with the ~113 GB survey estimate. idx-6 (PP 1) follows, and may run in parallel.
-4. **eval-1 [stronger]:** sequencing approaches; seq-2 (classification) as fixture-only work.
+3. **[user] idx-6:** let the PP 1 index finish, then `photovault hash` it and re-run `report duplicates`
+   (`docs/user/INDEX_WORKFLOW.md`). idx-5 is done except `lrcat mark` (not yet run on a real catalog).
+4. **seq-2 [stronger]** waits for the user's answers on eval-1 (`docs/reviews/2026-11-11-eval-1-sequencing.md`).
 5. Backlog items from this milestone: rental bodies and variants, shoot names from geo or a local LLM, video
    body inference (`docs/specs/backlog.md`).
 6. **idx-8 [stronger]:** `lrcat mark --force-exit`, which asks Lightroom to quit first (not on the critical path).
@@ -76,16 +77,20 @@ task's commit:
 - The exFAT answer looked cut off ("honestly considering…"). Tell us if you are weighing APFS after all.
 - **idx-10 (D-042):** approve `lrcat mark --was-mounted-as` (new CLI flag)? Until then, run `lrcat mark` for PP 1
   before renaming the drive: a rename breaks Lightroom's stored paths.
-- Phase 3: keep Lightroom closed while Flats 1 is hashed. Then register, index and hash PP 1 (idx-6; commands in
-  `docs/user/INDEX_WORKFLOW.md`), and paste back the `report duplicates` summary.
+- **eval-1 (4 questions):** read the camera's bracket flag (a metadata field change), make search segmentation the
+  production segmenter, which bracket steps count, and a boundary check from memory. See the review file.
+- **Stale job 3:** `jobs` shows an index job on PP 1 as `running` with no process (job 4 is the live one). Propose
+  idx-9 (mark ownerless `running` jobs `paused` at the next start)? Details: `docs/private/IDX5_FLATS1_RESULTS.md`.
+- **lrcat mark:** run it on a copy of one catalog (guide step 3) or say you are skipping it for now. Keep Lightroom
+  closed while you do.
 
 ## Recent decisions
+- D-043 (agent): eval-1 harness lives in `photovault/sequence_eval.py`; tempo is start-to-start; the recommendation is a proposal.
 - D-042 (agent): outside review of 4 suspected bugs: stem reuse (ing-12) and double card read (ing-13) confirmed,
   lrcat renamed-mount gap (idx-10, needs your OK), dry-run partial hashes declined (backlog).
 - D-041 (user): the 4 TB is PP 1 (LEGACY); Flats 1 runs as is, no cleanup first; the two may run in parallel.
 - D-040 (agent): duplicate report (idx-4): verified non-CARD copies only; unhashed files listed; output never under `/Volumes`.
 - D-039 (user): `--force-exit` (idx-8): gracefully quit Lightroom on command; no kill, no lock deletion.
-- D-038 (agent): lrcat reader (idx-3): refuses on a lock file or running Lightroom; marking is additive.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.
