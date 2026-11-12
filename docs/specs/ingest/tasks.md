@@ -253,7 +253,7 @@ Rules:
 
 - [ ] 11. **[user]** Acceptance on real hardware
   - ID: ing-11
-  - Blocks on: ing-10
+  - Blocks on: ing-10, ing-12 (ing-13 is a speed fix and does not gate it)
   - The user runs these, in a terminal:
     1. `uv run photovault volumes assign "/Volumes/X9 Pro" --role WORKING --label 1TB_WORK`
     2. `uv run photovault ingest --source "/Volumes/NIKON Z 6_2" --target "/Volumes/X9 Pro" --name "Test import" --dry-run`
@@ -267,3 +267,53 @@ Rules:
   - The agent then records the details in `docs/private/acceptance.md` and a redacted Result line here.
   - Verify: `uv run photovault card-status "/Volumes/NIKON Z 6_2"` exits 0
   - _Design:_ audit §6 Phase 2 gate
+
+- [ ] 12. **[stronger]** Name a card frame already known from a legacy drive by the naming spec
+  - ID: ing-12
+  - Blocks on: ing-10
+  - Why (review of 2026-11-11, confirmed in the code): `index` stores a legacy group with `canonical_stem` = its
+    original stem and `shoot_id` NULL (idx-1, D-035). `plan_card_ingest` reuses the `canonical_stem` of any
+    existing group, so a card frame that was already dumped onto an indexed legacy drive would be imported as
+    `DSC_0781.NEF`, not the D-005 stem. Two frames that share a camera number after a counter rollover would
+    also share a name, and the second would fail as a name collision. The catalog already holds such groups
+    for Flats 1 (idx-5), so this must land before ing-11. Supersedes the last sentence of D-035 (D-042).
+  - In `photovault/catalog/repo.py` add `promote_group(conn, group_id, *, canonical_stem, shoot_id) -> None`:
+    `UPDATE capture_groups SET canonical_stem = ?, shoot_id = ? WHERE group_id = ? AND shoot_id IS NULL`.
+    Additive, no schema change.
+  - In `photovault/ingest.py` `plan_card_ingest`, branch on `existing["shoot_id"] is None`, which marks a group
+    made by `index`: compute `canonical_stem(group, nick, cfg.naming.template)`, create the shoot exactly as the
+    new-group branch does (share it through a small local helper), call `promote_group`, and name the files with
+    the new stem. A group that already has a `shoot_id` is reused as today. Legacy instances keep their on-disk
+    names (`instances.rel_path`); only the `capture_groups` row changes. Leave `index.py` as it is: catalogs
+    that already hold legacy groups need no repair, because the fix runs at plan time.
+  - Do not change the schema, the naming spec or a §3 signature.
+  - Tests, in `tests/test_baseline_hash.py` (it already builds a legacy drive plus a card with the same frame):
+    - index and hash the legacy drive, ingest the card: the target name matches the D-005 shape (`M0001_…`), not
+      `DSC_0001`; the group row has `canonical_stem != original_stem` and a `shoot_id`;
+    - a second ingest copies 0 and the name is unchanged;
+    - `ingest --dry-run` leaves the group as the legacy row (`shoot_id` NULL), because the plan is rolled back;
+    - rollover: a legacy frame and a card frame with the same camera number but different shutter counts get
+      different names and both import;
+    - a group already created by an earlier ingest keeps its stem when a card frame matches it.
+  - Verify: `uv run pytest tests/test_baseline_hash.py -q`
+  - _Design:_ system-design §3 (`plan_card_ingest`), §4; D-004, D-005, D-035, D-042
+
+- [ ] 13. **[stronger]** Hash a card file once, not twice, when only a legacy copy matches
+  - ID: ing-13
+  - Blocks on: ing-12 (both edit `ingest.py`)
+  - Why (review of 2026-11-11, confirmed in the code): in `run_job` the candidate loop runs
+    `full = full or sha256_file(src)` before `_policy_met(...)`. Once a legacy drive is hashed (idx-2), every card
+    file that also sits on it matches `find_candidates`, is read in full off the card to be hashed, and then is
+    read again by `copy_verified` because the policy is not met (D-036). Correctness is unaffected; the cost is a
+    second full read of a slow card. D-036 still holds.
+  - In `photovault/ingest.py` `run_job`, test the policy first. Per candidate: skip it when
+    `_policy_met(cfg, repo.verified_counts_by_role(conn, cand["asset_id"]))` is false; only then compute
+    `full = full or sha256_file(src)` and compare it with `cand["sha256"]`. When no candidate meets the policy,
+    `full` stays `None` and `copy_verified` reads the file once (the existing `if full is not None` check already
+    handles that).
+  - Tests, in `tests/test_baseline_hash.py`, with `photovault.ingest.sha256_file` wrapped by a call counter:
+    - the only candidate is a LEGACY copy: 0 calls, the file is copied and verified;
+    - a WORKING copy exists: exactly 1 call, the item is `skipped_dup`;
+    - a policy-met candidate with the same size and partial hash but different bytes: 1 call, the file is copied.
+  - Verify: `uv run pytest tests/test_baseline_hash.py -q`
+  - _Design:_ system-design §4; D-036, D-042

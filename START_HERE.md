@@ -55,15 +55,17 @@ task's commit:
 ```
 
 ## Next
-1. **[user] ing-11:** the first real import (commands in `docs/user/CARD_WORKFLOW.md`), then paste back the
+1. **ing-12, then ing-13 [stronger]** (D-042): a card frame already indexed from Flats 1 would be named by its camera
+   stem; fix first, and ing-13 stops a double card read. Then:
+2. **[user] ing-11:** the first real import (commands in `docs/user/CARD_WORKFLOW.md`), after ing-12, then paste back the
    timings, `sync_method` and counts.
-2. **[user] idx-5** (idx-1 to idx-4 done): the Flats 1 index, hash, `lrcat mark` and `report duplicates` run
+3. **[user] idx-5** (idx-1 to idx-4 done): the Flats 1 index, hash, `lrcat mark` and `report duplicates` run
    (pulled forward per `docs/UTILITY_ASSESSMENT.md`; guide: `docs/user/INDEX_WORKFLOW.md`). Running now. Paste back the
    report summary; the agent compares it with the ~113 GB survey estimate. idx-6 (PP 1) follows, and may run in parallel.
-3. **eval-1 [stronger]:** sequencing approaches; seq-2 (classification) as fixture-only work.
-4. Backlog items from this milestone: rental bodies and variants, shoot names from geo or a local LLM, video
+4. **eval-1 [stronger]:** sequencing approaches; seq-2 (classification) as fixture-only work.
+5. Backlog items from this milestone: rental bodies and variants, shoot names from geo or a local LLM, video
    body inference (`docs/specs/backlog.md`).
-5. **idx-8 [stronger]:** `lrcat mark --force-exit`, which asks Lightroom to quit first (not on the critical path).
+6. **idx-8 [stronger]:** `lrcat mark --force-exit`, which asks Lightroom to quit first (not on the critical path).
 
 ## Waiting on user
 - **Push the archive branch?** Run `git push -u origin archive/v0-cli-2026-11-11` if you want it on GitHub.
@@ -72,15 +74,18 @@ task's commit:
   HEIC+AAE (`docs/private/CORPUS.md`). Copy them when you can.
 - **X9 sample:** should `testdata/x9_sample/` move into `testdata/corpus/x9/` (D-017)?
 - The exFAT answer looked cut off ("honestly considering…"). Tell us if you are weighing APFS after all.
+- **idx-10 (D-042):** approve `lrcat mark --was-mounted-as` (new CLI flag)? Until then, run `lrcat mark` for PP 1
+  before renaming the drive: a rename breaks Lightroom's stored paths.
 - Phase 3: keep Lightroom closed while Flats 1 is hashed. Then register, index and hash PP 1 (idx-6; commands in
   `docs/user/INDEX_WORKFLOW.md`), and paste back the `report duplicates` summary.
 
 ## Recent decisions
+- D-042 (agent): outside review of 4 suspected bugs: stem reuse (ing-12) and double card read (ing-13) confirmed,
+  lrcat renamed-mount gap (idx-10, needs your OK), dry-run partial hashes declined (backlog).
 - D-041 (user): the 4 TB is PP 1 (LEGACY); Flats 1 runs as is, no cleanup first; the two may run in parallel.
 - D-040 (agent): duplicate report (idx-4): verified non-CARD copies only; unhashed files listed; output never under `/Volumes`.
 - D-039 (user): `--force-exit` (idx-8): gracefully quit Lightroom on command; no kill, no lock deletion.
 - D-038 (agent): lrcat reader (idx-3): refuses on a lock file or running Lightroom; marking is additive.
-- D-037 (agent): baseline hash details (idx-2): MB = 10^6, re-run resumes, changed files skipped.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

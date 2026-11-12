@@ -29,3 +29,8 @@ These items are not tasks yet. Promote one into a spec with full task text befor
   lines of `hash` instead (D-041). Proposal only: it changes the CLI, so it needs the user's approval first.
 - **Infer the body of model-less videos** more precisely (QuickTime Make/Model tags) instead of the folder vote
   used today (D-032).
+- **Skip the partial hashes in `ingest --dry-run`.** Declined for now (D-042). The plan reads three 64 KiB
+  windows per card file and `--dry-run` then rolls them back, but a real run reuses them in `run_job`, and a
+  dry run that reads them also shows an unreadable file before the real import (D-031). The saving is at most
+  about 190 KiB per file. It would need a new optional argument on `plan_card_ingest`, which is a §3 signature,
+  so it needs the user's approval. Revisit if the dry-run time the user pastes back from ing-11 is slow.

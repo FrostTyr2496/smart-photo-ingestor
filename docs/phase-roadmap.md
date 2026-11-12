@@ -52,7 +52,9 @@ Policy: one verified copy on WORKING (D-003).
 | P2.8 | ing-8 card status (**done 2026-11-11**) | ing-7 | G | — |
 | P2.9 | ing-9 CLI wiring (**done 2026-11-11**) | ing-8 | G | — |
 | P2.10 | ing-10 fault suite **[stronger]** (**done 2026-11-11**) | ing-9 | G | — |
-| P2.11 | ing-11 acceptance | ing-10 | G | **[user]** real card → X9 Pro |
+| P2.11 | ing-11 acceptance | ing-10, ing-12 | G | **[user]** real card → X9 Pro, after ing-12 |
+| P2.12 | ing-12 legacy-known frames get the naming-spec stem **[stronger]** (D-042) | ing-10 | G | — |
+| P2.13 | ing-13 hash a card file once when only a legacy copy matches **[stronger]** (D-042) | ing-12 | G | — |
 
 Notes:
 - ing-1, ing-2 and ing-3 to ing-5 can run during Phase 1. They only need fnd-1 and fnd-5 where noted.
@@ -70,6 +72,7 @@ Notes:
 | P3.6 | idx-6 PP 1 (the 4 TB) survey + index | idx-5 | H | **[user]** the 4 TB is plugged in (D-041); the user may run it alongside idx-5 |
 | P3.7 | idx-7 consolidation plan **[stronger]** | idx-6 | H | **[user]** approve |
 | P3.8 | idx-8 `--force-exit` quits Lightroom on command **[stronger]** | idx-3 | I | first real use is the user's |
+| P3.9 | idx-10 `lrcat mark --was-mounted-as` for renamed drives **[stronger]** (D-042) | idx-3 | I | **[user]** approve the CLI change |
 
 ## Phase 4: sequences (spec `sequences`)
 

@@ -115,7 +115,11 @@ Rules:
   - The agent re-runs the read-only survey (as in the 2026-11-11 audit) into `docs/private/STORAGE_LAYOUT.md`.
   - The user then runs the idx-5 commands for it with `--label "PP 1"`. The user may run its `index` and `hash`
     in a second terminal while idx-5 runs (the catalog is safe for that; see the guide).
-  - Verify: as idx-5.
+  - Before you rename the drive (D-042): a Lightroom catalog stores absolute paths with the mount name it had
+    when the folders were added, so renaming the volume breaks the catalog's links to everything on it, and
+    `lrcat mark` finds no paths under the new name. Run `lrcat mark` for PP 1 while its mount name still matches
+    the catalog, and leave the rename until idx-7 decides how Lightroom is handled. The catalog label "PP 1"
+    does not depend on the mount name.
 
 - [ ] 7. **[stronger]** Consolidation plan (design only, user approval required)
   - ID: idx-7
@@ -162,3 +166,32 @@ Rules:
     terminal for Automation permission on first use. The user checks this on the first real use (idx-5 step 1
     could use the flag); report back before relying on it.
   - _Design:_ vault-rules 7; D-038
+
+- [ ] 10. **[stronger]** `lrcat mark`: handle catalogs written under an older mount name
+  - ID: idx-10
+  - Blocks on: idx-3, **user approval** (it adds a CLI flag and fields to the `lrcat mark` result and warning
+    events, and CLAUDE.md puts protocol and CLI changes behind the user)
+  - Why (review of 2026-11-11, a gap rather than a bug): `keys_on_volume` keeps only catalog paths that start
+    with the volume's current mount, which is correct (D-038). A catalog written while a drive had another name
+    (PP 1 was `Backup`, D-041; Flats 1 may have been renamed too) then marks little or nothing. The only
+    warning fires when zero paths match, so a partial miss is silent, and idx-7 would read the unmarked files as
+    not referenced by Lightroom (vault-rules 7). Rejected: matching catalog paths to a volume by relative path,
+    because Flats 1 and PP 1 share event folder names and it would flag the wrong drive.
+  - In `photovault/lrcat.py` add two pure helpers (no change to the §3 signatures of `referenced_paths` and
+    `mark_lr_referenced`):
+    - `remap_paths(paths, old_mounts, new_mount) -> set[str]` rewrites a leading `old_mount` to `new_mount` on a
+      path-segment boundary (`/Volumes/Backup` does not match `/Volumes/Backup2`), comparing with the
+      `rel_path_key` rules (case-insensitive, NFC);
+    - `off_volume_roots(mount, paths) -> Counter[str]` counts the paths that are not under `mount`, by their first
+      two path segments (for example `/Volumes/<name>`).
+  - In `photovault/cli.py` add a repeatable `--was-mounted-as <old mount path>` to `lrcat mark`. The remap runs
+    before `keys_on_volume`. The `result` event gains `off_volume` (the top five roots and counts), and a new
+    `warning` (`code="paths_elsewhere"`) names them and suggests the flag whenever any paths are off the volume.
+    The existing `no_paths_on_volume` warning stays. Marking stays additive, and nothing is written to the
+    `.lrcat`.
+  - Tests, in `tests/test_lrcat.py`, on a synthetic catalog whose root is `/Volumes/Backup/...` and a volume
+    mounted at a `tmp_path`: without the flag `on_volume` is 0 and `paths_elsewhere` names `/Volumes/Backup`;
+    with the flag the expected files are marked; the `Backup2` boundary; case and NFC variants; a catalog that
+    mixes this drive and another leaves the other drive's paths unmapped and unmarked.
+  - Verify: `uv run pytest tests/test_lrcat.py -q`
+  - _Design:_ vault-rules 7; D-038, D-041, D-042
