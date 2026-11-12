@@ -120,3 +120,36 @@ Rules:
     - which new tasks this creates.
   - Real paths stay in `docs/private/`.
   - Verify: the user approves; a decision row is recorded.
+
+- [ ] 8. **[stronger]** `--force-exit`: quit Lightroom on the user's command before reading a catalog
+  - ID: idx-8
+  - Blocks on: idx-3
+  - Why: idx-3 refuses while Lightroom is running (D-038). The user asked for a flag that closes Lightroom for
+    them instead of making them quit it by hand (D-039). This kills nothing and deletes nothing: it asks
+    Lightroom to quit, the way the user would.
+  - In `photovault/lrcat.py` add `quit_lightroom(*, run=subprocess.run, sleep=time.sleep, timeout_s: float = 60.0) -> bool`:
+    - Return `False` at once if `lightroom_running()` is false; run no command.
+    - Otherwise run `osascript -e 'tell application "Adobe Lightroom Classic" to quit'`. This is a graceful
+      quit: Lightroom saves the catalog and may show its own dialog (for example the backup prompt).
+    - Poll `lightroom_running()` every 1 s until it is false or `timeout_s` passes. Return `True` if it quit.
+    - On timeout raise `CatalogInUse("Lightroom did not quit in <n> s; it may be showing a dialog. Quit it yourself and retry")`.
+    - If `osascript` fails (macOS Automation permission denied, or the app name differs), raise `CatalogInUse`
+      with its stderr and the hint to quit Lightroom by hand.
+    - Never send a signal (no `kill`, `pkill`, `SIGTERM`, `SIGKILL`) and never delete or edit the lock file
+      (vault-rules 4, 7).
+  - In `photovault/cli.py` add `--force-exit` to `lrcat mark` (off by default). When set, call
+    `quit_lightroom()` before `referenced_paths`, and emit a `warning` event (`code="lightroom_quit"`) saying
+    Lightroom is being asked to quit. The flag is the user's command, so there is no extra prompt (the menu-bar
+    app uses `--json`). It does not bypass the lock check: a lock file still present after a clean quit is stale,
+    and `CatalogInUse` still applies (D-038).
+  - Create tests in `tests/test_lrcat.py`, all with `run` and `sleep` faked (the tests never start or quit a real
+    process): not running → no command run; running, then exits after two polls → returns `True`, and the
+    command was the `osascript` quit; never exits → `CatalogInUse` and no command other than `osascript`
+    and `pgrep` was run; `osascript` returns non-zero → `CatalogInUse` carrying stderr; CLI with
+    `--force-exit` quits then marks; CLI without the flag refuses and runs no `osascript`; a lock file left after the
+    quit still refuses.
+  - Verify: `uv run pytest tests/test_lrcat.py -q`
+  - Unverified until a real run: the Lightroom application name for `osascript`, and whether macOS asks the
+    terminal for Automation permission on first use. The user checks this on the first real use (idx-5 step 1
+    could use the flag); report back before relying on it.
+  - _Design:_ vault-rules 7; D-038

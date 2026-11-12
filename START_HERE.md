@@ -60,6 +60,7 @@ task's commit:
 3. **eval-1 [stronger]:** sequencing approaches; seq-2 (classification) as fixture-only work.
 4. Backlog items from this milestone: rental bodies and variants, shoot names from geo or a local LLM, video
    body inference (`docs/specs/backlog.md`).
+5. **idx-8 [stronger]:** `lrcat mark --force-exit`, which asks Lightroom to quit first (not on the critical path).
 
 ## Waiting on user
 - **Push the archive branch?** Run `git push -u origin archive/v0-cli-2026-11-11` if you want it on GitHub.
@@ -71,11 +72,11 @@ task's commit:
 - Phase 3: close Lightroom before indexing Flats 1, and plug in the 4 TB (D-006).
 
 ## Recent decisions
+- D-039 (user): `--force-exit` (idx-8): gracefully quit Lightroom on command; no kill, no lock deletion.
 - D-038 (agent): lrcat reader (idx-3): refuses on a lock file or running Lightroom; marking is additive.
 - D-037 (agent): baseline hash details (idx-2): MB = 10^6, re-run resumes, changed files skipped.
 - D-036 (agent): ingest skips a dup only when its copies meet the policy (a LEGACY copy alone does not).
 - D-035 (agent): index details (idx-1): re-run resumes, changed files lose their asset link, groups via job items.
-- D-034 (agent): resume hardening: retry failed items, re-queue vanished target files, sweep partials, pause on crash.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.
