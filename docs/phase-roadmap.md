@@ -51,7 +51,7 @@ Policy: one verified copy on WORKING (D-003).
 | P2.7 | ing-7 run/resume **[stronger]** (**done 2026-11-11**) | ing-2, ing-6 | G | — |
 | P2.8 | ing-8 card status (**done 2026-11-11**) | ing-7 | G | — |
 | P2.9 | ing-9 CLI wiring (**done 2026-11-11**) | ing-8 | G | — |
-| P2.10 | ing-10 fault suite **[stronger]** (partly covered) | ing-9 | G | — |
+| P2.10 | ing-10 fault suite **[stronger]** (**done 2026-11-11**) | ing-9 | G | — |
 | P2.11 | ing-11 acceptance | ing-10 | G | **[user]** real card → X9 Pro |
 
 Notes:

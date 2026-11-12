@@ -19,7 +19,7 @@ from typing import Callable
 from photovault import metadata, volumes
 from photovault.catalog import repo
 from photovault.config import Config
-from photovault.copy_engine import CopyError, _hash_uncached, copy_verified
+from photovault.copy_engine import CopyError, _hash_uncached, copy_verified, sweep_partials
 from photovault.groups import build_groups
 from photovault.hashing import partial_sha256, sha256_file
 from photovault.naming import body_nickname, canonical_stem, check_unique, dest_dir, member_filename, shoot_date
@@ -202,6 +202,39 @@ def _job_paths(job: sqlite3.Row) -> tuple[Path, Path]:
     return Path(params["source_mount"]), Path(params["target_mount"])
 
 
+def _prepare_resume(conn: sqlite3.Connection, job: sqlite3.Row, target: Path, emit: Emitter) -> None:
+    """Before (re)running a job: retry failed items, re-plan committed items whose file has vanished from the
+    target, and sweep the engine's leftover `.pvpartial` files. Cheap: one stat per finished item."""
+    job_id = job["job_id"]
+    rows = conn.execute("SELECT * FROM job_items WHERE job_id = ? ORDER BY seq", (job_id,)).fetchall()
+    retried = vanished = 0
+    with repo.transaction(conn):
+        for it in rows:
+            if it["state"] == "failed":
+                repo.set_item_state(conn, job_id, it["seq"], "planned")
+                retried += 1
+            elif it["state"] == "committed":
+                inst = repo.get_instance(conn, job["target_volume_id"], it["dst_rel"])
+                try:
+                    ok = inst is not None and os.stat(target / it["dst_rel"]).st_size == inst["size"]
+                except OSError:
+                    ok = False
+                if not ok:
+                    if inst is not None:
+                        conn.execute("UPDATE instances SET state = 'missing' WHERE instance_id = ?",
+                                     (inst["instance_id"],))
+                    repo.set_item_state(conn, job_id, it["seq"], "planned")
+                    vanished += 1
+    swept = sweep_partials([target / it["dst_rel"] for it in rows if it["dst_rel"]])
+    if retried:
+        emit.emit("warning", code="retry_failed", message=f"retrying {retried} failed item(s)")
+    if vanished:
+        emit.emit("warning", code="target_missing",
+                  message=f"{vanished} committed file(s) are gone from {target}; marked missing and re-queued")
+    if swept:
+        emit.emit("warning", code="partials_swept", message=f"removed {swept} leftover .pvpartial file(s)")
+
+
 def run_job(
     conn: sqlite3.Connection, cfg: Config, job_id: int, *, emit: Emitter, should_stop: Callable[[], bool] = lambda: False
 ) -> JobSummary:
@@ -226,6 +259,8 @@ def run_job(
     copied = skipped = failed = 0
     bytes_copied = 0
     sync_methods: Counter[str] = Counter()
+    if target_ok():
+        _prepare_resume(conn, job, target, emit)
     items = repo.pending_items(conn, job_id)
     total = len(items)
     with repo.transaction(conn):
@@ -237,83 +272,97 @@ def run_job(
         emit.emit("warning", code="paused", message=f"{reason}; resume with: photovault resume {job_id}")
         return JobSummary(copied, skipped, failed, bytes_copied, time.monotonic() - start, True)
 
-    for n, item in enumerate(items, 1):
-        if should_stop():
-            return pause("stopped by user")
-        if not target_ok():
-            return pause(f"target {target} is missing or its marker changed")
-        if not source.is_dir():
-            return pause(f"source {source} is not mounted")
-        seq, src_rel, dst_rel = item["seq"], item["src_rel"], item["dst_rel"]
-        src, dst = source / src_rel, target / dst_rel
-        with repo.transaction(conn):
-            repo.set_item_state(conn, job_id, seq, "copying")
-        src_inst = repo.get_instance(conn, job["source_volume_id"], src_rel)
-        kind = src_inst["kind"] if src_inst else "raw"
-        state, error, asset_id = "failed", None, None
-        try:
-            st = os.stat(src)
-            partial = (src_inst["partial_sha256"] if src_inst and src_inst["partial_sha256"] else partial_sha256(src))
-            full = None
-            dup = None
-            for cand in repo.find_candidates(conn, st.st_size, partial):
-                full = full or sha256_file(src)
-                if cand["sha256"] == full and repo.verified_counts_by_role(conn, cand["asset_id"]):
-                    dup = cand
-                    break
-            if dup is not None:
-                state, asset_id = "skipped_dup", int(dup["asset_id"])
-                with repo.transaction(conn):
-                    repo.upsert_instance(conn, volume_id=job["source_volume_id"], rel_path=src_rel, size=st.st_size,
-                                         mtime_ns=st.st_mtime_ns, kind=kind, state="indexed", asset_id=asset_id,
-                                         partial_sha256=partial)
-                    repo.set_item_state(conn, job_id, seq, state, asset_id=asset_id)
-                skipped += 1
-            else:
-                if dst.exists():
-                    full = full or sha256_file(src)
-                    if _hash_uncached(dst) != full:
-                        raise FileExistsError("name collision: a different file already exists at the destination")
-                    sha, size, dpartial = full, st.st_size, partial_sha256(dst)
-                else:
-                    res = copy_verified(src, dst, mtime_ns=st.st_mtime_ns)
-                    if full is not None and res.sha256 != full:
-                        raise CopyError("source changed during copy")
-                    sha, size, dpartial = res.sha256, res.size, res.partial_sha256
-                    sync_methods[res.sync_method] += 1
-                    bytes_copied += size
-                with repo.transaction(conn):
-                    asset_id = repo.insert_asset(conn, sha256=sha, size=size, partial_sha256=dpartial, kind=kind,
-                                                 group_id=item["group_id"], group_role=item["role"])
-                    dstat = os.stat(dst)
-                    repo.upsert_instance(conn, volume_id=job["target_volume_id"], rel_path=dst_rel, size=size,
-                                         mtime_ns=dstat.st_mtime_ns, kind=kind, state="verified", asset_id=asset_id,
-                                         partial_sha256=dpartial, verified_sha256=sha)
-                    repo.upsert_instance(conn, volume_id=job["source_volume_id"], rel_path=src_rel, size=st.st_size,
-                                         mtime_ns=st.st_mtime_ns, kind=kind, state="indexed", asset_id=asset_id,
-                                         partial_sha256=partial)
-                    repo.set_item_state(conn, job_id, seq, "committed", asset_id=asset_id)
-                state = "committed"
-                copied += 1
-        except (CopyError, FileExistsError, OSError) as exc:
+    current: int | None = None
+    try:
+        for n, item in enumerate(items, 1):
+            if should_stop():
+                return pause("stopped by user")
             if not target_ok():
-                with repo.transaction(conn):
-                    repo.set_item_state(conn, job_id, seq, "planned")
-                return pause(f"target {target} went away ({exc})")
+                return pause(f"target {target} is missing or its marker changed")
             if not source.is_dir():
-                with repo.transaction(conn):
-                    repo.set_item_state(conn, job_id, seq, "planned")
-                return pause(f"source {source} went away ({exc})")
-            error = str(exc)
+                return pause(f"source {source} is not mounted")
+            seq, src_rel, dst_rel = item["seq"], item["src_rel"], item["dst_rel"]
+            src, dst = source / src_rel, target / dst_rel
             with repo.transaction(conn):
-                repo.set_item_state(conn, job_id, seq, "failed", error=error)
-            failed += 1
-        emit.emit("item", job_id=job_id, seq=seq, state=state, src=src_rel, dst=dst_rel, **({"error": error} if error else {}))
-        if n % PROGRESS_EVERY == 0 or n == total:
-            elapsed = time.monotonic() - start
-            rate = bytes_copied / elapsed if elapsed > 0 else 0
-            emit.emit("progress", phase="copy", current=n, total=total,
-                      message=f"{human_bytes(bytes_copied)} copied, {human_bytes(rate)}/s, {failed} failed")
+                repo.set_item_state(conn, job_id, seq, "copying")
+            current = seq
+            src_inst = repo.get_instance(conn, job["source_volume_id"], src_rel)
+            kind = src_inst["kind"] if src_inst else "raw"
+            state, error, asset_id = "failed", None, None
+            try:
+                st = os.stat(src)
+                partial = (src_inst["partial_sha256"] if src_inst and src_inst["partial_sha256"] else partial_sha256(src))
+                full = None
+                dup = None
+                for cand in repo.find_candidates(conn, st.st_size, partial):
+                    full = full or sha256_file(src)
+                    if cand["sha256"] == full and repo.verified_counts_by_role(conn, cand["asset_id"]):
+                        dup = cand
+                        break
+                if dup is not None:
+                    state, asset_id = "skipped_dup", int(dup["asset_id"])
+                    with repo.transaction(conn):
+                        repo.upsert_instance(conn, volume_id=job["source_volume_id"], rel_path=src_rel, size=st.st_size,
+                                             mtime_ns=st.st_mtime_ns, kind=kind, state="indexed", asset_id=asset_id,
+                                             partial_sha256=partial)
+                        repo.set_item_state(conn, job_id, seq, state, asset_id=asset_id)
+                    skipped += 1
+                else:
+                    if dst.exists():
+                        full = full or sha256_file(src)
+                        if _hash_uncached(dst) != full:
+                            raise FileExistsError("name collision: a different file already exists at the destination")
+                        sha, size, dpartial = full, st.st_size, partial_sha256(dst)
+                    else:
+                        res = copy_verified(src, dst, mtime_ns=st.st_mtime_ns)
+                        if full is not None and res.sha256 != full:
+                            raise CopyError("source changed during copy")
+                        sha, size, dpartial = res.sha256, res.size, res.partial_sha256
+                        sync_methods[res.sync_method] += 1
+                        bytes_copied += size
+                    with repo.transaction(conn):
+                        asset_id = repo.insert_asset(conn, sha256=sha, size=size, partial_sha256=dpartial, kind=kind,
+                                                     group_id=item["group_id"], group_role=item["role"])
+                        dstat = os.stat(dst)
+                        repo.upsert_instance(conn, volume_id=job["target_volume_id"], rel_path=dst_rel, size=size,
+                                             mtime_ns=dstat.st_mtime_ns, kind=kind, state="verified", asset_id=asset_id,
+                                             partial_sha256=dpartial, verified_sha256=sha)
+                        repo.upsert_instance(conn, volume_id=job["source_volume_id"], rel_path=src_rel, size=st.st_size,
+                                             mtime_ns=st.st_mtime_ns, kind=kind, state="indexed", asset_id=asset_id,
+                                             partial_sha256=partial)
+                        repo.set_item_state(conn, job_id, seq, "committed", asset_id=asset_id)
+                    state = "committed"
+                    copied += 1
+            except (CopyError, FileExistsError, OSError) as exc:
+                if not target_ok():
+                    with repo.transaction(conn):
+                        repo.set_item_state(conn, job_id, seq, "planned")
+                    return pause(f"target {target} went away ({exc})")
+                if not source.is_dir():
+                    with repo.transaction(conn):
+                        repo.set_item_state(conn, job_id, seq, "planned")
+                    return pause(f"source {source} went away ({exc})")
+                error = str(exc)
+                with repo.transaction(conn):
+                    repo.set_item_state(conn, job_id, seq, "failed", error=error)
+                failed += 1
+            current = None
+            emit.emit("item", job_id=job_id, seq=seq, state=state, src=src_rel, dst=dst_rel, **({"error": error} if error else {}))
+            if n % PROGRESS_EVERY == 0 or n == total:
+                elapsed = time.monotonic() - start
+                rate = bytes_copied / elapsed if elapsed > 0 else 0
+                emit.emit("progress", phase="copy", current=n, total=total,
+                          message=f"{human_bytes(bytes_copied)} copied, {human_bytes(rate)}/s, {failed} failed")
+    except BaseException:
+        # Unexpected error or a hard interrupt: leave a resumable state, never a half-recorded item.
+        try:
+            with repo.transaction(conn):
+                if current is not None:
+                    repo.set_item_state(conn, job_id, current, "planned")
+                repo.set_job_state(conn, job_id, "paused")
+        except sqlite3.Error:
+            pass
+        raise
 
     with repo.transaction(conn):
         repo.set_job_state(conn, job_id, "failed" if failed else "done")

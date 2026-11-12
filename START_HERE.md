@@ -27,7 +27,8 @@ Reference docs:
 ## Now (2026-11-11)
 - **Card milestone built:** the CLI imports a card onto WORKING with verified copies and answers
   `card-status`. Commands: `drives`, `volumes assign`, `ingest [--dry-run]`, `resume`, `card-status`, `jobs`.
-  User guide: `docs/user/CARD_WORKFLOW.md`. `uv run pytest -q` → 251 passed, 2 skipped (`live`).
+  User guide: `docs/user/CARD_WORKFLOW.md`. `uv run pytest -q` → 258 passed, 2 skipped (`live`).
+- Fault suite done (ing-10): resume retries failed items, re-queues files gone from the target, sweeps partials (D-034).
 - Built modules: config, catalog (db, repo), volumes, metadata, hashing, scan, groups, naming, copy engine,
   ingest (plan/run), status, protocol, cli, sequences, preview, live harness and survey.
 - A live dry run planned both real cards (D-031); no real import has run yet (ing-11 is the user's).
@@ -54,10 +55,9 @@ task's commit:
 ## Next
 1. **[user] ing-11:** the first real import (commands in `docs/user/CARD_WORKFLOW.md`), then paste back the
    timings, `sync_method` and counts.
-2. **ing-10 [stronger]:** the remaining fault scenarios (mid-job exception counts, flipped byte, `.pvpartial` sweep).
-3. **idx-1 → idx-4:** index Flats 1 and the duplicate report (pulled forward per `docs/UTILITY_ASSESSMENT.md`).
-4. **eval-1 [stronger]:** sequencing approaches; seq-2 (classification) as fixture-only work.
-5. Backlog items from this milestone: rental bodies and variants, shoot names from geo or a local LLM, video
+2. **idx-1 → idx-4:** index Flats 1 and the duplicate report (pulled forward per `docs/UTILITY_ASSESSMENT.md`).
+3. **eval-1 [stronger]:** sequencing approaches; seq-2 (classification) as fixture-only work.
+4. Backlog items from this milestone: rental bodies and variants, shoot names from geo or a local LLM, video
    body inference (`docs/specs/backlog.md`).
 
 ## Waiting on user
@@ -68,14 +68,13 @@ task's commit:
 - **X9 sample:** should `testdata/x9_sample/` move into `testdata/corpus/x9/` (D-017)?
 - The exFAT answer looked cut off ("honestly considering…"). Tell us if you are weighing APFS after all.
 - Phase 3: close Lightroom before indexing Flats 1, and plug in the 4 TB (D-006).
-- **Run ing-11** (the first real import), see `docs/user/CARD_WORKFLOW.md`.
 
 ## Recent decisions
+- D-034 (agent): resume hardening: retry failed items, re-queue vanished target files, sweep partials, pause on crash.
 - D-033 (user): the Z 8 on Flats 1 was a rental; rental and variant bodies go in the backlog.
 - D-032 (agent): milestone build details (human output by default, `drives`, folder body vote for videos, `_2` suffix).
 - D-031 (agent, delegated): live tests may dry-run an ingest from a real card into tmp_path.
 - D-030 (user): user runs drive writes; canonical rename; date + optional name; card-milestone scope.
-- D-029 (agent): live survey details (live-1): counts only, report outside the mounts, assessment doc.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

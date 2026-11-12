@@ -57,13 +57,35 @@ def _hash_uncached(path: Path) -> str:
     return digest.hexdigest()
 
 
+def partial_path(dst: Path) -> Path:
+    """The temp name `copy_verified` writes before the rename."""
+    dst = Path(dst)
+    return dst.parent / f".{dst.name}.pvpartial"
+
+
+def sweep_partials(dsts: list[Path]) -> int:
+    """Remove leftover `.<name>.pvpartial` files for these destinations (after a crash); returns the count.
+
+    Only the engine's own temp names are touched; a finished file at `dst` never is (vault-rules 3, 4).
+    """
+    removed = 0
+    for dst in dsts:
+        tmp = partial_path(dst)
+        try:
+            tmp.unlink()
+            removed += 1
+        except FileNotFoundError:
+            pass
+    return removed
+
+
 def copy_verified(src: Path, dst: Path, *, mtime_ns: int | None = None) -> CopyResult:
     """Copy `src` to `dst` with a verified read-back. Raises `FileExistsError` if `dst` exists."""
     src, dst = Path(src), Path(dst)
     if dst.exists():
         raise FileExistsError(f"destination exists: {dst}")
     dst.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dst.parent / f".{dst.name}.pvpartial"
+    tmp = partial_path(dst)
     if tmp.exists():
         tmp.unlink()
 

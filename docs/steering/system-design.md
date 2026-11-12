@@ -129,6 +129,10 @@ Timestamps written by the engine are UTC ISO-8601 (`repo.utcnow()`). Capture tim
      instance, the item is `skipped_dup`.
    - Otherwise `copy_verified` into `target/dst_rel`, insert or find the asset, mark the target instance
      `verified`, link the source instance to the asset, and set the item to `committed`.
+   - Before (re)running, `_prepare_resume` re-plans `failed` items, re-plans `committed` items whose target
+     file is gone or a different size (the target instance becomes `missing`), and `sweep_partials` removes
+     the engine's own leftover `.pvpartial` names. An unexpected exception leaves the item `planned` and the
+     job `paused` (D-034).
 6. `card_status(source)` → green when every media file on the card meets `policy.required`.
 
 ## 5. Catalog schema v1 (migration 1, authoritative)

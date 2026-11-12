@@ -229,10 +229,7 @@ Rules:
   - Result (2026-11-11): `uv run pytest tests/test_cli.py -q` → 10 passed. Added `drives` (D-032).
   - _Design:_ system-design §10
 
-- [ ] 10. **[stronger]** Fault-injection suite
-  - Partly covered by `tests/test_cli.py` (2026-11-11): unplugged target + resume, collision, stop + resume,
-    card unchanged. Still open: scenario 1 (exception mid-job then resume with exact counts), 3 (flipped byte
-    → card-status red), and the `*.pvpartial` sweep after a crash.
+- [x] 10. **[stronger]** Fault-injection suite
   - ID: ing-10
   - Blocks on: ing-9
   - Create `tests/test_ingest_faults.py`, with synthetic "card" files (random bytes, DCIM names) and
@@ -247,6 +244,11 @@ Rules:
        is unchanged.
     6. The source tree's hashes and mtimes are identical before and after every scenario.
   - Verify: `uv run pytest tests/test_ingest_faults.py -q`
+  - Result (2026-11-11): `uv run pytest tests/test_ingest_faults.py -q` → 7 passed; full suite 258 passed.
+    Also edits `photovault/ingest.py` and `photovault/copy_engine.py`: the scenarios exposed four gaps
+    (unexpected exception left the job `running`; resume never retried `failed` items; files vanished from
+    the target stayed `verified`; stale partials were never swept). Fixed per D-034. Scenario 6 runs as a
+    fixture check after every test. Out of scope: periodic fixity audits of committed files (Phase 6).
   - _Design:_ audit §2.4; vault-rules 1, 3, 4
 
 - [ ] 11. **[user]** Acceptance on real hardware
