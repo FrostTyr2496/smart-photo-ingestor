@@ -107,7 +107,8 @@ def card_status(conn, cfg: Config, mount: Path) -> CardStatus  # read-only
 class Emitter:  def __init__(self, stream=sys.stdout, json_mode: bool = True); def emit(self, event: str, **fields) -> None
 ```
 
-Repository functions (`catalog/repo.py`) don't commit. Callers wrap each unit of work in `with conn:`.
+Repository functions (`catalog/repo.py`) don't commit. Callers wrap each unit of work in
+`with repo.transaction(conn):` (the connection is autocommit, so a bare `with conn:` opens no transaction; D-025).
 Timestamps written by the engine are UTC ISO-8601 (`repo.utcnow()`). Capture times are naive local time plus
 `capture_offset` when known.
 

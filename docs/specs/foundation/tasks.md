@@ -79,7 +79,7 @@ Rules:
     cannot be enabled.
   - _Design:_ system-design §3 (catalog/db), §5
 
-- [ ] 3. Catalog repository: volumes, bodies, assets, instances, jobs
+- [x] 3. Catalog repository: volumes, bodies, assets, instances, jobs
   - ID: fnd-3
   - Blocks on: fnd-2
   - Create `photovault/catalog/repo.py`. No function commits; the docstring says callers use `with conn:`.
@@ -108,6 +108,9 @@ Rules:
   - Create `tests/test_catalog_repo.py`: one test per function, plus case-insensitive instance uniqueness
     (`DCIM/A.NEF` vs `dcim/a.nef` → same row).
   - Verify: `uv run pytest tests/test_catalog_repo.py -q`
+  - Result (2026-11-11): `uv run pytest tests/test_catalog_repo.py -q` → 12 passed; `uv run pytest -q` → 180 passed.
+    `connect` is autocommit, so a bare `with conn:` does not group writes. Added `repo.transaction(conn)`
+    (BEGIN IMMEDIATE, COMMIT or ROLLBACK) and use it where this spec says `with conn:` (D-025).
   - _Design:_ system-design §3, §5
 
 - [ ] 4. Volumes: probe, card detection, markers, registration
