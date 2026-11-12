@@ -1,0 +1,15 @@
+# Placeholder registry for the live-device harness (photovault/live_harness.py).
+#
+# Copy to docs/private/live_sources.toml (gitignored) and put your real mount paths there.
+# Never commit real volume names, serials or UUIDs: this repo is public (vault-rules 10).
+#
+# role is one of CARD, WORKING, MASTER, LEGACY. Paths must be absolute. The harness only reads.
+# Set PHOTOVAULT_LIVE_SOURCES to use a registry somewhere else.
+
+[sources.example_card]
+path = "/Volumes/EXAMPLE_CARD"
+role = "CARD"
+
+[sources.example_working]
+path = "/Volumes/EXAMPLE_WORKING"
+role = "WORKING"

@@ -27,8 +27,8 @@ Reference docs:
 - `main` was reset (D-007). The scaffold, hooks, docs, a redacted EXIF fixture, the config loader (fnd-1) and
   the ExifTool metadata reader (fnd-5, `photovault/metadata.py`), the local sample corpus (fnd-7, 10 files
   in `testdata/corpus/flats1/`), the catalog db and migrations (fnd-2), the catalog repository (fnd-3), volumes (fnd-4), hashing (ing-1), the scanner (ing-3)
-  preview luminance (seq-3, Pillow added) and run detection (seq-1, flat 150 s gap floor) exist;
-  `uv run pytest -q` → 195 passed.
+  preview luminance (seq-3, Pillow added), run detection (seq-1, flat 150 s gap floor) and the live-device
+  harness (live-1, `tmp_path` tests only) exist; `uv run pytest -q` → 220 passed.
 - The old v0 code is on local branch `archive/v0-cli-2026-11-11`. Port from it with
   `git show archive/v0-cli-2026-11-11:photo_ingest/<file>` (fnd-5 ports `analyzer.py`).
 - Hooks are live: `guard_volumes.py` blocks agent writes and engine runs on `/Volumes`; `preflight.sh` prints
@@ -54,12 +54,12 @@ task's commit:
 ```
 
 ## Next
-1. **live-1 next** (the user wants live files before eval-1; real mounts still wait on the vault-rules 2
-   change). **Phase 1:** lane B is done; fnd-6 is unblocked.
+1. **eval-1 next** (live-1's harness is done; real-mount tests still wait on the vault-rules 2 change).
+   **Phase 1:** lane B is done; fnd-6 is unblocked.
 2. **Phase 2 early lanes**, which can run alongside Phase 1: ing-2 (copy engine); ing-4 → ing-5 (groups, naming).
 3. **Fixture-only work:** seq-2 (metadata classification).
-4. **[stronger], Opus or Sonnet:** eval-1 (sequencing approaches), live-1 (live-device harness, needs a
-   vault-rules change first), gap-1 (master merge gap analysis, after idx-4).
+4. **[stronger], Opus or Sonnet:** eval-1 (sequencing approaches), gap-1 (master merge gap analysis, after
+   idx-4).
 5. After that, fnd-6 then ing-6. ing-7 and ing-10 are **[stronger]**.
 
 ## Waiting on user
@@ -70,14 +70,16 @@ task's commit:
 - **X9 sample:** should `testdata/x9_sample/` move into `testdata/corpus/x9/` (D-017)?
 - The exFAT answer looked cut off ("honestly considering…"). Tell us if you are weighing APFS after all.
 - Phase 3: close Lightroom before indexing Flats 1, and plug in the 4 TB (D-006).
-- **live-1 needs a vault-rules change:** read-only live tests on `/Volumes` (vault-rules 2). Approve or refuse.
+- **vault-rules 2 change for live tests:** relax it to "tests may read mounted drives read-only, only under
+  `@pytest.mark.live` and `-m live`". Approve or refuse. If approved, copy `docs/live_sources.example.toml`
+  to `docs/private/live_sources.toml` with your real mounts (D-027).
 
 ## Recent decisions
+- D-027 (agent): live harness (live-1): example registry in `docs/`, `-m live` opt-in, `rb` opens only.
 - D-026 (agent): volume details (fnd-4): malformed marker raises, register_volume does not commit.
 - D-025 (agent): `repo.transaction(conn)` added; `with conn:` doesn't open a transaction on an autocommit connection.
 - D-024 (user): new readiness tasks eval-1, live-1 and gap-1 (all [stronger]).
 - D-023 (user): run gap rule is a flat 150 s floor for now (seq-1); eval-1 evaluates alternatives.
-- D-022 (agent): preview luminance details (flat = luma > 100 with stddev <= 25, to tune in seq-4).
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

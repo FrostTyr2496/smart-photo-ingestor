@@ -25,4 +25,5 @@ module-root = ""
 testpaths = ["tests"]
 markers = [
     "realfiles: needs local sample photos under testdata/corpus (gitignored); skipped when absent",
+    "live: reads real mounted drives, read-only; runs only with `-m live` and a registry (live-1)",
 ]

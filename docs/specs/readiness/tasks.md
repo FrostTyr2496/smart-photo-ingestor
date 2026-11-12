@@ -32,7 +32,7 @@ Rules:
   - Verify: `uv run pytest tests/test_sequence_eval.py -q`
   - _Design:_ audit §5.4; seq-1; D-023
 
-- [ ] 2. **[stronger]** Live-device test harness (read-only, no local copies needed)
+- [x] 2. **[stronger]** Live-device test harness (read-only, no local copies needed)
   - ID: live-1
   - Blocks on: ing-3, fnd-4, seq-1
   - Goal: tests can read the live files of plugged-in cards and drives in place, so the local corpus stays
@@ -40,9 +40,12 @@ Rules:
   - Create:
     - `photovault/live_harness.py`: reads the source registry and yields `scan.walk` entries for each source.
       Opens files `"rb"` only.
-    - `docs/private/live_sources.example.toml` (committed, placeholder names only) and the real
-      `docs/private/live_sources.toml` (gitignored): `name → mount path`, with a `role`.
-    - `@pytest.mark.live`: skips when no registry is present or the mount path is absent.
+    - `docs/live_sources.example.toml` (committed, placeholder names only; it cannot live in `docs/private/`,
+      which is gitignored) and the real `docs/private/live_sources.toml` (gitignored): `name → mount path`,
+      with a `role`.
+    - `@pytest.mark.live` (registered in `pyproject.toml`) and `tests/conftest.py`: live tests run only with
+      `-m live`, and the `live_sources`/`live_source` fixtures skip when no registry is present or the mount
+      path is absent.
     - `tests/test_live_harness.py`: uses only `tmp_path` and a fake registry. It checks the skip paths and that
       the harness never opens a file for writing.
   - **Blocker:** `vault-rules` 2 says tests never touch `/Volumes`, and the guard hook blocks engine runs there.
@@ -51,6 +54,10 @@ Rules:
     and its `tmp_path` tests only.
   - Milestone pulls (`testdata/milestones/`) are copies. Make them a **[user]** command, not an agent step.
   - Verify: `uv run pytest tests/test_live_harness.py -q` (tmp_path only).
+  - Result (2026-11-11): `uv run pytest tests/test_live_harness.py -q` → 25 passed; `uv run pytest -q` → 220 passed.
+    Built the harness and its `tmp_path` tests only. Left out of scope until the user approves the vault-rules 2
+    change: any `@pytest.mark.live` test that reads a real mount, and the real `live_sources.toml`.
+    Milestone pulls stay a [user] command (none written).
   - [user] after approval: `uv run pytest -m live -q` with the drives plugged in.
   - _Design:_ vault-rules 2, 10; system-design §8 (scan)
 

@@ -40,6 +40,7 @@ as task-execution §6 describes.
 | `photovault/report.py` | duplicate report | idx-4 |
 | `photovault/sequences.py` | `detect_runs`, `classify_run`, `detect_bursts` | seq-1, seq-2 |
 | `photovault/preview.py` | `preview_luma` | seq-3 |
+| `photovault/live_harness.py` | `load_registry`, `iter_entries`, `iter_all`, `open_rb` (read-only live sources, test-only) | live-1 |
 
 ## 3. Seams (exact signatures; later tasks depend on them)
 
