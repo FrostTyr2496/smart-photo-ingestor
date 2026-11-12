@@ -100,6 +100,67 @@ def test_write_markdown(cat, tmp_path: Path) -> None:
     assert ("a" * 12) in text and ("a" * 13) not in text  # a short hash, not the full one
 
 
+def unreadable_file(c, volume: str, rel: str, size: int, partial: str, *, group: tuple[int, str] | None = None) -> None:
+    """A `mismatch` instance with no asset, as `hash` leaves a file whose read failed (idx-11)."""
+    repo.upsert_instance(c, volume_id=volume, rel_path=rel, size=size, mtime_ns=1, kind="raw", state="mismatch",
+                         partial_sha256=partial)
+    if group is not None:  # `index` records group membership as index job items
+        job = repo.create_job(c, kind="index_volume", source_volume_id=volume, target_volume_id=None, params={})
+        repo.add_job_items(c, job, [{"seq": 1, "src_rel": rel, "dst_rel": None, "group_id": group[0],
+                                     "role": group[1]}])
+    c.commit()
+
+
+def frame(c, shutter: int) -> int:
+    body = repo.get_or_create_body(c, "NIKON Z 6_2", "0000001", "Z6II")
+    return repo.insert_group(c, body_id=body, shutter_count=shutter, capture_time=None, capture_offset=None,
+                             time_source="exif", canonical_stem=f"DSC_{shutter}", original_stem=f"DSC_{shutter}",
+                             original_num=shutter, shoot_id=None)
+
+
+def test_unreadable_files_and_where_a_copy_may_be(cat) -> None:
+    put(cat, "v-work", "2026/1.NEF", "a", 1000)  # same size + partial as the damaged 1.NEF
+    put(cat, "v-old", "elsewhere/2.NEF", "b", 2000)  # same volume as the damaged 2.NEF: no rescue
+    g3, g4 = frame(cat, 3), frame(cat, 4)
+    aid = repo.insert_asset(cat, sha256="c" * 64, size=3100, partial_sha256="x" * 8, kind="raw", group_id=g3,
+                            group_role="raw")
+    repo.upsert_instance(cat, volume_id="v-work", rel_path="2026/3.NEF", size=3100, mtime_ns=1, kind="raw",
+                         state="verified", asset_id=aid)
+    aid = repo.insert_asset(cat, sha256="d" * 64, size=400, partial_sha256="y" * 8, kind="jpeg", group_id=g4,
+                            group_role="jpeg")
+    repo.upsert_instance(cat, volume_id="v-work", rel_path="2026/4.JPG", size=400, mtime_ns=1, kind="jpeg",
+                         state="verified", asset_id=aid)
+    unreadable_file(cat, "v-old", "bad/1.NEF", 1000, "a" * 8)
+    unreadable_file(cat, "v-old", "bad/2.NEF", 2000, "b" * 8)
+    unreadable_file(cat, "v-old", "bad/3.NEF", 3000, "z" * 8, group=(g3, "raw"))
+    unreadable_file(cat, "v-old", "bad/4.NEF", 4000, "w" * 8, group=(g4, "raw"))  # only the JPG survives
+
+    got = {u.rel_path: u.rescue for u in report.unreadable(cat)}
+
+    assert got["bad/1.NEF"].startswith("likely copy on WORK") and "unconfirmed" in got["bad/1.NEF"]
+    assert got["bad/2.NEF"] == report.NO_COPY
+    assert got["bad/3.NEF"].startswith("same frame on WORK")
+    assert got["bad/4.NEF"] == report.NO_COPY  # a JPG of the frame is no copy of the NEF
+    assert len(got) == 4  # the coverage table's `mismatch` rows with an asset are not unreadable files
+
+
+def test_write_markdown_lists_unreadable_files(cat, tmp_path: Path) -> None:
+    put(cat, "v-work", "2026/1.NEF", "a", 1000)
+    unreadable_file(cat, "v-old", "bad/1.NEF", 1000, "a" * 8)
+    unreadable_file(cat, "v-old", "bad/9.NEF", 9000, "q" * 8)
+    out = tmp_path / "r.md"
+
+    report.write_markdown([], out, summaries=report.coverage(cat), unreadable=report.unreadable(cat))
+
+    text = out.read_text()
+    assert "## Unreadable files (I/O errors)" in text
+    assert "2 files could not be read in full; 1 have no known copy" in text
+    assert "| OLD | `bad/9.NEF` | 9.0 KB | no known copy |" in text
+    assert "| OLD | LEGACY | 2 | 0 | 2 | 0 (0 B) |" in text
+    report.write_markdown([], out, unreadable=[])
+    assert "Unreadable files" not in out.read_text()
+
+
 def test_write_markdown_empty_report(cat, tmp_path: Path) -> None:
     out = tmp_path / "r.md"
     report.write_markdown([], out)

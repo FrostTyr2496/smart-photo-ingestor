@@ -56,6 +56,70 @@ class VolumeCoverage:
     only_here_bytes: int
 
 
+NO_COPY = "no known copy"
+
+
+@dataclass(frozen=True)
+class UnreadableFile:
+    """An instance whose full read failed with an I/O error (`mismatch`, no asset; idx-11) and where else it may be.
+
+    `rescue` is a hint, not a verified copy: the damaged file has no full hash, so a match is either the same
+    size and partial hash (a candidate only, vault-rules 5) or the same camera frame and role.
+    """
+
+    volume_label: str
+    volume_role: str
+    rel_path: str
+    size: int
+    rescue: str
+
+
+def _labels(rows: list[sqlite3.Row]) -> str:
+    return ", ".join(sorted({r["label"] for r in rows}))
+
+
+def unreadable(conn: sqlite3.Connection) -> list[UnreadableFile]:
+    """Every unreadable instance, by volume and path, with the best hint of a healthy copy on another volume."""
+    from photovault.index import group_links  # the index job items hold each legacy file's group
+
+    links: dict[str, dict[str, tuple[int, str]]] = {}
+    out = []
+    for r in conn.execute(
+        """
+        SELECT i.volume_id, i.rel_path, i.rel_path_key, i.size, i.partial_sha256, v.label, v.role
+        FROM instances i JOIN volumes v ON v.volume_id = i.volume_id
+        WHERE i.state = 'mismatch' AND i.asset_id IS NULL ORDER BY v.label, i.rel_path
+        """
+    ).fetchall():
+        rescue = NO_COPY
+        same = conn.execute(
+            """
+            SELECT DISTINCT v.label FROM assets a JOIN instances i ON i.asset_id = a.asset_id
+            JOIN volumes v ON v.volume_id = i.volume_id
+            WHERE a.size = ? AND a.partial_sha256 = ? AND i.state = 'verified' AND i.volume_id != ?
+            """,
+            (r["size"], r["partial_sha256"], r["volume_id"]),
+        ).fetchall() if r["partial_sha256"] else []
+        if same:
+            rescue = f"likely copy on {_labels(same)} (same size and partial hash, unconfirmed)"
+        else:
+            if r["volume_id"] not in links:
+                links[r["volume_id"]] = group_links(conn, r["volume_id"])
+            group_id, role = links[r["volume_id"]].get(r["rel_path_key"], (None, None))
+            frame = conn.execute(
+                """
+                SELECT DISTINCT v.label FROM assets a JOIN instances i ON i.asset_id = a.asset_id
+                JOIN volumes v ON v.volume_id = i.volume_id
+                WHERE a.group_id = ? AND a.group_role = ? AND i.state = 'verified' AND i.volume_id != ?
+                """,
+                (group_id, role, r["volume_id"]),
+            ).fetchall() if group_id is not None else []
+            if frame:
+                rescue = f"same frame on {_labels(frame)} (same camera, shutter count and role; bytes may differ)"
+        out.append(UnreadableFile(r["label"], r["role"], r["rel_path"], r["size"], rescue))
+    return out
+
+
 def duplicates(conn: sqlite3.Connection, *, volume_id: str | None = None) -> list[Cluster]:
     """Clusters of identical files, largest reclaimable first.
 
@@ -150,7 +214,8 @@ def _cell(text: str) -> str:
     return text.replace("|", "\\|")
 
 
-def write_markdown(clusters: list[Cluster], out: Path, *, summaries: list[VolumeCoverage] | None = None) -> None:
+def write_markdown(clusters: list[Cluster], out: Path, *, summaries: list[VolumeCoverage] | None = None,
+                   unreadable: list[UnreadableFile] | None = None) -> None:
     """Write the report to `out` (parent directories are created). Raises ValueError for a path under /Volumes."""
     out = check_output_path(out)
     reclaimable = sum(c.reclaimable for c in clusters)
@@ -174,13 +239,29 @@ def write_markdown(clusters: list[Cluster], out: Path, *, summaries: list[Volume
         lines += [
             "## Coverage per volume",
             "",
-            "| Volume | Role | Files | Not hashed yet | Mismatch | Only on this volume |",
+            "| Volume | Role | Files | Not hashed yet | Unreadable | Only on this volume |",
             "|---|---|---:|---:|---:|---:|",
         ]
         for s in summaries:
             lines.append(f"| {_cell(s.label)} | {s.role} | {s.files} | {s.unhashed} | {s.mismatch} | "
                          f"{s.only_here_files} ({human_bytes(s.only_here_bytes)}) |")
         lines += ["", "Files that are not hashed yet cannot appear in a cluster. Run `photovault hash` to include them.", ""]
+    if unreadable:
+        no_copy = sum(1 for u in unreadable if u.rescue == NO_COPY)
+        lines += [
+            "## Unreadable files (I/O errors)",
+            "",
+            f"{len(unreadable)} files could not be read in full; {no_copy} have no known copy on another drive. "
+            "A copy listed here is a hint, not a verified match. Retry with `photovault hash <mount> "
+            "--retry-unreadable`.",
+            "",
+            "| Volume | File | Size | Copy elsewhere |",
+            "|---|---|---:|---|",
+        ]
+        for u in unreadable:
+            lines.append(f"| {_cell(u.volume_label)} | `{_cell(u.rel_path)}` | {human_bytes(u.size)} | "
+                         f"{_cell(u.rescue)} |")
+        lines.append("")
     lines += ["## Clusters", ""]
     if not clusters:
         lines.append("No duplicates found.")
@@ -199,5 +280,5 @@ def write_markdown(clusters: list[Cluster], out: Path, *, summaries: list[Volume
     out.write_text("\n".join(lines), encoding="utf-8")
 
 
-__all__ = ["Cluster", "ClusterInstance", "VolumeCoverage", "coverage", "default_report_path", "duplicates",
-           "write_markdown"]
+__all__ = ["NO_COPY", "Cluster", "ClusterInstance", "UnreadableFile", "VolumeCoverage", "coverage",
+           "default_report_path", "duplicates", "unreadable", "write_markdown"]

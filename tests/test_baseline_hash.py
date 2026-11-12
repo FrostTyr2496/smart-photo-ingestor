@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import io
+import json
 import os
 import shutil
 from pathlib import Path
+from typing import Callable
 
 import pytest
 
@@ -149,3 +152,150 @@ def test_card_frame_known_only_on_legacy_is_still_imported(env, capsys) -> None:
     c = conn()
     assert c.execute("SELECT COUNT(*) FROM instances WHERE asset_id = (SELECT asset_id FROM instances "
                      "WHERE rel_path = 'Photos/2024/A/DSC_0001.NEF')").fetchone()[0] == 3  # legacy, card, working
+
+
+# --- failing drives (idx-11) -------------------------------------------------------------------------------------
+
+REAL_SHA = index_mod.sha256_file
+
+
+def failing_reads(monkeypatch, drive: Path, is_bad: Callable[[str], bool], *, err: int = errno.EIO,
+                  before: Callable[[], None] = lambda: None) -> list[str]:
+    """Make `sha256_file` raise OSError(err) for rel paths where `is_bad` is true; returns the rel paths read."""
+    calls: list[str] = []
+
+    def fake(path: Path) -> str:
+        rel = Path(path).relative_to(drive).as_posix()
+        calls.append(rel)
+        if is_bad(rel):
+            before()
+            raise OSError(err, os.strerror(err), str(path))
+        return REAL_SHA(path)
+
+    monkeypatch.setattr(index_mod, "sha256_file", fake)
+    return calls
+
+
+def states(c) -> dict[str, str]:
+    return {r["rel_path"]: r["state"] for r in c.execute("SELECT rel_path, state FROM instances")}
+
+
+def codes(lines: list[dict]) -> list[str]:
+    return [e["code"] for e in lines if e["event"] == "warning"]
+
+
+def test_read_error_marks_unreadable_and_is_not_read_again(env, capsys, monkeypatch) -> None:
+    bad = "Photos/2024/A/DSC_0001.NEF"
+    assign_and_index(capsys, env["drive"])
+    calls = failing_reads(monkeypatch, env["drive"], lambda rel: rel == bad)
+
+    code, lines = run(capsys, "hash", str(env["drive"]))
+
+    assert code == 0, lines
+    r = result(lines)
+    assert (r["hashed"], r["unreadable"], r["skipped"], r["deferred"], r["excluded"]) == (7, 1, 0, 0, 0)
+    assert codes(lines) == ["read_error"]
+    c = conn()
+    assert states(c)[bad] == "mismatch"
+    assert c.execute("SELECT asset_id FROM instances WHERE rel_path = ?", (bad,)).fetchone()[0] is None
+    calls.clear()
+    code, lines = run(capsys, "hash", str(env["drive"]))
+    assert code == 0 and result(lines)["hashed"] == 0 and calls == []  # the damaged file is left alone
+
+
+def test_retry_unreadable_hashes_a_recovered_file(env, capsys, monkeypatch) -> None:
+    bad = "Photos/2025/B/DSC_0002.JPG"
+    assign_and_index(capsys, env["drive"])
+    failing_reads(monkeypatch, env["drive"], lambda rel: rel == bad)
+    run(capsys, "hash", str(env["drive"]))
+    calls = failing_reads(monkeypatch, env["drive"], lambda rel: False)  # the drive reads it now
+
+    code, lines = run(capsys, "hash", str(env["drive"]), "--retry-unreadable")
+
+    assert code == 0 and calls == [bad]
+    assert result(lines)["hashed"] == 1
+    assert states(conn())[bad] == "verified"
+
+
+def test_other_os_errors_are_skipped_not_marked(env, capsys, monkeypatch) -> None:
+    bad = "Photos/2024/A/DSC_0002.JPG"
+    assign_and_index(capsys, env["drive"])
+    failing_reads(monkeypatch, env["drive"], lambda rel: rel == bad, err=errno.EACCES)
+
+    code, lines = run(capsys, "hash", str(env["drive"]))
+
+    assert code == 0
+    assert (result(lines)["skipped"], result(lines)["unreadable"]) == (1, 0)
+    assert codes(lines) == ["skipped"]
+    assert states(conn())[bad] == "indexed"
+
+
+def test_folder_breaker_defers_the_rest_of_a_bad_folder(env, capsys, monkeypatch) -> None:
+    bad_dir = env["drive"] / "Photos/2024/Z"
+    bad_dir.mkdir()
+    for i in range(1, 7):
+        (bad_dir / f"DSC_{i:04d}.NEF").write_bytes(os.urandom(1000 + i))
+    assign_and_index(capsys, env["drive"])
+    calls = failing_reads(monkeypatch, env["drive"], lambda rel: rel.startswith("Photos/2024/Z/"))
+
+    code, lines = run(capsys, "hash", str(env["drive"]))
+
+    assert code == 0, lines
+    r = result(lines)
+    assert (r["hashed"], r["unreadable"], r["deferred"]) == (8, 3, 3)
+    assert sum(1 for rel in calls if rel.startswith("Photos/2024/Z/")) == index_mod.DIR_ERROR_LIMIT
+    breaker = [e for e in lines if e.get("code") == "bad_sector_dir"]
+    assert "skipping the remaining 3 files" in breaker[0]["message"] and "deferred" in breaker[-1]["message"]
+    z = {k: v for k, v in states(conn()).items() if k.startswith("Photos/2024/Z/")}
+    assert sorted(z.values()) == ["indexed"] * 3 + ["mismatch"] * 3
+
+    code, lines = run(capsys, "hash", str(env["drive"]))  # the next run tries the deferred files
+    r = result(lines)
+    assert (r["hashed"], r["unreadable"], r["deferred"]) == (0, 3, 0)
+
+
+def test_consecutive_read_errors_pause_the_job(env, capsys, monkeypatch) -> None:
+    monkeypatch.setattr(index_mod, "RUN_ERROR_LIMIT", 3)
+    assign_and_index(capsys, env["drive"])
+    failing_reads(monkeypatch, env["drive"], lambda rel: True)
+
+    code, lines = run(capsys, "hash", str(env["drive"]))
+
+    assert code == 4  # paused, resumable
+    assert codes(lines)[-1] == "too_many_read_errors"
+    assert sorted(states(conn()).values()) == ["indexed"] * 5 + ["mismatch"] * 3
+    failing_reads(monkeypatch, env["drive"], lambda rel: False)
+    code, lines = run(capsys, "hash", str(env["drive"]))
+    assert code == 0 and "resuming" in codes(lines) and result(lines)["hashed"] == 5
+
+
+def test_drive_gone_pauses_without_marking_anything(env, capsys, monkeypatch) -> None:
+    assign_and_index(capsys, env["drive"])
+    away = env["vols"] / "unplugged"
+    failing_reads(monkeypatch, env["drive"], lambda rel: rel == "Photos/2024/A/DSC_0002.NEF",
+                  before=lambda: env["drive"].rename(away))  # the EIO arrives as the drive drops off
+
+    code, lines = run(capsys, "hash", str(env["drive"]))
+
+    assert code == 4
+    assert codes(lines) == ["drive_gone"]
+    assert "mismatch" not in states(conn()).values()
+    away.rename(env["drive"])
+    failing_reads(monkeypatch, env["drive"], lambda rel: False)
+    code, lines = run(capsys, "hash", str(env["drive"]))
+    assert code == 0 and result(lines)["hashed"] == 8 - 3  # 0001.JPG, 0001.NEF, 0002.JPG came before the drop
+
+
+def test_heartbeat_names_the_file_being_read(env, capsys, monkeypatch) -> None:
+    assign_and_index(capsys, env["drive"])
+    clock = iter(range(0, 10_000, 6))  # every call is 6 s after the last, past HEARTBEAT_S
+    monkeypatch.setattr(index_mod.time, "monotonic", lambda: next(clock))
+    out = io.StringIO()
+
+    baseline_hash(conn(), load_config(), env["drive"], emit=Emitter(out))
+
+    events = [json.loads(line) for line in out.getvalue().splitlines()]
+    beats = [e for e in events if e["event"] == "progress" and "reading" in e["message"]]
+    assert len(beats) == 8
+    assert beats[0]["message"].endswith("reading Photos/2024/A/DSC_0001.JPG")
+    assert [b["current"] for b in beats] == list(range(8))

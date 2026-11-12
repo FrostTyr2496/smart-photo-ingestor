@@ -239,3 +239,40 @@ def test_usage_error_exit_code(capsys) -> None:
 def test_catalog_init(env, capsys) -> None:
     code, lines = run(capsys, "catalog", "init")
     assert code == 0 and result(lines)["version"] >= 1
+
+
+def _legacy_drive(capsys, env) -> Path:
+    drive = env["vols"] / "OLD"
+    for rel in ("Photos/2024/A/DSC_0001.NEF", "Photos/2024b/DSC_0002.NEF", "Photos/2025/DSC_0003.NEF",
+                "Photos/2025/sub/DSC_0004.NEF"):
+        (drive / rel).parent.mkdir(parents=True, exist_ok=True)
+        (drive / rel).write_bytes(os.urandom(2000))
+    assert run(capsys, "volumes", "assign", str(drive), "--role", "LEGACY")[0] == 0
+    assert run(capsys, "index", str(drive))[0] == 0
+    return drive
+
+
+def test_hash_skip_prefix(env, capsys) -> None:
+    drive = _legacy_drive(capsys, env)
+
+    # lower case still matches (rel_path_key rules); "Photos/2024" must not match "Photos/2024b"; an absolute
+    # path under the mount is accepted
+    code, lines = run(capsys, "hash", str(drive), "--skip-prefix", "photos/2024/",
+                      "--skip-prefix", str(drive / "Photos/2025"))
+
+    assert code == 0, lines
+    r = result(lines)
+    assert (r["hashed"], r["excluded"]) == (1, 3)
+    conn = db.connect(load_config().catalog_path)
+    hashed = [row[0] for row in conn.execute("SELECT rel_path FROM instances WHERE state = 'verified'")]
+    assert hashed == ["Photos/2024b/DSC_0002.NEF"]
+    assert run(capsys, "hash", str(drive))[0] == 0  # without the prefixes the skipped files are hashed later
+    assert conn.execute("SELECT COUNT(*) FROM instances WHERE state = 'verified'").fetchone()[0] == 4
+
+
+def test_hash_skip_prefix_outside_the_mount_is_a_usage_error(env, capsys) -> None:
+    drive = _legacy_drive(capsys, env)
+    for bad in ("/elsewhere/Photos", str(drive)):
+        code, lines = run(capsys, "hash", str(drive), "--skip-prefix", bad)
+        assert code == 2
+        assert [e["code"] for e in lines if e["event"] == "error"] == ["usage"]

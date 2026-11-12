@@ -7,11 +7,12 @@ partial hash and metadata. `.lrcat` files are of kind `ignored`, so a Lightroom 
 
 from __future__ import annotations
 
+import errno
 import sqlite3
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path, PurePosixPath
-from typing import Callable
+from typing import Callable, Iterable
 
 from photovault import metadata, volumes
 from photovault.catalog import repo
@@ -25,6 +26,9 @@ from photovault.scan import FileEntry, walk
 META_KINDS = {"raw", "jpeg", "heic", "video", "derivative"}
 BATCH = 500
 MTIME_TOLERANCE_NS = 2_000_000_000  # exFAT has 2 s mtime resolution (vault-rules 8)
+DIR_ERROR_LIMIT = 3  # read errors in one folder before `hash` defers the rest of it to a later run (idx-11)
+RUN_ERROR_LIMIT = 10  # consecutive read errors (no success between) before `hash` pauses: the drive is failing
+HEARTBEAT_S = 5.0  # longest silence between `hash` progress events, checked between files
 
 
 def registered_volume(conn: sqlite3.Connection, mount: Path) -> sqlite3.Row:
@@ -184,18 +188,48 @@ def group_links(conn: sqlite3.Connection, volume_id: str) -> dict[str, tuple[int
     return {repo.path_key(r["src_rel"]): (int(r["group_id"]), r["role"]) for r in rows}
 
 
+def prefix_keys(prefixes: Iterable[str]) -> list[str]:
+    """Normalise `--skip-prefix` values to `rel_path_key` form. Raises ValueError for an absolute or empty one."""
+    keys = []
+    for p in prefixes:
+        if p.startswith("/"):
+            raise ValueError(f"skip prefix must be relative to the drive: {p}")
+        key = repo.path_key(p.strip("/"))
+        if not key:
+            raise ValueError("empty skip prefix")
+        keys.append(key)
+    return keys
+
+
+def under_prefix(key: str, prefixes: list[str]) -> bool:
+    """True when `key` is a prefix itself or lies below one, on a path-segment boundary."""
+    return any(key == p or key.startswith(p + "/") for p in prefixes)
+
+
+def _folder(key: str) -> str:
+    return str(PurePosixPath(key).parent)
+
+
 def baseline_hash(
     conn: sqlite3.Connection, cfg: Config, mount: Path, *, emit: Emitter, max_mbps: float | None = None,
-    should_stop: Callable[[], bool] = lambda: False,
+    should_stop: Callable[[], bool] = lambda: False, skip_prefixes: Iterable[str] = (),
+    retry_unreadable: bool = False,
 ) -> int:
     """Full-hash every indexed, unlinked instance on a volume; returns the job id. Read-only on the volume.
 
     Each file is hashed, its asset found or created, and the instance set `verified` in its own transaction,
     so a stop or crash loses at most one file of work. A paused hash job on the volume is resumed. A file
     whose size or mtime no longer matches the index is skipped with a warning (re-run `index` first).
+
+    Failing drives (idx-11, D-044): an `EIO` marks the instance `mismatch` (unreadable), so later runs leave
+    it alone unless `retry_unreadable`. After `DIR_ERROR_LIMIT` read errors in one folder the rest of that
+    folder is deferred (left `indexed`) to a later run; after `RUN_ERROR_LIMIT` consecutive read errors, or
+    when the mount disappears, the job pauses without marking anything more. `skip_prefixes` (relative to the
+    mount) are not read at all.
     """
     mount = Path(mount)
     start = time.monotonic()
+    prefixes = prefix_keys(skip_prefixes)
     vol = registered_volume(conn, mount)
     vid = vol["volume_id"]
     with repo.transaction(conn):
@@ -208,33 +242,83 @@ def baseline_hash(
                                      params={"mount": str(mount), "max_mbps": max_mbps})
         repo.set_job_state(conn, job_id, "running")
 
+    states = "('indexed', 'mismatch')" if retry_unreadable else "('indexed')"
     todo = conn.execute(
-        "SELECT * FROM instances WHERE volume_id = ? AND asset_id IS NULL AND state = 'indexed' ORDER BY rel_path",
+        f"SELECT * FROM instances WHERE volume_id = ? AND asset_id IS NULL AND state IN {states} ORDER BY rel_path",
         (vid,),
     ).fetchall()
     links = group_links(conn, vid)
     total_bytes = sum(r["size"] for r in todo)
     emit.emit("progress", phase="hash", current=0, total=len(todo),
               message=f"{len(todo)} files, {human_bytes(total_bytes)} to hash")
-    hashed = stale = 0
+    hashed = stale = unreadable = deferred = excluded = 0
     bytes_done = 0
+    dir_errors: Counter[str] = Counter()
+    tripped: set[str] = set()
+    consecutive = 0
+    beat_t, beat_bytes = start, 0
+
+    def pause(code: str, message: str) -> int:
+        with repo.transaction(conn):
+            repo.set_job_state(conn, job_id, "paused")
+        emit.emit("warning", code=code, message=message)
+        return job_id
+
     for n, inst in enumerate(todo, 1):
         if should_stop():
-            with repo.transaction(conn):
-                repo.set_job_state(conn, job_id, "paused")
-            emit.emit("warning", code="paused", message="stopped; run the same hash command again to resume")
-            return job_id
+            return pause("paused", "stopped; run the same hash command again to resume")
+        key = inst["rel_path_key"]
+        if prefixes and under_prefix(key, prefixes):
+            excluded += 1
+            continue
+        folder = _folder(key)
+        if folder in tripped:
+            deferred += 1
+            continue
+        now = time.monotonic()
+        if n % 100 == 0 or now - beat_t >= HEARTBEAT_S:
+            rate = (bytes_done - beat_bytes) / (now - beat_t) if now > beat_t else 0
+            emit.emit("progress", phase="hash", current=n - 1, total=len(todo),
+                      message=f"{human_bytes(bytes_done)} hashed, {human_bytes(rate)}/s, reading {inst['rel_path']}")
+            beat_t, beat_bytes = now, bytes_done
         path = mount / inst["rel_path"]
         try:
             st = path.stat()
             if st.st_size != inst["size"] or abs(st.st_mtime_ns - inst["mtime_ns"]) > MTIME_TOLERANCE_NS:
                 raise ValueError("changed since it was indexed; run index again")
             sha = sha256_file(path)
-        except (OSError, ValueError) as exc:
+        except ValueError as exc:
             stale += 1
             emit.emit("warning", code="skipped", message=f"{inst['rel_path']}: {exc}")
             continue
-        group_id, role = links.get(inst["rel_path_key"], (None, None))
+        except OSError as exc:
+            if not mount.is_dir():  # unplugged or unmounted: nothing here says the file is damaged
+                return pause("drive_gone", f"{mount} is no longer mounted; reconnect it and run the same hash "
+                                           "command again to resume")
+            if exc.errno != errno.EIO:
+                stale += 1
+                emit.emit("warning", code="skipped", message=f"{inst['rel_path']}: {exc}")
+                continue
+            with repo.transaction(conn):
+                conn.execute("UPDATE instances SET state = 'mismatch', last_seen_at = ? WHERE instance_id = ?",
+                             (repo.utcnow(), inst["instance_id"]))
+            unreadable += 1
+            consecutive += 1
+            dir_errors[folder] += 1
+            emit.emit("warning", code="read_error", message=f"{inst['rel_path']}: {exc} (marked unreadable)")
+            if consecutive >= RUN_ERROR_LIMIT:
+                return pause("too_many_read_errors",
+                             f"{consecutive} read errors in a row; the drive may be failing. Check it before "
+                             "running the same hash command again")
+            if dir_errors[folder] >= DIR_ERROR_LIMIT:
+                tripped.add(folder)
+                left = sum(1 for r in todo[n:] if _folder(r["rel_path_key"]) == folder)
+                emit.emit("warning", code="bad_sector_dir",
+                          message=f"{dir_errors[folder]} read errors in {PurePosixPath(inst['rel_path']).parent}; "
+                                  f"skipping the remaining {left} files in this folder for this run")
+            continue
+        consecutive = 0
+        group_id, role = links.get(key, (None, None))
         with repo.transaction(conn):
             asset_id = repo.insert_asset(conn, sha256=sha, size=inst["size"], partial_sha256=inst["partial_sha256"],
                                          kind=inst["kind"], group_id=group_id, group_role=role)
@@ -246,14 +330,15 @@ def baseline_hash(
         delay = throttle_delay(bytes_done, time.monotonic() - start, max_mbps)
         if delay > 0:
             time.sleep(delay)
-        if n % 100 == 0:
-            elapsed = time.monotonic() - start
-            emit.emit("progress", phase="hash", current=n, total=len(todo),
-                      message=f"{human_bytes(bytes_done)} hashed, {human_bytes(bytes_done / elapsed if elapsed else 0)}/s")
 
     with repo.transaction(conn):
         repo.set_job_state(conn, job_id, "done")
     elapsed = time.monotonic() - start
-    emit.emit("result", job_id=job_id, volume=vol["label"], hashed=hashed, skipped=stale,
-              bytes=bytes_done, size=human_bytes(bytes_done), elapsed_s=round(elapsed, 1))
+    if deferred:
+        emit.emit("warning", code="bad_sector_dir",
+                  message=f"{deferred} files in {len(tripped)} damaged folder(s) were deferred and are still "
+                          "unhashed; run hash again to retry them, or pass --skip-prefix to leave them out")
+    emit.emit("result", job_id=job_id, volume=vol["label"], hashed=hashed, skipped=stale, unreadable=unreadable,
+              deferred=deferred, excluded=excluded, bytes=bytes_done, size=human_bytes(bytes_done),
+              elapsed_s=round(elapsed, 1))
     return job_id

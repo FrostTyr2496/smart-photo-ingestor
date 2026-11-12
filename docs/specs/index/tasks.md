@@ -195,3 +195,34 @@ Rules:
     mixes this drive and another leaves the other drive's paths unmapped and unmarked.
   - Verify: `uv run pytest tests/test_lrcat.py -q`
   - _Design:_ vault-rules 7; D-038, D-041, D-042
+
+- [x] 11. **[stronger]** `hash` survives a failing drive
+  - ID: idx-11
+  - Blocks on: idx-2, **user approval** (CLI flags, warning codes and result fields; given 2026-11-12, D-044)
+  - Why: the PP 1 hash (a spinning HDD) hit `EIO` on files in one folder. `baseline_hash` only warned and left the
+    row `indexed`, so every resume read the bad sectors again, and the terminal was silent between 100-file
+    progress lines.
+  - In `photovault/index.py` `baseline_hash(..., skip_prefixes=(), retry_unreadable=False)`:
+    - `errno.EIO` marks the instance `mismatch` (asset still NULL) and warns `read_error`; later runs skip it
+      unless `retry_unreadable`.
+    - Any `OSError` first checks that the mount still exists. If it is gone, the job pauses (`drive_gone`) and
+      nothing is marked. Other errnos are `skipped`, as before.
+    - `DIR_ERROR_LIMIT = 3` read errors in one folder defer the rest of it to the next run (`bad_sector_dir`).
+      `RUN_ERROR_LIMIT = 10` consecutive read errors pause the job (`too_many_read_errors`).
+    - `skip_prefixes` match on path segments with the `rel_path_key` rules.
+    - A heartbeat every `HEARTBEAT_S = 5` s, between files, names the file being read.
+    - The result gains `unreadable`, `deferred` and `excluded`.
+  - CLI: `hash --skip-prefix FOLDER` (repeatable; an absolute path must lie under the mount, else exit 2) and
+    `hash --retry-unreadable`. `report duplicates` passes `report.unreadable(conn)` to `write_markdown`, and its
+    result gains `unreadable` and `unreadable_no_copy`.
+  - `photovault/report.py`: `unreadable(conn)` lists each unreadable file with a rescue hint, checked in order:
+    a verified copy on another volume with the same size and partial hash ("likely copy", a candidate only,
+    vault-rules 5), else the same capture group and role ("same frame"), else "no known copy".
+  - Tests: `tests/test_baseline_hash.py` (EIO, retry, other errno, folder breaker, run breaker, drive gone,
+    heartbeat), `tests/test_cli.py` (`--skip-prefix`), `tests/test_report.py` (rescue hints, Markdown section).
+  - Verify: `uv run pytest tests/test_baseline_hash.py tests/test_report.py tests/test_cli.py -q`
+  - Result (2026-11-12): Verify → 37 passed; full suite 328 passed, 4 skipped. The heartbeat cannot fire during
+    one blocked read (no threads), and Ctrl-C waits for the current file. Also edits
+    `docs/user/INDEX_WORKFLOW.md` (an "If a drive shows I/O errors" section). The real resume on PP 1 is the
+    user's.
+  - _Design:_ system-design §5 (the `mismatch` note); vault-rules 1, 2, 5; D-044

@@ -24,11 +24,12 @@ Reference docs:
 - `docs/legacy/handoff-v0.md`: v0 findings, including the ExifTool benchmarks.
 - `docs/UTILITY_ASSESSMENT.md`: does the app have real utility yet, the live-run findings, candidate tasks.
 
-## Now (2026-11-11)
+## Now (2026-11-12)
 - **Card milestone built:** the CLI imports a card onto WORKING with verified copies and answers
   `card-status`. Commands: `drives`, `volumes assign`, `ingest [--dry-run]`, `resume`, `card-status`, `jobs`.
-  User guides: `docs/user/CARD_WORKFLOW.md` (cards) and `docs/user/INDEX_WORKFLOW.md` (old drives). `uv run pytest -q` → 317 passed, 4 skipped (`live`).
-- Index modules done: idx-1 to idx-4. Flats 1 is indexed and hashed (27,326 files, 956 GB, 45 min); the duplicate
+  User guides: `docs/user/CARD_WORKFLOW.md` (cards) and `docs/user/INDEX_WORKFLOW.md` (old drives). `uv run pytest -q` → 328 passed, 4 skipped (`live`).
+- Index modules done: idx-1 to idx-4 and idx-11 (`hash` on a failing drive: unreadable files are marked, folder and
+  run breakers, `--skip-prefix`, `--retry-unreadable`; D-044). Flats 1 is indexed and hashed (27,326 files, 956 GB, 45 min); the duplicate
   report found 113.5 GB reclaimable, matching the ~113 GB survey estimate (`docs/private/IDX5_FLATS1_RESULTS.md`).
   `lrcat mark` is still not run on a real catalog, so the idx-3 schema stays unverified.
 - eval-1 done: search segmentation and the camera's bracket flag beat the flat floor; recommendation awaits the
@@ -41,7 +42,8 @@ Reference docs:
   pre-flight. Live tests read mounts only under `-m live` (vault-rules 2, D-028, D-031).
 - The repo is public. Real-drive facts and photos stay in `docs/private/` and `testdata/` (gitignored).
 - Drives: cards exFAT; X9 Pro (1 TB exFAT) is WORKING; Flats 1 (1 TB APFS, 98 % full) is LEGACY, indexed and hashed; the 4 TB
-  (PP 1, 4.0 TB APFS, LEGACY) is registered and its index is running (user-run), not hashed yet; the 12 TB is offline.
+  (PP 1, 4.0 TB APFS, a spinning HDD, LEGACY) is indexed (69,626 files); its hash hit I/O errors in one folder and
+  is paused, waiting for the user to resume it with idx-11; the 12 TB is offline.
 - Policy: one verified copy on WORKING = safe to format (D-003).
 
 ## In progress
@@ -61,8 +63,8 @@ task's commit:
    stem; fix first, and ing-13 stops a double card read. Then:
 2. **[user] ing-11:** the first real import (commands in `docs/user/CARD_WORKFLOW.md`), after ing-12, then paste back the
    timings, `sync_method` and counts.
-3. **[user] idx-6:** let the PP 1 index finish, then `photovault hash` it and re-run `report duplicates`
-   (`docs/user/INDEX_WORKFLOW.md`). idx-5 is done except `lrcat mark` (not yet run on a real catalog).
+3. **[user] idx-6:** resume the PP 1 hash with `--skip-prefix` on the damaged folder, then run `report duplicates`
+   ("If a drive shows I/O errors" in `docs/user/INDEX_WORKFLOW.md`). idx-5 is done except `lrcat mark`.
 4. **seq-2 [stronger]** waits for the user's answers on eval-1 (`docs/reviews/2026-11-11-eval-1-sequencing.md`).
 5. Backlog items from this milestone: rental bodies and variants, shoot names from geo or a local LLM, video
    body inference (`docs/specs/backlog.md`).
@@ -85,12 +87,13 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-044 (user): `hash` on a failing drive (idx-11): EIO → unreadable (`mismatch`); a missing mount pauses and marks
+  nothing; breakers at 3 per folder and 10 in a row; `--skip-prefix`; the report gives copy hints.
 - D-043 (agent): eval-1 harness lives in `photovault/sequence_eval.py`; tempo is start-to-start; the recommendation is a proposal.
 - D-042 (agent): outside review of 4 suspected bugs: stem reuse (ing-12) and double card read (ing-13) confirmed,
   lrcat renamed-mount gap (idx-10, needs your OK), dry-run partial hashes declined (backlog).
 - D-041 (user): the 4 TB is PP 1 (LEGACY); Flats 1 runs as is, no cleanup first; the two may run in parallel.
 - D-040 (agent): duplicate report (idx-4): verified non-CARD copies only; unhashed files listed; output never under `/Volumes`.
-- D-039 (user): `--force-exit` (idx-8): gracefully quit Lightroom on command; no kill, no lock deletion.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

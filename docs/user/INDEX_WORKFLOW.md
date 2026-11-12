@@ -43,14 +43,40 @@ Reads every indexed file in full and computes its SHA-256. Two files with the sa
 and that is how duplicates are found. **Run `index` first:** `hash` only handles files that are indexed, so on an
 unindexed drive it finishes at once with `hashed=0`.
 
-**How long will it take?** The first line says `N files, X GB to hash`. Every 100 files it prints
-`[hash] n/N  X GB hashed, Y MB/s`. The time left is the bytes still to hash divided by that rate. Small files
-(JPEGs, sidecars) go slower per byte than RAW or video, so the rate moves around.
+**How long will it take?** The first line says `N files, X GB to hash`. Every 100 files, and at least every 5 s
+between files, it prints `[hash] n/N  X GB hashed, Y MB/s, reading <file>`. The rate is the rate since the last
+line. The time left is the bytes still to hash divided by that rate. Small files (JPEGs, sidecars) go slower per
+byte than RAW or video, so the rate moves around. One very large or damaged file can still be silent for longer:
+the line names the file it started on.
 
 - Files go in path order and each file is saved as it finishes, so a stop loses at most one file.
-- **Ctrl-C pauses; run the same command again to resume.**
+- **Ctrl-C pauses; run the same command again to resume.** The pause waits for the current file to finish.
 - `--max-mbps N` caps the read rate (1 MB = 10^6 bytes) if you need the Mac or the drive for something else.
 - A file that changed after it was indexed is skipped with a warning. Run `index` again to pick it up.
+- `--skip-prefix "<folder>"` leaves a folder unread (relative to the drive, or the full path under the drive;
+  repeatable). The files stay "not hashed yet" for a later run without the flag.
+
+### If a drive shows I/O errors
+
+`WARNING [read_error]: <file>: [Errno 5] Input/output error (marked unreadable)` means the drive could not read
+that file. On a spinning drive this usually means bad sectors, and each failure can take many seconds. `hash`
+protects the drive this way:
+
+- An unreadable file is marked so in the catalog and **not read again** by later runs.
+- After 3 read errors in one folder it stops reading that folder for this run (`bad_sector_dir`), hashes the
+  healthy folders first, and tells you how many files it deferred. The next run tries the deferred files.
+- After 10 read errors in a row it **pauses** (`too_many_read_errors`, exit code 4). Take this as a sign that the
+  drive is failing. Check the drive before you run the command again.
+- If the drive disappears mid-run it pauses (`drive_gone`) and marks nothing. Reconnect it and run the same
+  command again.
+
+To keep the read head away from a damaged area altogether:
+`caffeinate -i uv run photovault hash "/Volumes/<drive>" --skip-prefix "<damaged folder>"`.
+Later, after the drive is copied or repaired, `--retry-unreadable` reads the files that were marked unreadable once
+more. The report (step 4) lists every unreadable file and whether another drive seems to hold a copy.
+
+**If the drive may hold the only copy of some photos, copy them off before anything else.** A full hash pass reads
+the whole drive and rescues nothing.
 
 ## 3. Optional: mark what Lightroom uses
 
@@ -76,7 +102,10 @@ Writes a Markdown file (by default `~/Library/Application Support/PhotoVault/rep
 under `/Volumes`). It holds:
 
 - a summary: duplicate groups, files, and the bytes you could reclaim;
-- coverage per drive: files, not hashed yet, mismatches, and files that exist only on that drive;
+- coverage per drive: files, not hashed yet, unreadable, and files that exist only on that drive;
+- when any file was unreadable: a table of those files with a hint of where a copy may be. "Likely copy" means
+  the same size and sampled bytes. "Same frame" means the same camera and shutter count. Neither is a verified
+  copy;
 - each duplicate group with every copy's drive, path and Lightroom flag.
 
 Only hashed files can appear in a group. If some are not hashed yet, the command warns `unhashed_files`. You can run

@@ -160,11 +160,30 @@ def cmd_index(args, cfg, emit) -> int:
     return EXIT_PAUSED if repo.get_job(conn, job_id)["state"] == "paused" else EXIT_OK
 
 
+def _relative_prefix(mount: Path, prefix: str) -> str | None:
+    """A `--skip-prefix` relative to the mount; an absolute path is accepted only when it lies under the mount."""
+    if not prefix.startswith("/"):
+        return prefix
+    try:
+        return str(Path(prefix).relative_to(mount))
+    except ValueError:
+        return None
+
+
 def cmd_hash(args, cfg, emit) -> int:
+    mount = Path(args.mount)
+    prefixes = []
+    for p in args.skip_prefix or []:
+        rel = _relative_prefix(mount, p)
+        if rel is None or rel in ("", "."):
+            emit.emit("error", code="usage", message=f"--skip-prefix must be a folder inside {mount}: {p}")
+            return EXIT_USAGE
+        prefixes.append(rel)
     conn = _open(cfg)
     stop = _Stop()
     stop.install(emit)
-    job_id = baseline_hash(conn, cfg, Path(args.mount), emit=emit, max_mbps=args.max_mbps, should_stop=stop)
+    job_id = baseline_hash(conn, cfg, mount, emit=emit, max_mbps=args.max_mbps, should_stop=stop,
+                           skip_prefixes=prefixes, retry_unreadable=args.retry_unreadable)
     return EXIT_PAUSED if repo.get_job(conn, job_id)["state"] == "paused" else EXIT_OK
 
 
@@ -191,10 +210,12 @@ def cmd_report_duplicates(args, cfg, emit) -> int:
     volume_id = registered_volume(conn, Path(args.volume))["volume_id"] if args.volume else None
     clusters = report.duplicates(conn, volume_id=volume_id)
     summaries = report.coverage(conn)
-    report.write_markdown(clusters, out, summaries=summaries)
+    bad = report.unreadable(conn)
+    report.write_markdown(clusters, out, summaries=summaries, unreadable=bad)
     reclaimable = sum(c.reclaimable for c in clusters)
     emit.emit("result", report=str(out), clusters=len(clusters), files=sum(len(c.instances) for c in clusters),
-              reclaimable=human_bytes(reclaimable), reclaimable_bytes=reclaimable,
+              reclaimable=human_bytes(reclaimable), reclaimable_bytes=reclaimable, unreadable=len(bad),
+              unreadable_no_copy=sum(1 for b in bad if b.rescue == report.NO_COPY),
               volumes=[{"volume": s.label, "role": s.role, "files": s.files, "unhashed": s.unhashed,
                         "only_here": s.only_here_files, "only_here_size": human_bytes(s.only_here_bytes)}
                        for s in summaries])
@@ -263,6 +284,10 @@ def build_parser() -> argparse.ArgumentParser:
     hs = sub.add_parser("hash", help="full SHA-256 of indexed files (read-only; Ctrl-C pauses, re-run resumes)")
     hs.add_argument("mount")
     hs.add_argument("--max-mbps", type=float, default=None, help="cap the average read rate in MB/s")
+    hs.add_argument("--skip-prefix", action="append", metavar="FOLDER",
+                    help="do not read files under this folder (relative to the drive; repeatable)")
+    hs.add_argument("--retry-unreadable", action="store_true",
+                    help="also retry files an earlier run marked unreadable (I/O error)")
     hs.set_defaults(func=cmd_hash)
 
     lr = sub.add_parser("lrcat").add_subparsers(dest="sub", required=True)

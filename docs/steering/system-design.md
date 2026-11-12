@@ -35,9 +35,9 @@ as task-execution §6 describes.
 | `photovault/naming.py` | `shoot_date`, `canonical_stem`, `dest_dir`, `windows_safe`, `check_unique` | ing-5 |
 | `photovault/ingest.py` | `plan_card_ingest`, `run_job`, `JobSummary` | ing-6, ing-7 |
 | `photovault/status.py` | `card_status`, `CardStatus` | ing-8 |
-| `photovault/index.py` | `index_volume`, `baseline_hash` | idx-1, idx-2 |
+| `photovault/index.py` | `index_volume`, `baseline_hash` (+ `skip_prefixes`, `retry_unreadable`, idx-11) | idx-1, idx-2, idx-11 |
 | `photovault/lrcat.py` | `referenced_paths`, `mark_lr_referenced` (read-only Lightroom catalog reader) | idx-3 |
-| `photovault/report.py` | `duplicates`, `coverage`, `write_markdown` (duplicate and coverage report) | idx-4 |
+| `photovault/report.py` | `duplicates`, `coverage`, `unreadable`, `write_markdown` (duplicate and coverage report) | idx-4, idx-11 |
 | `photovault/sequences.py` | `detect_runs`, `classify_run`, `detect_bursts` | seq-1, seq-2 |
 | `photovault/sequence_eval.py` | `segment_flat`, `segment_exposure`, `segment_burst`, `segment_search`, `score` (evaluation harness, not used by the engine) | eval-1 |
 | `photovault/preview.py` | `preview_luma` | seq-3 |
@@ -180,6 +180,8 @@ CREATE TABLE instances (
   UNIQUE (volume_id, rel_path_key)
 );
 CREATE INDEX instances_asset ON instances (asset_id, state);
+-- state 'mismatch' with asset_id NULL: the full read failed with EIO during `hash` (idx-11, D-044); not re-read
+-- unless `hash --retry-unreadable`, and `index` leaves it alone while size and mtime are unchanged.
 CREATE TABLE sidecars (                                                         -- mutable XMP, versioned
   sidecar_id INTEGER PRIMARY KEY, group_id INTEGER NOT NULL REFERENCES capture_groups,
   volume_id TEXT NOT NULL REFERENCES volumes, rel_path TEXT NOT NULL, sha256 TEXT NOT NULL,
