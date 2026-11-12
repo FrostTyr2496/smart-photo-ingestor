@@ -50,7 +50,7 @@ Rules:
     the policy, so a frame known only on a LEGACY drive is still imported (D-036).
   - _Design:_ audit §2.2 (I/O budget)
 
-- [ ] 3. Read-only Lightroom catalog reader
+- [x] 3. Read-only Lightroom catalog reader
   - ID: idx-3
   - Blocks on: idx-1
   - Create `photovault/lrcat.py`:
@@ -68,6 +68,10 @@ Rules:
   - Create `tests/test_lrcat.py`: build a minimal synthetic lrcat with those three tables in `tmp_path`;
     assert the paths, the sidecars and the lock refusal.
   - Verify: `uv run pytest tests/test_lrcat.py -q`
+  - Result (2026-11-11): `uv run pytest tests/test_lrcat.py -q` → 8 passed; full suite 277 passed, 2 skipped.
+    Refuses on a lock file or a running Lightroom process (`pgrep -x`), both as `CatalogInUse`; a wrong schema
+    raises `LrcatSchemaError`. Marking is additive (D-038). The schema is still unverified against a real
+    catalog (idx-5). Also edits `photovault/cli.py` (the `lrcat mark` command and its error mapping).
   - _Design:_ vault-rules 7
 
 - [ ] 4. Duplicate and coverage report

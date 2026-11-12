@@ -13,8 +13,9 @@ from pathlib import Path
 from photovault import volumes
 from photovault.catalog import db, repo
 from photovault.config import ConfigError, load_config
-from photovault.index import baseline_hash, index_volume
+from photovault.index import baseline_hash, index_volume, registered_volume
 from photovault.ingest import plan_card_ingest, run_job
+from photovault.lrcat import CatalogInUse, LrcatSchemaError, keys_on_volume, mark_lr_referenced, referenced_paths
 from photovault.protocol import EXIT_ERROR, EXIT_OK, EXIT_PAUSED, EXIT_RED, EXIT_USAGE, Emitter, human_bytes
 from photovault.status import card_status
 
@@ -167,6 +168,22 @@ def cmd_hash(args, cfg, emit) -> int:
     return EXIT_PAUSED if repo.get_job(conn, job_id)["state"] == "paused" else EXIT_OK
 
 
+def cmd_lrcat_mark(args, cfg, emit) -> int:
+    """Flag the instances on a registered volume that a Lightroom catalog references (reads the .lrcat only)."""
+    conn = _open(cfg)
+    mount = Path(args.volume)
+    row = registered_volume(conn, mount)
+    paths = referenced_paths(Path(args.lrcat))
+    on_volume = len(keys_on_volume(mount, paths))
+    marked = mark_lr_referenced(conn, row["volume_id"], mount, paths)
+    emit.emit("result", lrcat=Path(args.lrcat).name, referenced=len(paths), on_volume=on_volume, marked=marked,
+              volume=row["label"])
+    if on_volume == 0:
+        emit.emit("warning", code="no_paths_on_volume",
+                  message=f"the catalog references no paths under {mount}; is this the right volume or catalog?")
+    return EXIT_OK
+
+
 def cmd_jobs(args, cfg, emit) -> int:
     conn = _open(cfg)
     rows = []
@@ -226,6 +243,12 @@ def build_parser() -> argparse.ArgumentParser:
     hs.add_argument("--max-mbps", type=float, default=None, help="cap the average read rate in MB/s")
     hs.set_defaults(func=cmd_hash)
 
+    lr = sub.add_parser("lrcat").add_subparsers(dest="sub", required=True)
+    lm = lr.add_parser("mark", help="flag files a Lightroom catalog references (reads the .lrcat read-only)")
+    lm.add_argument("lrcat", help="path to the .lrcat (use a copy; refused while Lightroom is open)")
+    lm.add_argument("--volume", required=True, help="registered drive the catalog's paths live on")
+    lm.set_defaults(func=cmd_lrcat_mark)
+
     j = sub.add_parser("jobs", help="recent jobs")
     j.add_argument("--limit", type=int, default=20)
     j.set_defaults(func=cmd_jobs)
@@ -243,7 +266,7 @@ def main(argv: list[str] | None = None) -> int:
         cfg = load_config()
         return args.func(args, cfg, emit)
     except (ValueError, ConfigError, FileExistsError, RuntimeError, OSError, volumes.CardWriteRefused,
-            volumes.UnknownVolume) as exc:
+            volumes.UnknownVolume, CatalogInUse, LrcatSchemaError) as exc:
         emit.emit("error", code=type(exc).__name__, message=str(exc))
         return EXIT_ERROR
 

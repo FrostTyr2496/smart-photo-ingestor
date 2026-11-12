@@ -27,7 +27,8 @@ Reference docs:
 ## Now (2026-11-11)
 - **Card milestone built:** the CLI imports a card onto WORKING with verified copies and answers
   `card-status`. Commands: `drives`, `volumes assign`, `ingest [--dry-run]`, `resume`, `card-status`, `jobs`.
-  User guide: `docs/user/CARD_WORKFLOW.md`. `uv run pytest -q` → 258 passed, 2 skipped (`live`).
+  User guide: `docs/user/CARD_WORKFLOW.md`. `uv run pytest -q` → 277 passed, 2 skipped (`live`).
+- Index modules done: idx-1 index, idx-2 baseline hash, idx-3 Lightroom reader (`lrcat mark`, schema unverified until idx-5).
 - Fault suite done (ing-10): resume retries failed items, re-queues files gone from the target, sweeps partials (D-034).
 - Built modules: config, catalog (db, repo), volumes, metadata, hashing, scan, groups, naming, copy engine,
   ingest (plan/run), status, index, protocol, cli, sequences, preview, live harness and survey.
@@ -55,7 +56,7 @@ task's commit:
 ## Next
 1. **[user] ing-11:** the first real import (commands in `docs/user/CARD_WORKFLOW.md`), then paste back the
    timings, `sync_method` and counts.
-2. **idx-3, idx-4** (idx-1, idx-2 done): index Flats 1 and the duplicate report (pulled forward per `docs/UTILITY_ASSESSMENT.md`).
+2. **idx-4** (idx-1 to idx-3 done): the duplicate and coverage report; then idx-5 is the user's Flats 1 run (pulled forward per `docs/UTILITY_ASSESSMENT.md`).
 3. **eval-1 [stronger]:** sequencing approaches; seq-2 (classification) as fixture-only work.
 4. Backlog items from this milestone: rental bodies and variants, shoot names from geo or a local LLM, video
    body inference (`docs/specs/backlog.md`).
@@ -70,11 +71,11 @@ task's commit:
 - Phase 3: close Lightroom before indexing Flats 1, and plug in the 4 TB (D-006).
 
 ## Recent decisions
+- D-038 (agent): lrcat reader (idx-3): refuses on a lock file or running Lightroom; marking is additive.
 - D-037 (agent): baseline hash details (idx-2): MB = 10^6, re-run resumes, changed files skipped.
 - D-036 (agent): ingest skips a dup only when its copies meet the policy (a LEGACY copy alone does not).
 - D-035 (agent): index details (idx-1): re-run resumes, changed files lose their asset link, groups via job items.
 - D-034 (agent): resume hardening: retry failed items, re-queue vanished target files, sweep partials, pause on crash.
-- D-033 (user): the Z 8 on Flats 1 was a rental; rental and variant bodies go in the backlog.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.
