@@ -37,7 +37,7 @@ as task-execution §6 describes.
 | `photovault/status.py` | `card_status`, `CardStatus` | ing-8 |
 | `photovault/index.py` | `index_volume`, `baseline_hash` | idx-1, idx-2 |
 | `photovault/lrcat.py` | `referenced_paths`, `mark_lr_referenced` (read-only Lightroom catalog reader) | idx-3 |
-| `photovault/report.py` | duplicate report | idx-4 |
+| `photovault/report.py` | `duplicates`, `coverage`, `write_markdown` (duplicate and coverage report) | idx-4 |
 | `photovault/sequences.py` | `detect_runs`, `classify_run`, `detect_bursts` | seq-1, seq-2 |
 | `photovault/preview.py` | `preview_luma` | seq-3 |
 | `photovault/live_harness.py` | `load_registry`, `iter_entries`, `iter_all`, `open_rb` (read-only live sources, test-only) | live-1 |

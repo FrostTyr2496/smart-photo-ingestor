@@ -74,7 +74,7 @@ Rules:
     catalog (idx-5). Also edits `photovault/cli.py` (the `lrcat mark` command and its error mapping).
   - _Design:_ vault-rules 7
 
-- [ ] 4. Duplicate and coverage report
+- [x] 4. Duplicate and coverage report
   - ID: idx-4
   - Blocks on: idx-2
   - Create `photovault/report.py` with `duplicates(conn, *, volume_id=None) -> list[Cluster]` and
@@ -86,6 +86,10 @@ Rules:
   - Add `photovault report duplicates [--volume M] [--out F]` to the CLI.
   - Create `tests/test_report.py`.
   - Verify: `uv run pytest tests/test_report.py -q`
+  - Result (2026-11-11): `uv run pytest tests/test_report.py -q` → 9 passed; full suite 286 passed, 2 skipped.
+    Adds `coverage(conn)` (per-volume files, not-hashed, mismatch, only-here), `write_markdown(..., summaries=)`
+    (optional kwarg, so the task signature still works), `default_report_path` and `check_output_path`. Rules in
+    D-040. The CLI warns `unhashed_files` when indexed files have no hash yet. Also edits `photovault/cli.py`.
 
 - [ ] 5. **[user]** Index and hash Flats 1
   - ID: idx-5

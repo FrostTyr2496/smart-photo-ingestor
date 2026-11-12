@@ -10,7 +10,7 @@ import sys
 import uuid
 from pathlib import Path
 
-from photovault import volumes
+from photovault import report, volumes
 from photovault.catalog import db, repo
 from photovault.config import ConfigError, load_config
 from photovault.index import baseline_hash, index_volume, registered_volume
@@ -184,6 +184,28 @@ def cmd_lrcat_mark(args, cfg, emit) -> int:
     return EXIT_OK
 
 
+def cmd_report_duplicates(args, cfg, emit) -> int:
+    """Write the duplicate and coverage report. Reads the catalog only; the output may not be on a mounted drive."""
+    out = report.check_output_path(Path(args.out) if args.out else report.default_report_path(cfg.home))
+    conn = _open(cfg)
+    volume_id = registered_volume(conn, Path(args.volume))["volume_id"] if args.volume else None
+    clusters = report.duplicates(conn, volume_id=volume_id)
+    summaries = report.coverage(conn)
+    report.write_markdown(clusters, out, summaries=summaries)
+    reclaimable = sum(c.reclaimable for c in clusters)
+    emit.emit("result", report=str(out), clusters=len(clusters), files=sum(len(c.instances) for c in clusters),
+              reclaimable=human_bytes(reclaimable), reclaimable_bytes=reclaimable,
+              volumes=[{"volume": s.label, "role": s.role, "files": s.files, "unhashed": s.unhashed,
+                        "only_here": s.only_here_files, "only_here_size": human_bytes(s.only_here_bytes)}
+                       for s in summaries])
+    unhashed = sum(s.unhashed for s in summaries)
+    if unhashed:
+        emit.emit("warning", code="unhashed_files",
+                  message=f"{unhashed} indexed files are not hashed yet and cannot appear in a cluster; "
+                          "run 'photovault hash <mount>' first")
+    return EXIT_OK
+
+
 def cmd_jobs(args, cfg, emit) -> int:
     conn = _open(cfg)
     rows = []
@@ -248,6 +270,12 @@ def build_parser() -> argparse.ArgumentParser:
     lm.add_argument("lrcat", help="path to the .lrcat (use a copy; refused while Lightroom is open)")
     lm.add_argument("--volume", required=True, help="registered drive the catalog's paths live on")
     lm.set_defaults(func=cmd_lrcat_mark)
+
+    rp = sub.add_parser("report").add_subparsers(dest="sub", required=True)
+    rd = rp.add_parser("duplicates", help="identical files across drives and what is only on one drive (read-only)")
+    rd.add_argument("--volume", help="only clusters with a copy on this registered drive")
+    rd.add_argument("--out", help="Markdown file to write (default: <home>/reports/duplicates-<time>.md)")
+    rd.set_defaults(func=cmd_report_duplicates)
 
     j = sub.add_parser("jobs", help="recent jobs")
     j.add_argument("--limit", type=int, default=20)
