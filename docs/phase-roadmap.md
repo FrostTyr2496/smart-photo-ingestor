@@ -74,6 +74,7 @@ Notes:
 | P3.8 | idx-8 `--force-exit` quits Lightroom on command **[stronger]** | idx-3 | I | first real use is the user's |
 | P3.9 | idx-10 `lrcat mark --was-mounted-as` for renamed drives **[stronger]** (D-042) | idx-3 | I | **[user]** approve the CLI change |
 | P3.10 | idx-11 `hash` survives a failing drive **[stronger]** (D-044) (**done 2026-11-12**) | idx-2 | H | the PP 1 resume is the user's |
+| P3.11 | idx-12 `hash` bounds one stuck read and stops on Ctrl-C at once **[stronger]** | idx-11 | H | **[user]** approve the timeout option |
 
 ## Phase 4: sequences (spec `sequences`)
 

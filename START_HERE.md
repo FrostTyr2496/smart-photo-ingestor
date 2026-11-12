@@ -68,7 +68,8 @@ task's commit:
 4. **seq-2 [stronger]** waits for the user's answers on eval-1 (`docs/reviews/2026-11-11-eval-1-sequencing.md`).
 5. Backlog items from this milestone: rental bodies and variants, shoot names from geo or a local LLM, video
    body inference (`docs/specs/backlog.md`).
-6. **idx-8 [stronger]:** `lrcat mark --force-exit`, which asks Lightroom to quit first (not on the critical path).
+6. **idx-12, idx-8 [stronger]:** idx-12 bounds a stuck read (needs your OK for `--read-timeout`); idx-8 is
+   `lrcat mark --force-exit`. Neither is on the critical path.
 
 ## Waiting on user
 - **Push the archive branch?** Run `git push -u origin archive/v0-cli-2026-11-11` if you want it on GitHub.

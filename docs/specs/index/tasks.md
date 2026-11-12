@@ -226,3 +226,21 @@ Rules:
     `docs/user/INDEX_WORKFLOW.md` (an "If a drive shows I/O errors" section). The real resume on PP 1 is the
     user's.
   - _Design:_ system-design §5 (the `mismatch` note); vault-rules 1, 2, 5; D-044
+
+- [ ] 12. **[stronger]** `hash`: bound one stuck read and stop at once on Ctrl-C
+  - ID: idx-12
+  - Blocks on: idx-11, **user approval** (a new timeout option and a new warning code)
+  - Why (limits left by idx-11): `sha256_file` is a blocking read, so (1) the 5 s heartbeat cannot fire while one
+    read is stuck on a bad sector, and (2) Ctrl-C (`should_stop`) is only checked between files, so a pause waits for
+    that read to return. On a failing HDD one read can take minutes, and a kernel read in uninterruptible sleep
+    cannot be cancelled from Python.
+  - Design to settle first (propose, then get approval): read each file in a worker thread or a child process,
+    and give up waiting after `--read-timeout SECONDS` (default off or generous). On a timeout, mark the file
+    `mismatch` like an `EIO`, emit `read_timeout`, and count it toward the folder and run breakers. A thread stuck in
+    the kernel cannot be killed, so after a timeout the run should pause and say the drive needs attention, not
+    start another read on it. Ctrl-C then pauses within about a second of the signal even while a read is stuck.
+    A heartbeat thread, or the wait loop itself, prints the file being read every 5 s.
+  - Tests: a fake `sha256_file` that blocks on an event: the timeout marks the file and pauses; `should_stop`
+    set during the block returns within the poll interval; the normal path is unchanged.
+  - Verify: `uv run pytest tests/test_baseline_hash.py -q`
+  - _Design:_ D-044, idx-11
