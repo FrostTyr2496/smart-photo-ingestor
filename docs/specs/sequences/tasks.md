@@ -13,7 +13,7 @@ Rules:
 - `docs/steering/task-execution.md` applies.
 - Commit as `feat(seq-N): …  [seq-N]`.
 
-- [ ] 1. Run and burst detection (pure functions)
+- [x] 1. Run and burst detection (pure functions)
   - ID: seq-1
   - Create `photovault/sequences.py`:
     - `FrameMeta(body, shutter, dto: datetime, subsec, exposure_s, iso, fnumber, focal_mm, file, folder)`.
@@ -22,7 +22,8 @@ Rules:
     - `detect_bursts(frames, *, min_frames=3) -> list[Burst]`.
   - A run is a stretch of frames from one body, sorted by shutter count, with consecutive counts.
     - Each frame has `exposure ≥ min_exposure_s`.
-    - The gap between frames is ≤ `exposure + max(60 s, exposure)`.
+    - The gap between frames is ≤ `exposure + max(150 s, exposure)` (`max_gap_s=150.0`, D-023). Across a tolerated
+      outlier the limit stays `exposure + max(60 s, exposure)`.
     - A single out-of-rule frame (for example a 0.5 s framing shot) is tolerated when the run resumes on the
       next frame. It is excluded from the run and listed in `Run.interruptions`.
   - A burst is ≥ `min_frames` frames from one body sharing a `dto` second.
@@ -33,6 +34,10 @@ Rules:
     - NEF same-second groups of ≥ 3: **54 on CARD1 and 494 on CARD2**. These numbers come from the survey; if
       yours differ, investigate before changing the expectation.
   - Verify: `uv run pytest tests/test_sequences.py -q`
+  - Result (2026-11-11): `uv run pytest tests/test_sequences.py -q` → 17 passed; survey runs (CARD1 3, CARD2 2) and
+    same-second groups (54, 494) reproduced. `load_fixture` gained a `card` filter (survey numbers are per card).
+    The flat 150 s floor is kept for now (D-023); the audit §5.4 rule is superseded for seq-1 and seq-2 must
+    treat a run as a 150 s-gap run. Evaluating other grouping approaches is the new task `eval-1`.
   - _Design:_ audit §5.4
 
 - [ ] 2. Metadata-only classification

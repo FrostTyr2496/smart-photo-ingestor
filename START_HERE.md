@@ -27,13 +27,12 @@ Reference docs:
 - `main` was reset (D-007). The scaffold, hooks, docs, a redacted EXIF fixture, the config loader (fnd-1) and
   the ExifTool metadata reader (fnd-5, `photovault/metadata.py`), the local sample corpus (fnd-7, 10 files
   in `testdata/corpus/flats1/`), the catalog db and migrations (fnd-2), hashing (ing-1), the scanner (ing-3)
-  and preview luminance (seq-3, Pillow added) exist; `uv run pytest -q` → 151 passed, 168 with seq-1's files.
+  preview luminance (seq-3, Pillow added) and run detection (seq-1, flat 150 s gap floor) exist;
+  `uv run pytest -q` → 168 passed.
 - The old v0 code is on local branch `archive/v0-cli-2026-11-11`. Port from it with
   `git show archive/v0-cli-2026-11-11:photo_ingest/<file>` (fnd-5 ports `analyzer.py`).
-- Hooks are live:
-  - `.claude/hooks/guard_volumes.py` blocks agent writes and engine runs on `/Volumes`; real-drive runs are
-    [user] steps.
-  - `.claude/hooks/preflight.sh` prints the pre-flight at session start.
+- Hooks are live: `guard_volumes.py` blocks agent writes and engine runs on `/Volumes`; `preflight.sh` prints
+  the pre-flight.
 - The repo is public. Real-drive facts and photos stay in `docs/private/` and `testdata/` (gitignored).
 - Drives:
   - Cards are exFAT.
@@ -43,13 +42,7 @@ Reference docs:
 - Policy: one verified copy on WORKING = safe to format (D-003).
 
 ## In progress
-- Task: seq-1 (started 2026-11-11, Sonnet), implemented but NOT committed, held for the user's call
-- Files touched: photovault/sequences.py, tests/test_sequences.py (untracked)
-- Last verified: `uv run pytest tests/test_sequences.py -q` → 17 passed
-- Notes: the spec's gap rule (`exposure + max(60 s, exposure)`) and the audit §5.4 rule (`max(5 s, 0.5 x
-  exposure)`) both fail 3 of the 5 survey runs (gaps of 138, 144 and 108 s). The agent added
-  `detect_runs(max_gap_s=150.0)` (60 s kept across a tolerated outlier) and a `card` filter on `load_fixture`.
-  Decide the rule, record a decision row, fix the task text and the audit, then tick seq-1.
+- Task: none.
 
 When you start a task, replace `none` with this block before your first edit, and set it back to `none` in the
 task's commit:
@@ -62,10 +55,11 @@ task's commit:
 
 ## Next
 1. **Phase 1, lane B left:** fnd-3 → fnd-4. fnd-6 waits for fnd-4. Lanes A, C and D are done.
-2. **Phase 2 early lanes**, which can run alongside Phase 1: ing-2 (copy engine); ing-3 → ing-4 → ing-5 (groups,
-   naming).
-3. **Fixture-only work:** finish seq-1 (see In progress), then seq-2.
-4. After that, fnd-6 then ing-6. ing-7 and ing-10 are **[stronger]**.
+2. **Phase 2 early lanes**, which can run alongside Phase 1: ing-2 (copy engine); ing-4 → ing-5 (groups, naming).
+3. **Fixture-only work:** seq-2 (metadata classification).
+4. **[stronger], Opus or Sonnet:** eval-1 (sequencing approaches), live-1 (live-device harness, needs a
+   vault-rules change first), gap-1 (master merge gap analysis, after idx-4).
+5. After that, fnd-6 then ing-6. ing-7 and ing-10 are **[stronger]**.
 
 ## Waiting on user
 - **Push the archive branch?** Run `git push -u origin archive/v0-cli-2026-11-11` if you want it on GitHub;
@@ -75,13 +69,14 @@ task's commit:
 - **X9 sample:** should `testdata/x9_sample/` move into `testdata/corpus/x9/` (D-017)?
 - The exFAT answer looked cut off ("honestly considering…"). Tell us if you are weighing APFS after all.
 - Phase 3: close Lightroom before indexing Flats 1, and plug in the 4 TB (D-006).
+- **live-1 needs a vault-rules change:** read-only live tests on `/Volumes` (vault-rules 2). Approve or refuse.
 
 ## Recent decisions
+- D-024 (user): new readiness tasks eval-1, live-1 and gap-1 (all [stronger]).
+- D-023 (user): run gap rule is a flat 150 s floor for now (seq-1); eval-1 evaluates alternatives.
 - D-022 (agent): preview luminance details (flat = luma > 100 with stddev <= 25, to tune in seq-4).
 - D-021 (agent): scanner details (sidecar beats derivative; dot-dirs and non-regular files skipped).
 - D-020 (agent): fnd-2 spec said 11 tables, §5 has 10; text corrected, schema unchanged.
-- D-019 (user): commit messages follow the mimir shape (template in `task-execution.md` §4).
-- D-018 (user): no Z8 owned yet; struck from fnd-7 and the audit.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

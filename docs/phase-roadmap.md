@@ -74,7 +74,7 @@ Notes:
 
 | Item | Task | Blocks on | Lane | Gate |
 |---|---|---|---|---|
-| P4.1 | seq-1 runs and bursts | — (can start any time) | J | — |
+| P4.1 | seq-1 runs and bursts (**done 2026-11-11**, flat 150 s floor, D-023) | — | J | — |
 | P4.2 | seq-2 classification | seq-1 | J | — |
 | P4.3 | seq-3 preview luminance (adds Pillow) (**done 2026-11-11**) | — | K | — |
 | P4.4 | seq-4 persist + astro layout **[stronger]** | seq-2, seq-3, ing-10 | J | **[user]** approve the naming-spec change |
@@ -97,6 +97,14 @@ Note: seq-1 to seq-3 are pure and fixture-driven, so they make good parallel Hai
 | P6.1 | rep-1 assign 12 TB | rep-0 | **[user]** |
 | P6.x | rep-2 to rep-4 | rep-1 | written by rep-0 |
 | P6.5 | rep-5 dual-copy policy | dedupe done | **[user]** (D-003) |
+
+## Phase 4b: readiness (spec `readiness`, all [stronger])
+
+| Item | Task | Blocks on | Gate |
+|---|---|---|---|
+| P4.6 | eval-1 sequencing approaches **[stronger]** | seq-1 | **[user]** approve the chosen approach |
+| P4.7 | live-1 live-device harness **[stronger]** | ing-3, fnd-4, seq-1 | **[user]** approve the vault-rules 2 change first |
+| P6.G | gap-1 master gap analysis **[stronger]** | idx-4, live-1 | **[user]** review the verdict before any merge |
 
 ## Phase 7: backlog
 
