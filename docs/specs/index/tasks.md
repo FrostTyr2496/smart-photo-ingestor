@@ -31,7 +31,7 @@ Rules:
     membership is recorded as `committed` index job items for idx-2 to link assets (D-035).
   - _Design:_ system-design §5, §7; audit §6 Phase 3
 
-- [ ] 2. Baseline full hash (resumable, throttled)
+- [x] 2. Baseline full hash (resumable, throttled)
   - ID: idx-2
   - Blocks on: idx-1
   - Add `baseline_hash(conn, cfg, mount, *, emit, max_mbps: float | None = None, should_stop=...) -> int` to
@@ -44,6 +44,10 @@ Rules:
   - Create `tests/test_baseline_hash.py` covering: hashes and links; identical files on two tmp "volumes" →
     one asset with two instances; resume after a stop; the throttle maths (monkeypatch `time.sleep`).
   - Verify: `uv run pytest tests/test_baseline_hash.py -q`
+  - Result (2026-11-11): `uv run pytest tests/test_baseline_hash.py -q` → 7 passed; full suite 269 passed.
+    MB is 10^6 bytes. A file changed since `index` is skipped with a warning. Also edits
+    `photovault/ingest.py`: a card file is skipped as a duplicate only when its verified copies already meet
+    the policy, so a frame known only on a LEGACY drive is still imported (D-036).
   - _Design:_ audit §2.2 (I/O budget)
 
 - [ ] 3. Read-only Lightroom catalog reader

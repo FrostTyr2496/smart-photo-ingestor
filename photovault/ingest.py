@@ -197,6 +197,15 @@ def plan_card_ingest(
     return job_id
 
 
+def _policy_met(cfg: Config, counts: dict[str, int]) -> bool:
+    """Skip a file as a duplicate only when its existing verified copies already satisfy the policy (D-036).
+
+    vault-rules 5 makes a verified non-CARD copy necessary; a copy on a LEGACY drive alone is not enough,
+    or a card holding frames already on a legacy drive could never go green.
+    """
+    return bool(counts) and all(counts.get(role, 0) >= need for role, need in cfg.policy.required.items())
+
+
 def _job_paths(job: sqlite3.Row) -> tuple[Path, Path]:
     params = json.loads(job["params_json"])
     return Path(params["source_mount"]), Path(params["target_mount"])
@@ -296,7 +305,7 @@ def run_job(
                 dup = None
                 for cand in repo.find_candidates(conn, st.st_size, partial):
                     full = full or sha256_file(src)
-                    if cand["sha256"] == full and repo.verified_counts_by_role(conn, cand["asset_id"]):
+                    if cand["sha256"] == full and _policy_met(cfg, repo.verified_counts_by_role(conn, cand["asset_id"])):
                         dup = cand
                         break
                 if dup is not None:

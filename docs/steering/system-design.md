@@ -125,8 +125,8 @@ Timestamps written by the engine are UTC ISO-8601 (`repo.utcnow()`). Capture tim
    recorded as `state=indexed`.
 5. `run_job` processes each item in its own transaction:
    - Look up candidates by `(size, partial_sha256)`.
-   - If there is a candidate, hash the source fully. If it matches an asset with a verified non-CARD
-     instance, the item is `skipped_dup`.
+   - If there is a candidate, hash the source fully. If it matches an asset whose verified non-CARD
+     instances already meet `policy.required` (D-036), the item is `skipped_dup`.
    - Otherwise `copy_verified` into `target/dst_rel`, insert or find the asset, mark the target instance
      `verified`, link the source instance to the asset, and set the item to `committed`.
    - Before (re)running, `_prepare_resume` re-plans `failed` items, re-plans `committed` items whose target

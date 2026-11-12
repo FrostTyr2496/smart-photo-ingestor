@@ -55,7 +55,7 @@ task's commit:
 ## Next
 1. **[user] ing-11:** the first real import (commands in `docs/user/CARD_WORKFLOW.md`), then paste back the
    timings, `sync_method` and counts.
-2. **idx-2 → idx-4** (idx-1 done): index Flats 1 and the duplicate report (pulled forward per `docs/UTILITY_ASSESSMENT.md`).
+2. **idx-3, idx-4** (idx-1, idx-2 done): index Flats 1 and the duplicate report (pulled forward per `docs/UTILITY_ASSESSMENT.md`).
 3. **eval-1 [stronger]:** sequencing approaches; seq-2 (classification) as fixture-only work.
 4. Backlog items from this milestone: rental bodies and variants, shoot names from geo or a local LLM, video
    body inference (`docs/specs/backlog.md`).
@@ -70,11 +70,11 @@ task's commit:
 - Phase 3: close Lightroom before indexing Flats 1, and plug in the 4 TB (D-006).
 
 ## Recent decisions
+- D-037 (agent): baseline hash details (idx-2): MB = 10^6, re-run resumes, changed files skipped.
+- D-036 (agent): ingest skips a dup only when its copies meet the policy (a LEGACY copy alone does not).
 - D-035 (agent): index details (idx-1): re-run resumes, changed files lose their asset link, groups via job items.
 - D-034 (agent): resume hardening: retry failed items, re-queue vanished target files, sweep partials, pause on crash.
 - D-033 (user): the Z 8 on Flats 1 was a rental; rental and variant bodies go in the backlog.
-- D-032 (agent): milestone build details (human output by default, `drives`, folder body vote for videos, `_2` suffix).
-- D-031 (agent, delegated): live tests may dry-run an ingest from a real card into tmp_path.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.
