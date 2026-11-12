@@ -347,3 +347,34 @@ def list_jobs(conn: sqlite3.Connection, limit: int = 20) -> list[Row]:
 
 def list_volumes(conn: sqlite3.Connection) -> list[Row]:
     return conn.execute("SELECT * FROM volumes ORDER BY role, label").fetchall()
+
+
+def volume_instances(conn: sqlite3.Connection, volume_id: str) -> dict[str, Row]:
+    """Every instance on a volume, keyed by ``rel_path_key``."""
+    rows = conn.execute("SELECT * FROM instances WHERE volume_id = ?", (volume_id,)).fetchall()
+    return {r["rel_path_key"]: r for r in rows}
+
+
+def clear_instance_identity(conn: sqlite3.Connection, instance_id: int) -> None:
+    """Forget what an instance's bytes were (they changed): unlink the asset and drop the verification."""
+    conn.execute(
+        "UPDATE instances SET asset_id = NULL, verified_sha256 = NULL, verified_at = NULL WHERE instance_id = ?",
+        (instance_id,),
+    )
+
+
+def mark_missing(conn: sqlite3.Connection, instance_ids: Iterable[int]) -> int:
+    """Set these instances to ``missing`` (the file was not found); returns how many changed."""
+    cur = conn.executemany(
+        "UPDATE instances SET state = 'missing' WHERE instance_id = ? AND state != 'missing'",
+        [(i,) for i in instance_ids],
+    )
+    return cur.rowcount
+
+
+def latest_job(conn: sqlite3.Connection, *, kind: str, source_volume_id: str, state: str) -> Row | None:
+    """The newest job of ``kind`` on a source volume in ``state`` (used to resume a paused index or hash)."""
+    return conn.execute(
+        "SELECT * FROM jobs WHERE kind = ? AND source_volume_id = ? AND state = ? ORDER BY job_id DESC LIMIT 1",
+        (kind, source_volume_id, state),
+    ).fetchone()

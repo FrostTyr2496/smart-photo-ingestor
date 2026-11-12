@@ -62,7 +62,7 @@ Notes:
 
 | Item | Task | Blocks on | Lane | Gate |
 |---|---|---|---|---|
-| P3.1 | idx-1 index volume | ing-9 | H | — |
+| P3.1 | idx-1 index volume (**done 2026-11-11**) | ing-9 | H | — |
 | P3.2 | idx-2 baseline hash | idx-1 | H | — |
 | P3.3 | idx-3 lrcat reader | idx-1 | I | schema unverified until idx-5 |
 | P3.4 | idx-4 duplicate report | idx-2 | H | — |

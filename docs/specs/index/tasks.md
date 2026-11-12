@@ -8,7 +8,7 @@ Rules:
 - Commit as `feat(idx-N): …  [idx-N]`.
 - LEGACY volumes are read-only and get **no marker** (vault-rules 1).
 
-- [ ] 1. Index a volume (stat + metadata + partial hash)
+- [x] 1. Index a volume (stat + metadata + partial hash)
   - ID: idx-1
   - Blocks on: ing-9
   - Create `photovault/index.py` with `index_volume(conn, cfg, mount, *, emit, should_stop=lambda: False) -> int`
@@ -25,6 +25,10 @@ Rules:
   - Create `tests/test_index.py` covering: index a tmp tree; re-index is a no-op; a deleted file → `missing`;
     a modified file → re-indexed; `should_stop` → paused, then resume.
   - Verify: `uv run pytest tests/test_index.py -q`
+  - Result (2026-11-11): `uv run pytest tests/test_index.py -q` → 4 passed; full suite 262 passed. Also adds
+    additive helpers to `photovault/catalog/repo.py` (`volume_instances`, `clear_instance_identity`,
+    `mark_missing`, `latest_job`). Resume = run the same command again (the paused job is reused). Group
+    membership is recorded as `committed` index job items for idx-2 to link assets (D-035).
   - _Design:_ system-design §5, §7; audit §6 Phase 3
 
 - [ ] 2. Baseline full hash (resumable, throttled)

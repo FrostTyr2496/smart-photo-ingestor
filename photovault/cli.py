@@ -13,6 +13,7 @@ from pathlib import Path
 from photovault import volumes
 from photovault.catalog import db, repo
 from photovault.config import ConfigError, load_config
+from photovault.index import index_volume
 from photovault.ingest import plan_card_ingest, run_job
 from photovault.protocol import EXIT_ERROR, EXIT_OK, EXIT_PAUSED, EXIT_RED, EXIT_USAGE, Emitter, human_bytes
 from photovault.status import card_status
@@ -150,6 +151,14 @@ def cmd_card_status(args, cfg, emit) -> int:
     return EXIT_OK if s.state == "green" else EXIT_RED
 
 
+def cmd_index(args, cfg, emit) -> int:
+    conn = _open(cfg)
+    stop = _Stop()
+    stop.install(emit)
+    job_id = index_volume(conn, cfg, Path(args.mount), emit=emit, should_stop=stop)
+    return EXIT_PAUSED if repo.get_job(conn, job_id)["state"] == "paused" else EXIT_OK
+
+
 def cmd_jobs(args, cfg, emit) -> int:
     conn = _open(cfg)
     rows = []
@@ -199,6 +208,10 @@ def build_parser() -> argparse.ArgumentParser:
     cs.add_argument("mount")
     cs.add_argument("--show", type=int, default=10, help="how many problem files to list")
     cs.set_defaults(func=cmd_card_status)
+
+    ix = sub.add_parser("index", help="record what is on a registered drive (read-only; Ctrl-C pauses, re-run resumes)")
+    ix.add_argument("mount")
+    ix.set_defaults(func=cmd_index)
 
     j = sub.add_parser("jobs", help="recent jobs")
     j.add_argument("--limit", type=int, default=20)
