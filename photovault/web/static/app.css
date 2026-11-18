@@ -597,6 +597,7 @@ dialog.dlg[open] { animation: dlg-in 160ms var(--ease); }
 .is-warn .tl-when { color: rgb(var(--c-maybe)); }
 .is-never .tl-when, .is-queued .tl-when { color: rgb(var(--c-ink) / 0.5); }
 .tl-step .bar { width: 100%; margin-top: 4px; }
+.tl-step .tl-run { margin-top: 4px; }
 @media (max-width: 720px) {
   .timeline { grid-auto-flow: row; gap: 14px; }
   .tl-step::before { display: none; }

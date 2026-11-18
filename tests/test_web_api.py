@@ -817,3 +817,23 @@ def test_activity_lists_outside_runs_and_stale_jobs(srv: Client, monkeypatch: py
     assert [(a["pid"], a["words"], a["job"]["job_id"]) for a in body["activity"]] == [
         (4242, ["index", "/Volumes/Big Drive"], live)]
     assert [j["job_id"] for j in body["stale_jobs"]] == [stale]
+
+
+# --------------------------------------------------------------------------- keep the Mac awake (ui-12)
+
+def test_runner_keeps_the_mac_awake_until_the_task_exits(tmp_path: Path) -> None:
+    seen = tmp_path / "awake.txt"
+    awake = [sys.executable, "-c", f"import sys; open({str(seen)!r}, 'w').write(' '.join(sys.argv[1:]))", "-w"]
+    runner = web.TaskRunner([sys.executable, "-c", CHILD], awake_argv=awake)
+    task_id = runner.start(["index", "/x"])
+    deadline = time.time() + 10
+    while (runner.get(task_id).state == "running" or not seen.exists()) and time.time() < deadline:
+        time.sleep(0.05)
+    assert runner.get(task_id).summary()["keep_awake"] is True
+    assert re.fullmatch(r"-w \d+", seen.read_text())
+
+
+def test_runner_awake_defaults() -> None:
+    assert web.TaskRunner([sys.executable]).awake_argv is None  # custom engine (tests): off
+    assert web.TaskRunner(awake_argv=None).awake_argv is None
+    assert web.TaskRunner().awake_argv == web.default_awake_argv()

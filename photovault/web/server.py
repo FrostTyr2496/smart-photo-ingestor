@@ -16,6 +16,7 @@ import mimetypes
 import os
 import re
 import select
+import shutil
 import signal
 import sqlite3
 import subprocess
@@ -73,6 +74,12 @@ def default_base_argv() -> list[str]:
     return [sys.executable, "-m", "photovault", "--json"]
 
 
+def default_awake_argv() -> list[str] | None:
+    """`caffeinate` blocking idle, system (on AC) and disk sleep until a pid exits (ui-12); None off macOS."""
+    exe = shutil.which("caffeinate") if sys.platform == "darwin" else None
+    return [exe, "-ims", "-w"] if exe else None
+
+
 def parse_line(line: str) -> dict:
     """One stdout line of the engine: its JSON event, or `{"event": "text", "line": ...}` for anything else."""
     text = line.rstrip("\r\n")
@@ -93,6 +100,7 @@ class _Task:
         self.exit_code: int | None = None
         self.events: deque[dict] = deque(maxlen=EVENTS_KEPT)
         self.next_seq = 0
+        self.keep_awake = False
 
     def add(self, event: dict) -> None:
         event = {**event, "seq": self.next_seq}
@@ -105,7 +113,7 @@ class _Task:
 
     def summary(self) -> dict:
         return {"task_id": self.task_id, "state": self.state, "exit_code": self.exit_code, "argv": self.argv,
-                "last_seq": self.next_seq - 1}
+                "last_seq": self.next_seq - 1, "keep_awake": self.keep_awake}
 
     def detail(self, since: int) -> dict:
         events = [e for e in self.events if e["seq"] > since]
@@ -114,10 +122,17 @@ class _Task:
 
 
 class TaskRunner:
-    """Runs engine commands as subprocesses and keeps their events in memory (for the life of the server)."""
+    """Runs engine commands as subprocesses and keeps their events in memory (for the life of the server).
 
-    def __init__(self, base_argv: list[str] | None = None) -> None:
+    `awake_argv` (ui-12) is started with the task's pid appended, to keep the Mac awake until the task exits.
+    By default it is `default_awake_argv()` when running the real engine, and off for a custom `base_argv`.
+    """
+
+    def __init__(self, base_argv: list[str] | None = None, awake_argv: list[str] | None | str = "auto") -> None:
         self.base_argv = list(base_argv) if base_argv is not None else default_base_argv()
+        if awake_argv == "auto":
+            awake_argv = default_awake_argv() if base_argv is None else None
+        self.awake_argv = list(awake_argv) if awake_argv else None
         self._lock = threading.Lock()
         self._tasks: dict[int, _Task] = {}
         self._procs: dict[int, subprocess.Popen] = {}
@@ -140,6 +155,13 @@ class TaskRunner:
             return task_id
         with self._lock:
             self._procs[task_id] = proc
+        if self.awake_argv:
+            try:  # it exits on its own when the task does (`-w <pid>`)
+                subprocess.Popen([*self.awake_argv, str(proc.pid)], stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                task.keep_awake = True
+            except OSError as exc:
+                logger.warning("cannot keep the Mac awake: %s", exc)
         threading.Thread(target=self._pump, args=(task, proc), daemon=True, name=f"task-{task_id}").start()
         return task_id
 

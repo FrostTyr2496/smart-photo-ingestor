@@ -273,3 +273,14 @@ still naive, apply the `settings` value `default_offset` (default "+00:00"). The
   - Result (2026-11-18): `uv run pytest tests/test_activity.py tests/test_web_api.py -q` → 71 passed; full suite 467
     passed, 4 skipped. A live `/api/activity` showed the running terminal index with catalog counts, and 9 stale jobs.
     Out of scope: pausing an outside run from the UI, and repairing stale jobs (idx-9).
+
+- [x] 12. Run one step, and keep the Mac awake (visual check pending, user)
+  - ID: ui-12 (after ui-11)
+  - Each step of a drive's timeline (index, hash, scan, sidecars) has its own Run button, so hash can follow a
+    terminal index without re-indexing. Sidecars asks first, as the workflow does. While a UI task runs, the server
+    keeps the Mac awake with `caffeinate -ims -w <pid>` (idle, system-on-AC and disk sleep; it exits with the task).
+    macOS only, skipped when `caffeinate` is missing; the task shows "keeping the Mac awake". No engine change.
+    A terminal run on the drive (ui-11) disables the buttons.
+  - Verify: `uv run pytest tests/test_web_api.py -q`
+  - Result (2026-11-18): `uv run pytest tests/test_web_api.py -q` → 53 passed; full suite 469 passed, 4 skipped.
+    Real `caffeinate -ims -w <pid>` held its assertions and exited with the process.

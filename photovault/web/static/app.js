@@ -388,8 +388,10 @@ function waitForTask(id) {
   });
 }
 
+// A run started in a terminal on this drive (ui-11) counts too, so the UI never starts a second one beside it.
 function workflowBusy(d) {
-  return Boolean(st.workflow) || Boolean(liveStep(d));
+  return Boolean(st.workflow) || Boolean(liveStep(d))
+    || st.elsewhere.some((e) => (e.words || []).includes(d.mount));
 }
 
 // Runs the steps one after another and stops at the first one that does not finish.
@@ -429,6 +431,36 @@ async function runWorkflow(d) {
   }
 }
 
+// Runs one step on its own (ui-12), e.g. hash after an index that ran in a terminal. Sidecars write to the
+// drive, so they ask first, as the workflow does.
+async function runStep(d, step) {
+  if (workflowBusy(d)) return;
+  if (step.id === "sidecars") {
+    const ok = await confirmDialog({
+      title: "Write sidecar files?",
+      lines: [`On "${driveName(d)}": write XMP sidecar files next to photos with saved edits.`, "Nothing is deleted or overwritten."],
+      action: "Write sidecars",
+    });
+    if (!ok) return;
+  }
+  await startTask(step.cmd, step.args);
+  updateWorkflowUI();
+}
+
+// One Run button per drive and step, kept across repaints so a click is never lost to a poll.
+const stepBtns = new Map();
+function stepButton(d, step) {
+  const key = `${d.volume_id}:${step.id}`;
+  let b = stepBtns.get(key);
+  if (!b) {
+    b = el("button", { type: "button", class: "small-btn tl-run" }, "Run");
+    stepBtns.set(key, b);
+  }
+  b.onclick = () => runStep(d, step);
+  b.title = `Run only ${STEP_NAME[step.id].toLowerCase()} on ${driveName(d)}`;
+  return b;
+}
+
 let timelineBox = null;
 let workflowBtn = null;
 
@@ -459,6 +491,8 @@ function updateWorkflowUI() {
       if (total) fill.style.width = `${Math.min(100, Math.floor(((Number(v.task.progress.current) || 0) / total) * 100))}%`;
       kids.push(bar);
       if (total) kids.push(el("span", { class: "tl-count muted small" }, `${fmtInt(v.task.progress.current)} of ${fmtInt(total)}`));
+    } else if (!busy && d.mounted) {
+      kids.push(stepButton(d, step));
     }
     return el("li", { class: `tl-step is-${v.cls}` }, kids);
   });
@@ -829,7 +863,7 @@ function paintTask(v, t, now) {
     v.bar.removeAttribute("aria-valuenow");
   }
   v.line.hidden = !running;
-  v.line.textContent = progressLine(t, now) || "Starting…";
+  v.line.textContent = (progressLine(t, now) || "Starting…") + (t.keep_awake ? " · keeping the Mac awake" : "");
   v.note.hidden = !(running && t.note);
   v.note.textContent = t.note;
   v.actions.hidden = !running;
@@ -956,6 +990,7 @@ function absorb(t, d) {
   t.state = d.state;
   t.exit_code = d.exit_code;
   t.last_seq = d.last_seq;
+  t.keep_awake = Boolean(d.keep_awake);
   if (d.latest_progress) t.progress = d.latest_progress;
   for (const e of d.events) {
     if (t.startMs === null && e.ts) t.startMs = Date.parse(e.ts) || null;

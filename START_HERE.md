@@ -53,6 +53,11 @@ Reference docs:
   app.css, index.html (new-drive setup view, read-only NTFS roles)
 - Last verified: `uv run pytest -q` → 467 passed, 4 skipped (with this work in the tree)
 - Notes: from another session; it needs a task ID and its own commit. ui-11's hunks in those files are committed.
+- Task: met-1 (started 2026-11-18, claude-opus-5-5), in parallel with the work above (no shared files)
+- Files touched: docs/specs/metrics/tasks.md, photovault/metrics.py, photovault/hashing.py,
+  photovault/copy_engine.py, photovault/cli.py, tests/test_metrics.py
+- Last verified: not run
+- Notes: metrics go to `<home>/metrics.sqlite`, not the catalog (D-054).
 
 When you start a task, replace `none` with this block before your first edit, and set it back to `none` in the
 task's commit:
@@ -64,7 +69,8 @@ task's commit:
 ```
 
 ## Next
-0. **[user] visual check (ui-5..11, card-3):** restart the server so it picks up ui-11, then run `uv run photovault serve`, try drives, cards and the editor.
+0. **[user] visual check (ui-5..12, card-3):** restart `uv run photovault serve` (it picks up ui-11/12), try drives,
+   cards, a step's Run button (e.g. Hash) and the editor.
 1. **ing-13 [stronger]** (D-042): stops a double card read at import (ing-12 is done). Then:
 2. **[user] ing-11:** the first real import (commands in `docs/user/CARD_WORKFLOW.md`), after ing-12, then paste back the
    timings, `sync_method` and counts.
@@ -91,12 +97,12 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-055 (user ask, ui-12): each timeline step has Run; UI tasks keep the Mac awake (`caffeinate -ims -w <pid>`).
 - D-053 (agent): the UI shows runs started outside it (`ps` + `<home>/activity/<pid>.json`; catalog counts for older runs).
 - D-052 (user): show a drive's volume name on hover; rename to match on any role, with a Lightroom warning
   (rule 1 exception); relink method is a spike (vn-3).
 - D-051 (user): copies over 1 GB need a fresh drive health check; `stop` refuses, `warn` needs an accept.
 - D-050 (user): card workflow = import onto WORKING plus a trailing WORKING → MASTER backup job; no LEGACY targets.
-- D-049 (user): at most 1–2 finished tasks uncommitted; commit each task as it finishes.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

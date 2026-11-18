@@ -105,6 +105,7 @@ Note: seq-1 to seq-3 are pure and fixture-driven, so they make good parallel Hai
 | P5a.11 | ui-9 ignore drives (**done 2026-11-17**) | ui-6 | **[user]** visual check |
 | P5a.12 | ui-10 one filter bar for drives and cards (**done 2026-11-17**) | ui-8, card-3 | **[user]** visual check |
 | P5a.13 | ui-11 progress of runs started outside the UI (**done 2026-11-18**) | ui-4 | **[user]** visual check |
+| P5a.14 | ui-12 run one step, keep the Mac awake (**done 2026-11-18**) | ui-11 | **[user]** visual check |
 
 ## Phase 5b: card backup, drive health, volume names (spec `backup`, D-050..D-052)
 
