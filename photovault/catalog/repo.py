@@ -283,6 +283,14 @@ def set_job_state(conn: sqlite3.Connection, job_id: int, state: str) -> None:
 # --- shoots and capture groups (ing-6) ----------------------------------------------------------------------
 
 
+def promote_group(conn: sqlite3.Connection, group_id: int, *, canonical_stem: str, shoot_id: int) -> None:
+    """Give a group made by ``index`` (no shoot yet) its canonical stem and shoot at its first card ingest (ing-12).
+
+    A group that already has a shoot is left alone."""
+    conn.execute("UPDATE capture_groups SET canonical_stem = ?, shoot_id = ? WHERE group_id = ? AND shoot_id IS NULL",
+                 (canonical_stem, shoot_id, group_id))
+
+
 def get_or_create_shoot(conn: sqlite3.Connection, *, name: str, shoot_date: str, folder_rel: str) -> int:
     """Return the ``shoot_id`` for ``(shoot_date, name)``, creating it if new."""
     conn.execute(

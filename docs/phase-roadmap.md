@@ -53,7 +53,7 @@ Policy: one verified copy on WORKING (D-003).
 | P2.9 | ing-9 CLI wiring (**done 2026-11-11**) | ing-8 | G | — |
 | P2.10 | ing-10 fault suite **[stronger]** (**done 2026-11-11**) | ing-9 | G | — |
 | P2.11 | ing-11 acceptance | ing-10, ing-12 | G | **[user]** real card → X9 Pro, after ing-12 |
-| P2.12 | ing-12 legacy-known frames get the naming-spec stem **[stronger]** (D-042) | ing-10 | G | — |
+| P2.12 | ing-12 legacy-known frames get the naming-spec stem **[stronger]** (D-042) (**done 2026-11-17**) | ing-10 | G | — |
 | P2.13 | ing-13 hash a card file once when only a legacy copy matches **[stronger]** (D-042) | ing-12 | G | — |
 
 Notes:

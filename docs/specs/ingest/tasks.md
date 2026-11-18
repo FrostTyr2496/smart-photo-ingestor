@@ -268,7 +268,7 @@ Rules:
   - Verify: `uv run photovault card-status "/Volumes/NIKON Z 6_2"` exits 0
   - _Design:_ audit §6 Phase 2 gate
 
-- [ ] 12. **[stronger]** Name a card frame already known from a legacy drive by the naming spec
+- [x] 12. **[stronger]** Name a card frame already known from a legacy drive by the naming spec
   - ID: ing-12
   - Blocks on: ing-10
   - Why (review of 2026-11-11, confirmed in the code): `index` stores a legacy group with `canonical_stem` = its
@@ -297,6 +297,7 @@ Rules:
     - a group already created by an earlier ingest keeps its stem when a card frame matches it.
   - Verify: `uv run pytest tests/test_baseline_hash.py -q`
   - _Design:_ system-design §3 (`plan_card_ingest`), §4; D-004, D-005, D-035, D-042
+  - Result (2026-11-17): `uv run pytest tests/test_baseline_hash.py -q` → 18 passed.
 
 - [ ] 13. **[stronger]** Hash a card file once, not twice, when only a legacy copy matches
   - ID: ing-13

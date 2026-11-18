@@ -299,3 +299,92 @@ def test_heartbeat_names_the_file_being_read(env, capsys, monkeypatch) -> None:
     assert len(beats) == 8
     assert beats[0]["message"].endswith("reading Photos/2024/A/DSC_0001.JPG")
     assert [b["current"] for b in beats] == list(range(8))
+
+
+# --- ing-12: a group made by `index` gets the D-005 name at its first card ingest ----------------------------------
+
+
+def card_with(env, *rels: str) -> Path:
+    """A card holding copies of legacy files (by legacy rel path), in one DCIM folder."""
+    card = env["vols"] / "CARD1"
+    d = card / "DCIM" / "100NZ6_2"
+    d.mkdir(parents=True, exist_ok=True)
+    for rel in rels:
+        shutil.copy2(env["drive"] / rel, d / Path(rel).name)
+    return card
+
+
+def work_drive(env, capsys) -> Path:
+    work = env["vols"] / "WORK"
+    work.mkdir()
+    code, _ = run(capsys, "volumes", "assign", str(work), "--role", "WORKING")
+    assert code == 0
+    return work
+
+
+def group_of(c, rel: str):
+    return c.execute(
+        "SELECT g.* FROM capture_groups g JOIN assets a ON a.group_id = g.group_id "
+        "JOIN instances i ON i.asset_id = a.asset_id WHERE i.rel_path = ?", (rel,)).fetchone()
+
+
+def test_legacy_group_gets_canonical_name_at_ingest(env, capsys) -> None:
+    card = card_with(env, "Photos/2024/A/DSC_0001.NEF")
+    assign_and_index(capsys, env["drive"])
+    run(capsys, "hash", str(env["drive"]))
+    before = group_of(conn(), "Photos/2024/A/DSC_0001.NEF")
+    assert before["shoot_id"] is None and before["canonical_stem"] == "DSC_0001"
+
+    work = work_drive(env, capsys)
+    code, lines = run(capsys, "ingest", "--source", str(card), "--target", str(work), "--dry-run")
+    assert code == 0, lines
+    assert group_of(conn(), "Photos/2024/A/DSC_0001.NEF")["shoot_id"] is None  # the dry-run plan was rolled back
+
+    code, lines = run(capsys, "ingest", "--source", str(card), "--target", str(work))
+    assert code == 0 and result(lines)["copied"] == 1, lines
+    names = [p.name for p in work.rglob("*.NEF")]
+    assert len(names) == 1 and names[0].startswith("M0001_"), names
+    after = group_of(conn(), "Photos/2024/A/DSC_0001.NEF")
+    assert after["group_id"] == before["group_id"] and after["shoot_id"] is not None
+    assert after["canonical_stem"] != after["original_stem"]
+    assert (env["drive"] / "Photos/2024/A/DSC_0001.NEF").exists()  # the legacy file keeps its name
+
+    code, lines = run(capsys, "ingest", "--source", str(card), "--target", str(work))
+    assert code == 0 and result(lines)["copied"] == 0, lines
+    assert [p.name for p in work.rglob("*.NEF")] == names
+
+
+def test_ingested_group_keeps_its_stem(env, capsys) -> None:
+    card = card_with(env, "Photos/2024/A/DSC_0001.NEF")
+    work = work_drive(env, capsys)
+    run(capsys, "ingest", "--source", str(card), "--target", str(work))
+    stem = conn().execute("SELECT canonical_stem FROM capture_groups").fetchone()[0]
+    shutil.rmtree(card)
+    card2 = env["vols"] / "CARD2" / "DCIM" / "100NZ6_2"
+    card2.mkdir(parents=True)
+    (card2 / "DSC_0001.NEF").write_bytes(os.urandom(4000))  # same frame (body, shutter count), other bytes
+    code, lines = run(capsys, "ingest", "--source", str(env["vols"] / "CARD2"), "--target", str(work), "--dry-run")
+    assert code == 0, lines
+    assert conn().execute("SELECT canonical_stem FROM capture_groups").fetchone()[0] == stem
+
+
+def test_rollover_frames_get_different_names(env, capsys, monkeypatch) -> None:
+    """Same camera number on the legacy drive and the card, different shutter counts: two groups, two names."""
+    def rolled(paths, **kw):
+        res = fake_read(paths, **kw)
+        for p in paths:
+            if "DCIM" in p.parts:
+                res.meta[p]["ShutterCount"] += 10_000
+        return res
+
+    monkeypatch.setattr(metadata, "read_metadata", rolled)
+    card = card_with(env)
+    (card / "DCIM" / "100NZ6_2" / "DSC_0001.NEF").write_bytes(os.urandom(6000))
+    assign_and_index(capsys, env["drive"])
+    run(capsys, "hash", str(env["drive"]))
+    work = work_drive(env, capsys)
+    code, lines = run(capsys, "ingest", "--source", str(card), "--target", str(work))
+    assert code == 0 and result(lines)["copied"] == 1 and result(lines)["failed"] == 0, lines
+    legacy = group_of(conn(), "Photos/2024/A/DSC_0001.NEF")
+    assert legacy["shoot_id"] is None and legacy["canonical_stem"] == "DSC_0001"  # untouched
+    assert [p.name for p in work.rglob("*.NEF")][0].startswith("M0001_")

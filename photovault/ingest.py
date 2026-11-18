@@ -115,13 +115,22 @@ def plan_card_ingest(
         shoot = shoot_date(group.capture_time, cfg.naming.day_boundary_hour)
         folder = dest_dir(cfg, shoot, shoot_name, nick)
         existing = repo.find_group(conn, body_id, group.shutter_count)
-        if existing is not None:
-            stem, group_id = existing["canonical_stem"], int(existing["group_id"])
-        else:
-            stem = canonical_stem(group, nick, cfg.naming.template)
-            shoot_id = repo.get_or_create_shoot(
+
+        def new_shoot() -> int:
+            return repo.get_or_create_shoot(
                 conn, name=shoot_name or "", shoot_date=shoot.isoformat(), folder_rel=str(folder.parent)
             )
+
+        if existing is not None and existing["shoot_id"] is not None:
+            stem, group_id = existing["canonical_stem"], int(existing["group_id"])
+        elif existing is not None:
+            # A group made by `index` (legacy drive or card check) keeps the camera's stem and no shoot. Give it
+            # the D-005 name now; its legacy files keep their on-disk names (ing-12, D-042).
+            stem, group_id = canonical_stem(group, nick, cfg.naming.template), int(existing["group_id"])
+            repo.promote_group(conn, group_id, canonical_stem=stem, shoot_id=new_shoot())
+        else:
+            stem = canonical_stem(group, nick, cfg.naming.template)
+            shoot_id = new_shoot()
             group_id = repo.insert_group(
                 conn,
                 body_id=body_id,
