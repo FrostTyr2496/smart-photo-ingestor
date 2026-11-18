@@ -69,7 +69,7 @@ task's commit:
 ```
 
 ## Next
-0. **[user] visual check (ui-5..12, card-3):** restart `uv run photovault serve` (it picks up ui-11/12), try drives,
+0. **[user] visual check (ui-5..13, card-3):** restart `uv run photovault serve` (it picks up ui-11/12), try drives,
    cards, a step's Run button (e.g. Hash) and the editor.
 1. **ing-13 [stronger]** (D-042): stops a double card read at import (ing-12 is done). Then:
 2. **[user] ing-11:** the first real import (commands in `docs/user/CARD_WORKFLOW.md`), after ing-12, then paste back the
@@ -97,12 +97,12 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-056 (agent, ui-13): a finished hash with indexed files still waiting shows as incomplete, never done.
 - D-055 (user ask, ui-12): each timeline step has Run; UI tasks keep the Mac awake (`caffeinate -ims -w <pid>`).
 - D-053 (agent): the UI shows runs started outside it (`ps` + `<home>/activity/<pid>.json`; catalog counts for older runs).
 - D-052 (user): show a drive's volume name on hover; rename to match on any role, with a Lightroom warning
   (rule 1 exception); relink method is a spike (vn-3).
 - D-051 (user): copies over 1 GB need a fresh drive health check; `stop` refuses, `warn` needs an accept.
-- D-050 (user): card workflow = import onto WORKING plus a trailing WORKING → MASTER backup job; no LEGACY targets.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

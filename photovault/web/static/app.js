@@ -373,8 +373,11 @@ function stepView(d, step, last) {
   }
   if (!last) return { cls: "never", when: "Never run" };
   const ago = relTime(last.at);
+  const left = last.pending ? ` · ${fmtInt(last.pending)} left` : "";
   if (last.state === "done") return { cls: "done", when: `Last run ${ago}` };
-  if (last.state === "paused") return { cls: "warn", when: `Paused ${ago}` };
+  // A hash that finished while files still wait (ui-13): e.g. it ran before the index found them.
+  if (last.state === "incomplete") return { cls: "warn", when: `${fmtInt(last.pending)} files not hashed yet` };
+  if (last.state === "paused") return { cls: "warn", when: `Paused ${ago}${left}` };
   if (last.state === "failed") return { cls: "warn", when: `Failed ${ago}` };
   return { cls: "warn", when: `Interrupted ${ago}` };
 }

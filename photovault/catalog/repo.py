@@ -425,6 +425,8 @@ def volume_runs(conn: sqlite3.Connection, volume_id: str, limit: int = 20) -> li
 def volume_last_steps(conn: sqlite3.Connection, volume_id: str) -> dict[str, dict | None]:
     """When each workflow step last ran on a volume: ``{step: {"at", "state"} | None}``.
 
+    Hash also has ``pending`` (indexed files with no full hash); a ``done`` hash with any is ``incomplete``.
+
     Index and hash come from their newest job. Scan metadata and sidecars have no job rows (no schema change), so
     they use the newest ``group_meta.updated_at`` (also moved by a metadata edit) and ``sidecars.seen_at``."""
     out: dict[str, dict | None] = {"index": None, "hash": None, "scan": None, "sidecars": None}
@@ -434,6 +436,15 @@ def volume_last_steps(conn: sqlite3.Connection, volume_id: str) -> dict[str, dic
             "WHERE source_volume_id = ? AND kind = ? ORDER BY job_id DESC LIMIT 1", (volume_id, kind)).fetchone()
         if row:
             out[step] = {"at": row["at"], "state": row["state"]}
+    # A finished hash is only complete when no indexed file still waits for one (ui-13): an index after the hash,
+    # or a hash that ran over an empty index, leaves files unhashed.
+    if out["hash"] is not None:
+        pending = conn.execute(
+            "SELECT COUNT(*) FROM instances WHERE volume_id = ? AND state = 'indexed' AND asset_id IS NULL",
+            (volume_id,)).fetchone()[0]
+        out["hash"]["pending"] = pending
+        if pending and out["hash"]["state"] == "done":
+            out["hash"]["state"] = "incomplete"
     scan = conn.execute(
         """
         SELECT MAX(m.updated_at) AS at FROM group_meta m

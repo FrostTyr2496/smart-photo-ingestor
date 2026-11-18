@@ -284,3 +284,13 @@ still naive, apply the `settings` value `default_offset` (default "+00:00"). The
   - Verify: `uv run pytest tests/test_web_api.py -q`
   - Result (2026-11-18): `uv run pytest tests/test_web_api.py -q` → 53 passed; full suite 469 passed, 4 skipped.
     Real `caffeinate -ims -w <pid>` held its assertions and exited with the process.
+
+- [x] 13. Hash is not "done" while files wait (visual check pending, user)
+  - ID: ui-13 (after ui-12)
+  - The Hash step showed a green tick from a run that hashed 0 files (an index found nothing, then a later index
+    found 112,797). `volume_last_steps` now returns `pending` for hash (instances `indexed` with no asset), and a
+    `done` hash with pending files becomes `incomplete`; the timeline shows "N files not hashed yet" in the warning
+    colour. Files left by `--skip-prefix` or deferred folders count as pending, which is true. No schema change.
+  - Verify: `uv run pytest tests/test_web_api.py tests/test_catalog_repo.py -q`
+  - Result (2026-11-18): `uv run pytest tests/test_web_api.py tests/test_catalog_repo.py -q` → 66 passed; full suite
+    470 passed, 4 skipped. The real catalog now reports the 12 TB drive's hash as incomplete, 112,797 pending.

@@ -165,3 +165,27 @@ def test_transaction_commits_and_rolls_back(conn) -> None:
         _vol(conn)
     assert conn.execute("SELECT COUNT(*) FROM volumes").fetchone()[0] == 1
     assert not conn.in_transaction
+
+
+def test_hash_step_is_incomplete_while_files_wait(conn) -> None:
+    """ui-13: an empty index, a hash of 0 files, then an index that finds files must not show hash as done."""
+    repo.upsert_volume(conn, volume_id="v", role="LEGACY", label="L", fs_type="ntfs", da_volume_uuid=None,
+                       marker_id=None, capacity_bytes=None, mount_path=None)
+
+    def job(kind: str) -> None:
+        job_id = repo.create_job(conn, kind=kind, source_volume_id="v", target_volume_id=None, params={})
+        repo.set_job_state(conn, job_id, "done")
+
+    job("index_volume")
+    job("baseline_hash")
+    assert repo.volume_last_steps(conn, "v")["hash"] | {"at": None} == {"at": None, "state": "done", "pending": 0}
+    job("index_volume")
+    for name in ("a.NEF", "b.NEF"):
+        repo.upsert_instance(conn, volume_id="v", rel_path=name, size=1, mtime_ns=1, kind="photo", state="indexed")
+    step = repo.volume_last_steps(conn, "v")["hash"]
+    assert (step["state"], step["pending"]) == ("incomplete", 2)
+    asset = repo.insert_asset(conn, sha256="a" * 64, size=1, partial_sha256="aa", kind="photo")
+    for name in ("a.NEF", "b.NEF"):  # both hashed: complete again (same bytes, for brevity)
+        repo.upsert_instance(conn, volume_id="v", rel_path=name, size=1, mtime_ns=1, kind="photo", state="verified",
+                             asset_id=asset)
+    assert repo.volume_last_steps(conn, "v")["hash"]["state"] == "done"
