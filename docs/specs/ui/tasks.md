@@ -259,3 +259,17 @@ still naive, apply the `settings` value `default_offset` (default "+00:00"). The
     counted. Camera on a drive file comes from its asset's capture group; no schema change.
   - Verify: `uv run pytest tests/test_web_api.py -q`
   - Result (2026-11-17): `uv run pytest tests/test_web_api.py -q` → 50 passed; full suite 442 passed, 4 skipped.
+
+- [x] 11. Progress of runs started outside the UI (visual check pending, user)
+  - ID: ui-11 (after ui-4)
+  - The sidebar lists engine runs the UI did not start (a terminal `index`, `hash`, `ingest`, ...) with their
+    progress. Live processes come from `ps` (any `photovault` command except `serve` and the server's own
+    children). Each long command writes its newest `progress` event to `<home>/activity/<pid>.json`
+    (`activity.ActivityEmitter`, a subclass, so the §3 `Emitter` signature is unchanged; removed at exit). A run
+    without that file (started on older code) gets counts from the catalog for its `running` job, matched by mount:
+    files recorded (index), hashed/remaining (hash), committed/items (ingest), and the time of the last write.
+    `running` jobs with no process are listed as stale. `GET /api/activity`. Read-only; no schema change.
+  - Verify: `uv run pytest tests/test_activity.py tests/test_web_api.py -q`
+  - Result (2026-11-18): `uv run pytest tests/test_activity.py tests/test_web_api.py -q` → 71 passed; full suite 467
+    passed, 4 skipped. A live `/api/activity` showed the running terminal index with catalog counts, and 9 stale jobs.
+    Out of scope: pausing an outside run from the UI, and repairing stale jobs (idx-9).

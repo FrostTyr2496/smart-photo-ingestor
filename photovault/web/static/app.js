@@ -9,6 +9,8 @@ const DRIVE_LATE_MS = 2000;    // and once more, for a slow mount
 const TASK_FAST_MS = 1000;   // poll running tasks this often
 const TASK_IDLE_MS = 5000;   // poll when nothing runs
 const TASK_LIST_MS = 5000;   // re-read the full task list this often
+const ACTIVITY_MS = 3000;    // re-read runs started outside the UI this often (ui-11)
+const QUIET_WARN_S = 600;    // a run with no catalog write for this long gets a "may be stuck" note
 const SEARCH_GAP_MS = 1000;
 const RECENT_FINISHED = 3;   // finished tasks shown before the "Earlier" group
 
@@ -41,6 +43,9 @@ const st = {
   marker: null,
   lastSearch: 0,
   tasks: new Map(),    // task_id -> task record (see newTask)
+  elsewhere: [],       // runs the UI did not start, from /api/activity (ui-11)
+  staleJobs: [],       // jobs marked running that no process is doing
+  staleOpen: false,
   pausing: new Set(),  // task ids a pause was requested for, until they finish
   techOpen: new Set(), // task ids whose "Technical details" are open
   earlierOpen: false,
@@ -857,7 +862,8 @@ function renderTasks() {
   const now = Date.now();
   const all = [...st.tasks.values()].sort((a, b) => b.task_id - a.task_id);
   if (!all.length) {
-    setChildren(box, [el("p", { class: "muted small" }, "Nothing has run yet. Tasks you start appear here.")]);
+    setChildren(box, st.elsewhere.length ? []
+      : [el("p", { class: "muted small" }, "Nothing has run yet. Tasks you start appear here.")]);
     updateGlobal();
     syncDriveViews();
     return;
@@ -896,8 +902,9 @@ function syncDriveViews() {
 }
 
 // The slim header bar: average progress when every running task is countable, else a moving bar.
+// Runs started outside the UI count too.
 function updateGlobal() {
-  const running = [...st.tasks.values()].filter((t) => !t.final);
+  const running = [...st.tasks.values()].filter((t) => !t.final).concat(st.elsewhere.map(extTask));
   const wrap = $("#global");
   wrap.hidden = running.length === 0;
   if (!running.length) return;
@@ -1007,6 +1014,7 @@ async function onTasksFinished(list) {
 let ticking = false;
 let tickTimer = null;
 let lastListMs = 0;
+let lastActivityMs = 0;
 
 async function tick() {
   if (ticking) return;
@@ -1018,11 +1026,15 @@ async function tick() {
       await refreshTaskList().catch(() => {});
     }
     await pollTasks();
+    if (Date.now() - lastActivityMs >= ACTIVITY_MS) {
+      lastActivityMs = Date.now();
+      await loadActivity().catch(() => {});
+    }
   } catch (err) {
     // The loop keeps running even when one pass fails.
   } finally {
     ticking = false;
-    const live = [...st.tasks.values()].some((t) => !t.final);
+    const live = [...st.tasks.values()].some((t) => !t.final) || st.elsewhere.length > 0;
     tickTimer = setTimeout(tick, live ? TASK_FAST_MS : TASK_IDLE_MS);
   }
 }
@@ -1031,6 +1043,161 @@ function kick() {
   if (!ticking) {
     clearTimeout(tickTimer);
     tick();
+  }
+}
+
+// ---------------------------------------------------------------- runs started outside the UI (ui-11)
+
+// A run started elsewhere, in the shape the task helpers (taskTitle, progressLine, updateGlobal) expect.
+// A run with a progress file has exact numbers; an older one has counts from its catalog job.
+function extTask(e) {
+  const j = e.job;
+  const progress = e.progress || (j && j.current != null ? { current: j.current, total: j.total || 0 } : null);
+  return {
+    argv: e.words || [], progress, final: false,
+    startMs: Date.parse(e.phase_started_at || e.started_at) || null,
+  };
+}
+
+function agoText(iso, now) {
+  const ms = Date.parse(iso || "");
+  return Number.isNaN(ms) ? "" : `${fmtElapsed((now - ms) / 1000)} ago`;
+}
+
+// Progress for a run known only from the catalog: counts since its job started, its pace, and the newest write.
+function catalogLine(e, now) {
+  const j = e.job;
+  if (!j) return `Running for ${fmtElapsed((now - Date.parse(e.started_at)) / 1000)}. No catalog job matched it.`;
+  const cur = Number(j.current) || 0;
+  const total = Number(j.total) || 0;
+  const parts = [total
+    ? `${fmtInt(cur)} of ${fmtInt(total)} ${j.unit} · ${Math.min(100, Math.floor((cur / total) * 100))}%`
+    : `${fmtInt(cur)} ${j.unit}`];
+  parts.push(`${fmtElapsed((now - Date.parse(e.started_at)) / 1000)} elapsed`);
+  const since = (now - Date.parse(j.created_at)) / 1000;
+  if (cur > 0 && since >= 60) {
+    const rate = cur / since;
+    parts.push(`${fmtInt(Math.round(rate * 60))} per min`);
+    if (total && cur < total) parts.push(fmtEta((total - cur) / rate));
+  }
+  return parts.join(" · ");
+}
+
+// What the note under the bar says, and whether it is a warning.
+function extNote(e, now) {
+  if (e.source === "progress_file") {
+    const msg = (e.progress && e.progress.message) || "";
+    return { text: e.warning ? `${msg}${msg ? " · " : ""}${e.warnings} warning(s), last: ${e.warning}` : msg, warn: false };
+  }
+  const j = e.job;
+  if (!j) return { text: "", warn: false };
+  if (!j.last_write_at) {
+    return { text: j.kind === "index_volume" ? "No files recorded yet. It is probably still walking the drive." : "No catalog writes yet.", warn: false };
+  }
+  const quiet = (now - Date.parse(j.last_write_at)) / 1000;
+  if (quiet > QUIET_WARN_S) {
+    return { text: `No catalog writes for ${fmtElapsed(quiet)}. It may be stuck on a slow or failing drive.`, warn: true };
+  }
+  return { text: `Last catalog write ${agoText(j.last_write_at, now)}.`, warn: false };
+}
+
+const extViews = new Map(); // pid -> node refs, kept so the bar's width transition runs between polls
+
+function makeExtView() {
+  const v = {};
+  v.title = el("span", { class: "task-title" });
+  v.pill = el("span", { class: "pill state-running" }, "Running");
+  v.fill = el("div", { class: "fill" });
+  v.bar = el("div", { class: "bar", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": "100" }, v.fill);
+  v.line = el("div", { class: "task-line" });
+  v.note = el("div", { class: "task-note" });
+  v.origin = el("div", { class: "task-note" });
+  v.code = el("code");
+  v.tech = el("details", { class: "tech" }, el("summary", null, "Technical details"), v.code);
+  v.root = el("div", { class: "task task-ext" },
+    el("div", { class: "task-head" }, v.title, v.pill), v.bar, v.line, v.note, v.origin, v.tech);
+  return v;
+}
+
+function paintExt(v, e, now) {
+  const t = extTask(e);
+  v.title.textContent = taskTitle(t);
+  const total = t.progress && Number(t.progress.total) > 0 ? Number(t.progress.total) : 0;
+  v.bar.classList.toggle("indet", !total);
+  v.bar.setAttribute("aria-label", taskTitle(t));
+  if (total) {
+    const pct = Math.min(100, Math.floor(((Number(t.progress.current) || 0) / total) * 100));
+    v.fill.style.width = `${pct}%`;
+    v.bar.setAttribute("aria-valuenow", String(pct));
+  } else {
+    v.fill.style.width = "";
+    v.bar.removeAttribute("aria-valuenow");
+  }
+  v.line.textContent = (e.source === "progress_file" ? progressLine(t, now) : catalogLine(e, now)) || "Starting…";
+  const note = extNote(e, now);
+  v.note.hidden = !note.text;
+  v.note.textContent = note.text;
+  v.note.classList.toggle("problem", note.warn);
+  v.origin.textContent = e.source === "progress_file"
+    ? "Started outside this window."
+    : "Started outside this window. Counts come from the catalog; exact totals show for runs started after this update.";
+  const j = e.job;
+  v.code.textContent = `pid ${e.pid}${j ? ` · job ${j.job_id} (${j.kind})` : ""} · started ${e.started_at}\n`
+    + `photovault ${(e.words || []).join(" ")}`;
+}
+
+let staleEl = null;
+function staleBlock() {
+  if (!staleEl) {
+    staleEl = el("details", {
+      class: "earlier",
+      ontoggle: (ev) => { st.staleOpen = ev.currentTarget.open; },
+    }, el("summary", null), el("p", { class: "muted small" },
+      "A run ended without closing its job (for example the terminal was closed). Nothing is working on these."),
+    el("div", null));
+  }
+  return staleEl;
+}
+
+const JOB_WORD = { index_volume: "Index", baseline_hash: "Hash", card_ingest: "Import", replicate: "Backup", fixity_audit: "Audit" };
+
+function renderElsewhere() {
+  const box = $("#elsewhere");
+  const now = Date.now();
+  const nodes = [];
+  const pids = new Set();
+  for (const e of st.elsewhere) {
+    pids.add(e.pid);
+    let v = extViews.get(e.pid);
+    if (!v) { v = makeExtView(); extViews.set(e.pid, v); }
+    paintExt(v, e, now);
+    nodes.push(v.root);
+  }
+  for (const pid of [...extViews.keys()]) if (!pids.has(pid)) extViews.delete(pid);
+  if (st.staleJobs.length) {
+    const b = staleBlock();
+    b.open = st.staleOpen;
+    b.firstChild.textContent = `Marked running, but stopped (${st.staleJobs.length})`;
+    setChildren(b.lastChild, st.staleJobs.map((j) => el("div", { class: "task-note" },
+      `Job ${j.job_id} · ${JOB_WORD[j.kind] || j.kind} · ${j.label || "unknown drive"} · started ${relTime(j.created_at) || j.created_at}`)));
+    nodes.push(b);
+  }
+  box.hidden = nodes.length === 0;
+  setChildren(box, nodes);
+}
+
+async function loadActivity() {
+  const d = await api("GET", "/api/activity");
+  const before = new Map(st.elsewhere.map((e) => [e.pid, e]));
+  st.elsewhere = d.activity || [];
+  st.staleJobs = d.stale_jobs || [];
+  const gone = [...before.values()].filter((e) => !st.elsewhere.some((x) => x.pid === e.pid));
+  renderElsewhere();
+  renderTasks();
+  if (gone.length) {
+    for (const e of gone) toast(`${taskTitle(extTask(e))} has ended. It was started outside this window, so see its terminal for the result.`, "ok");
+    await Promise.allSettled([loadDrives(), loadShoots(), loadGroups()]);
+    if (st.driveView && !st.workflow) await loadDriveView().catch(reportError);
   }
 }
 

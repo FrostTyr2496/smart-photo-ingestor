@@ -11,6 +11,7 @@ import webbrowser
 from pathlib import Path
 
 from photovault import cards, meta, report, volumes
+from photovault.activity import ActivityEmitter
 from photovault.drives import CLI_DRIVE_KEYS, VOLUMES_ROOT, scan_mounts
 from photovault.web import server as web_server
 from photovault.catalog import db, repo
@@ -436,14 +437,18 @@ def main(argv: list[str] | None = None) -> int:
         args = parser.parse_args(argv)
     except SystemExit as exc:
         return EXIT_USAGE if exc.code else EXIT_OK
-    emit = Emitter(sys.stdout, json_mode=args.json)
+    # ActivityEmitter also keeps <home>/activity/<pid>.json current, so the web UI can show this run (ui-11).
+    emit = ActivityEmitter(sys.stdout, json_mode=args.json)
     try:
         cfg = load_config()
+        emit.track(cfg.home, list(sys.argv[1:] if argv is None else argv))
         return args.func(args, cfg, emit)
     except (ValueError, ConfigError, FileExistsError, RuntimeError, OSError, volumes.CardWriteRefused,
             volumes.UnknownVolume, CatalogInUse, LrcatSchemaError) as exc:
         emit.emit("error", code=type(exc).__name__, message=str(exc))
         return EXIT_ERROR
+    finally:
+        emit.close()
 
 
 if __name__ == "__main__":

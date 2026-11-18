@@ -40,14 +40,19 @@ Reference docs:
 - **Web UI (D-045, specs `docs/specs/ui`, `docs/specs/cards`):** `uv run photovault serve` → 127.0.0.1:8765.
   Drives (with Ignore, ui-9), tasks, a metadata view, a drive summary (ui-7) with copies across drives (ui-8), a
   Cards view (card-3; `cards check <mount>` = index + hash, read-only), and one filter bar for drive and card file
-  lists (ui-10: Show · Copies · Camera, "x / N files", drives always named). ui-7..10 and card-3 not seen in a
-  browser yet. The Mac folder (`mac_folder`, default `~/Sandbox`) is a drive (D-047).
+  lists (ui-10: Show · Copies · Camera, "x / N files", drives always named). Tasks also shows runs started in a
+  terminal, plus jobs left `running` with no process (ui-11, D-053). ui-7..11 and card-3 not seen in a browser yet.
+  The Mac folder (`mac_folder`, default `~/Sandbox`) is a drive (D-047).
 - Hooks: `guard_volumes.py` blocks agent writes and engine runs on `/Volumes`; live tests read mounts only under
   `-m live` (D-028, D-031). Old v0 code: local branch `archive/v0-cli-2026-11-11`.
 - The repo is public. Real-drive facts and photos stay in `docs/private/` and `testdata/` (gitignored).
 
 ## In progress
-- Task: none.
+- Task: untracked work, not ui-11 (ui-11 is committed); found uncommitted on 2026-11-18, no task ID
+- Files touched: photovault/scan.py, tests/test_scan.py (NTFS/Synology walk), photovault/web/static/app.js,
+  app.css, index.html (new-drive setup view, read-only NTFS roles)
+- Last verified: `uv run pytest -q` → 467 passed, 4 skipped (with this work in the tree)
+- Notes: from another session; it needs a task ID and its own commit. ui-11's hunks in those files are committed.
 
 When you start a task, replace `none` with this block before your first edit, and set it back to `none` in the
 task's commit:
@@ -59,7 +64,7 @@ task's commit:
 ```
 
 ## Next
-0. **[user] visual check (ui-5..10, card-3):** run `uv run photovault serve`, try drives, cards and the editor.
+0. **[user] visual check (ui-5..11, card-3):** restart the server so it picks up ui-11, then run `uv run photovault serve`, try drives, cards and the editor.
 1. **ing-13 [stronger]** (D-042): stops a double card read at import (ing-12 is done). Then:
 2. **[user] ing-11:** the first real import (commands in `docs/user/CARD_WORKFLOW.md`), after ing-12, then paste back the
    timings, `sync_method` and counts.
@@ -86,12 +91,12 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-053 (agent): the UI shows runs started outside it (`ps` + `<home>/activity/<pid>.json`; catalog counts for older runs).
 - D-052 (user): show a drive's volume name on hover; rename to match on any role, with a Lightroom warning
   (rule 1 exception); relink method is a spike (vn-3).
 - D-051 (user): copies over 1 GB need a fresh drive health check; `stop` refuses, `warn` needs an accept.
 - D-050 (user): card workflow = import onto WORKING plus a trailing WORKING → MASTER backup job; no LEGACY targets.
 - D-049 (user): at most 1–2 finished tasks uncommitted; commit each task as it finishes.
-- D-048 (agent): `cards check` = register + index + hash, read-only.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

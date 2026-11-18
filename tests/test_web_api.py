@@ -791,3 +791,29 @@ def test_every_built_command_is_allowed_by_run(srv: Client) -> None:
     built = set(re.findall(r'cmd == "(\w+)"|"(\w+)": "', inspect.getsource(web.build_argv)))
     names = {a or b for a, b in built} - {"card-status", "index", "hash"}
     assert names | {"card_status", "index", "hash"} <= set(web.ALLOWED_CMDS)
+
+
+# --------------------------------------------------------------------------- runs started elsewhere (ui-11)
+
+def test_activity_lists_outside_runs_and_stale_jobs(srv: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    import os
+
+    from photovault import activity
+
+    conn = db.connect(load_config().catalog_path)
+    live = repo.create_job(conn, kind="index_volume", source_volume_id="vol-leg", target_volume_id=None,
+                           params={"mount": "/Volumes/Big Drive"})
+    stale = repo.create_job(conn, kind="baseline_hash", source_volume_id="vol-leg", target_volume_id=None,
+                            params={"mount": "/Volumes/PP 1"})
+    for job_id in (live, stale):
+        repo.set_job_state(conn, job_id, "running")
+    conn.close()
+    text = "--json index /Volumes/Big Drive"
+    procs = [activity.EngineProcess(pid=4242, ppid=1, elapsed_s=90, words=activity.guess_words(text), text=text),
+             activity.EngineProcess(pid=4243, ppid=os.getpid(), elapsed_s=5, words=["hash", "/x"], text="hash /x")]
+    monkeypatch.setattr(activity, "list_processes", lambda: procs)
+    status, body = srv.call("GET", "/api/activity")
+    assert status == 200
+    assert [(a["pid"], a["words"], a["job"]["job_id"]) for a in body["activity"]] == [
+        (4242, ["index", "/Volumes/Big Drive"], live)]
+    assert [j["job_id"] for j in body["stale_jobs"]] == [stale]

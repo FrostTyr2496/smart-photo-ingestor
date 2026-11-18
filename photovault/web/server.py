@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from photovault import cards, preview, volumes
+from photovault import activity, cards, preview, volumes
 from photovault.catalog import db, repo
 from photovault.drives import DEFAULT_MAC_FOLDER, VOLUMES_ROOT, scan_mounts
 from photovault.geo import offset_tz, suggest
@@ -669,6 +669,7 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
             conn, _int_param(query, "limit", 20, 1, 200))]},
         ("POST", "/api/run"): lambda: _run(app, body),
         ("GET", "/api/tasks"): lambda: {"tasks": app.runner.summaries()},
+        ("GET", "/api/activity"): lambda: activity.snapshot(conn, app.home, server_pid=os.getpid()),
         ("GET", "/api/shoots"): lambda: {"shoots": [dict(r) for r in repo.list_shoots(conn)]},
         ("GET", "/api/groups"): lambda: _groups(conn, query),
         ("POST", "/api/groups/meta"): lambda: _groups_meta(conn, body),
