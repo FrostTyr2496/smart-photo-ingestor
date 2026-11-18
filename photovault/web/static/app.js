@@ -23,10 +23,10 @@ const st = {
   settings: {},
   showIgnored: readPref("showIgnoredDrives") === "1", // the folded "Ignored drives" list is expanded
   driveView: null,     // volume_id of the drive whose summary replaces the photo grid, or null
-  driveFiles: { state: "", copies: "", offset: 0 }, // file list filter and paging inside that summary
+  driveFiles: { state: "", copies: "", camera: "", offset: 0 }, // file list filter and paging inside that summary
   cardsOpen: false,    // the Cards view replaces the photo grid
   cardView: null,      // volume_id of the card whose ranked file list is open, or null for the card list
-  cardFiles: { tier: "", camera: "", offset: 0 },
+  cardFiles: { tier: "", copies: "", other: "", camera: "", offset: 0 },
   cards: null,         // last /api/cards answer
   drives: [],
   groups: [],          // the current page, in grid order
@@ -1229,7 +1229,7 @@ function openDrive(volumeId) {
   st.driveView = volumeId;
   st.driveSummary = null;
   timelineBox = workflowBtn = null;
-  st.driveFiles = { state: "", copies: "", offset: 0 };
+  st.driveFiles = { state: "", copies: "", camera: "", offset: 0 };
   $("#photo-panel").hidden = true;
   $("#drive-view").hidden = false;
   renderDriveLoading(volumeId);
@@ -1263,10 +1263,11 @@ async function loadDriveView() {
   const copies = st.driveFiles.copies;
   if (copies.startsWith("on:")) params.set("other", copies.slice(3));
   else if (copies) params.set("copies", copies);
+  if (st.driveFiles.camera) params.set("camera", st.driveFiles.camera);
   const base = `/api/volumes/${encodeURIComponent(id)}`;
   const [summary, files] = await Promise.all([api("GET", base), api("GET", `${base}/files?${params}`)]);
   if (st.driveView !== id) return; // the user opened another drive, or closed this one, while this loaded
-  renderDriveView(summary, files.files);
+  renderDriveView(summary, files.files, files.total);
 }
 
 async function revealOnDrive(relPath, volumeId = st.driveView) {
@@ -1297,7 +1298,7 @@ function runItem(r) {
     el("div", { class: "small" }, detail));
 }
 
-function renderDriveView(s, files) {
+function renderDriveView(s, files, total) {
   const d = s.drive || {};
   const isCard = roleKey(d.role) === "card";
   st.driveSummary = s;
@@ -1323,27 +1324,30 @@ function renderDriveView(s, files) {
   const kinds = s.kinds.map((k) => `${k.kind} ${fmtInt(k.files)}`).join(" · ");
   const pager = el("div", { class: "pager" },
     button("Previous", () => { st.driveFiles.offset = Math.max(0, st.driveFiles.offset - FILE_PAGE); loadDriveView().catch(reportError); }),
-    el("span", { class: "muted small" }, files.length ? `${fmtInt(st.driveFiles.offset + 1)}–${fmtInt(st.driveFiles.offset + files.length)}` : "No files"),
+    el("span", { class: "muted small" }, files.length
+      ? `${fmtInt(st.driveFiles.offset + 1)}–${fmtInt(st.driveFiles.offset + files.length)} of ${fmtInt(total)}` : "No files"),
     button("Next", () => { st.driveFiles.offset += FILE_PAGE; loadDriveView().catch(reportError); }));
   pager.querySelector("button:first-child").disabled = st.driveFiles.offset === 0;
-  pager.querySelector("button:last-child").disabled = files.length < FILE_PAGE;
+  pager.querySelector("button:last-child").disabled = st.driveFiles.offset + files.length >= total;
 
   const rows = files.map((f) => el("tr", null,
     el("td", { class: "path" }, f.rel_path),
     el("td", { class: "num" }, fmtBytes(f.size)),
     el("td", null, f.kind),
+    el("td", null, f.camera_name),
     el("td", null, el("span", { class: `pill state-${f.state}` }, FILE_STATE_NAME[f.state] || f.state)),
-    el("td", null, copyCell(f)),
+    el("td", null, copyCell({ ...f, hashed: f.state === "verified" && f.copies !== null && f.copies !== undefined },
+      st.driveView, "this drive")),
     el("td", null, mounted ? button("Show in Finder", () => revealOnDrive(f.rel_path)) : null)));
 
-  const filter = el("select", { "aria-label": "Show files", onchange: (e) => setDriveFilter(e.currentTarget.value) },
-    FILE_FILTERS.map(([value, label]) => el("option", { value }, label)));
-  filter.value = st.driveFiles.state;
-  const copyOptions = COPY_FILTERS.concat(((s.copies && s.copies.by_volume) || [])
-    .map((v) => [`on:${v.volume_id}`, `Also on ${driveName(v)}`]));
-  const copyFilter = el("select", { "aria-label": "Filter by copies", onchange: (e) => setCopyFilter(e.currentTarget.value) },
-    copyOptions.map(([value, label]) => el("option", { value }, label)));
-  copyFilter.value = st.driveFiles.copies;
+  const filterBar = fileFilterBar({
+    show: { options: FILE_FILTERS, value: st.driveFiles.state, onchange: setDriveFilter },
+    copies: { options: copyFilterOptions("this drive", (s.copies && s.copies.by_volume) || []),
+      value: st.driveFiles.copies, onchange: setCopyFilter },
+    camera: { options: cameraFilterOptions(s.cameras || []), value: st.driveFiles.camera,
+      onchange: (camera) => { st.driveFiles = { ...st.driveFiles, camera, offset: 0 }; loadDriveView().catch(reportError); } },
+    shown: total, total: s.files,
+  });
 
   $("#drive-view").replaceChildren(
     el("div", { class: "section-head" },
@@ -1383,13 +1387,12 @@ function renderDriveView(s, files) {
           ? el("ul", { class: "runs" }, s.runs.map(runItem))
           : el("p", { class: "muted small" }, "No index or hash runs yet."),
         el("h3", { class: "sub" }, "Files"),
-        el("div", { class: "toolbar" }, el("label", { class: "field" }, "Show", filter),
-          el("label", { class: "field" }, "Copies", copyFilter)),
+        filterBar,
         rows.length
           ? el("div", { class: "table-wrap" }, el("table", { class: "file-table" },
             el("thead", null, el("tr", null,
               el("th", null, "Path"), el("th", { class: "num" }, "Size"), el("th", null, "Kind"),
-              el("th", null, "State"), el("th", null, "Copies"), el("th", null, ""))),
+              el("th", null, "Camera"), el("th", null, "State"), el("th", null, "Copies"), el("th", null, ""))),
             el("tbody", null, rows)))
           : el("p", { class: "muted small" }, "No files in this view."),
         pager));
@@ -1410,10 +1413,40 @@ function setCopyFilter(copies) {
 
 // Where this drive's files also live. Identity is the full hash: only hashed (verified) files are compared, and a
 // card never counts as a copy, the same rule as `report duplicates`. Read-only: nothing here deletes or marks a file.
-const COPY_FILTERS = [
-  ["", "All files"], ["elsewhere", "On other drives"], ["only_here", "Only on this drive"],
-  ["dup_here", "Duplicated on this drive"],
-];
+// The same Copies choices on a drive and on a card; `here` is "this drive" or "this card", and each other drive
+// that holds a copy gets its own named choice.
+function copyFilterOptions(here, byVolume) {
+  return [["", "All files"], ["elsewhere", "On other drives"], ["only_here", `Only on ${here}`],
+    ["dup_here", `Duplicated on ${here}`]]
+    .concat(byVolume.map((v) => [`on:${v.volume_id}`, `Also on ${driveName(v)} (${roleLabel(v.role)})`]));
+}
+
+function cameraFilterOptions(cameras) {
+  return [["", "All cameras"]].concat(cameras.map((m) => [m.camera, `${m.name} (${fmtInt(m.files)})`]));
+}
+
+// The filter bar shared by the drive and card views: Show, Copies and Camera, then how many files this view
+// shows out of all the files on the drive or card ("x / N files").
+function fileFilterBar({ show, copies, camera, shown, total }) {
+  const field = (label, f) => {
+    const select = el("select", { "aria-label": label, onchange: (e) => f.onchange(e.currentTarget.value) },
+      f.options.map(([value, text]) => el("option", { value }, text)));
+    select.value = f.value;
+    return el("label", { class: "field" }, label, select);
+  };
+  const filtered = Boolean(show.value || copies.value || camera.value);
+  return el("div", { class: "toolbar" },
+    field("Show", show), field("Copies", copies), field("Camera", camera),
+    el("div", { class: "filter-count", role: "status", "aria-live": "polite",
+      title: filtered ? "Files in this view / all files" : "All files" },
+    el("span", { class: "filter-count-num" }, `${fmtInt(shown)} / ${fmtInt(total)}`),
+    el("span", { class: "muted small" }, total === 1 ? "file" : "files")));
+}
+
+// "A", "A and B", "A, B and C".
+function nameList(names) {
+  return names.length < 2 ? (names[0] || "") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
 
 function copySection(s) {
   const c = s.copies;
@@ -1447,7 +1480,8 @@ function copySection(s) {
   });
   return el("div", null, head,
     el("div", { class: "stats" },
-      tile("elsewhere", "On other drives", c.elsewhere.files, fmtBytes(c.elsewhere.bytes)),
+      tile("elsewhere", "On other drives", c.elsewhere.files,
+        [fmtBytes(c.elsewhere.bytes), nameList(c.by_volume.map(driveName))].filter(Boolean).join(" · ")),
       tile("only_here", "Only on this drive", c.only_here.files, fmtBytes(c.only_here.bytes)),
       tile("dup_here", "Duplicated on this drive", c.dup_here.files,
         `${fmtBytes(c.dup_here.extra_bytes)} in extra copies`)),
@@ -1460,26 +1494,26 @@ function copySection(s) {
       : null);
 }
 
-// The Copies cell: how many other drives hold the same bytes, and whether this drive holds it twice. Click to list
-// every copy, each with Show in Finder when its drive is connected.
-function copyCell(f) {
-  if (f.state !== "verified" || f.copies === null || f.copies === undefined) {
-    return el("span", { class: "muted small" }, "–");
-  }
+// The Copies cell, the same on a drive and on a card: the other drives that hold the same bytes, by name, and
+// whether this drive (or card) holds it twice. Click to list every copy, each with Show in Finder when connected.
+// `f` has hashed, copy_drives ({label, role} each), dup_here and asset_id; `volumeId` is the drive or card being shown.
+function copyCell(f, volumeId, here) {
+  if (!f.hashed) return el("span", { class: "muted small" }, "–");
+  const names = (f.copy_drives || []).map((v) => `${driveName(v)} (${roleLabel(v.role)})`);
   const pills = [
-    f.copies > 0
-      ? el("span", { class: "pill copy-elsewhere" }, `+${plural(f.copies, "drive")}`)
-      : el("span", { class: "pill copy-only_here" }, "Only here"),
-    f.dup_here > 0 ? el("span", { class: "pill copy-dup_here" }, `×${f.dup_here + 1} here`) : null,
+    names.length
+      ? el("span", { class: "pill copy-elsewhere", title: `Also on ${nameList(names)}` }, `On ${nameList(names)}`)
+      : el("span", { class: "pill copy-only_here" }, `Only on ${here}`),
+    f.dup_here > 0 ? el("span", { class: "pill copy-dup_here" }, `×${f.dup_here + 1} on ${here}`) : null,
   ];
-  if (f.copies === 0 && !f.dup_here) return el("span", { class: "copy-pills" }, pills);
+  if ((!names.length && !f.dup_here) || !f.asset_id) return el("span", { class: "copy-pills" }, pills);
   return el("button", {
     type: "button", class: "copy-toggle", "aria-expanded": "false", title: "Show every copy",
-    onclick: (e) => toggleCopies(e.currentTarget, f),
+    onclick: (e) => toggleCopies(e.currentTarget, f, volumeId),
   }, pills);
 }
 
-async function toggleCopies(btn, f) {
+async function toggleCopies(btn, f, volumeId) {
   const tr = btn.closest("tr");
   const next = tr.nextElementSibling;
   if (next && next.classList.contains("copy-row")) {
@@ -1494,18 +1528,18 @@ async function toggleCopies(btn, f) {
   try {
     const data = await api("GET", `/api/assets/${encodeURIComponent(f.asset_id)}/copies`);
     cell.replaceChildren(el("ul", { class: "copy-list" }, data.copies.map((c) => {
-      const self = c.volume_id === st.driveView && c.rel_path === f.rel_path;
+      const self = c.volume_id === volumeId && c.rel_path === f.rel_path;
       const isCard = roleKey(c.role) === "card";
       return el("li", null,
         el("span", { class: `pill role-${roleKey(c.role)}` }, roleLabel(c.role)),
         el("strong", null, driveName(c)),
         el("span", { class: "path" }, c.rel_path),
         self ? el("span", { class: "muted small" }, "(this file)") : null,
-        isCard ? el("span", { class: "muted small" }, "(a card does not count as a copy)") : null,
+        isCard && !self ? el("span", { class: "muted small" }, `(${driveName(c)} is a card, so it does not count as a copy)`) : null,
         c.lr_referenced ? el("span", { class: "pill" }, "Lightroom") : null,
         c.mounted
           ? button("Show in Finder", () => revealOnDrive(c.rel_path, c.volume_id))
-          : el("span", { class: "muted small" }, "Not connected"));
+          : el("span", { class: "muted small" }, `${driveName(c)} is not connected`));
     })));
   } catch (err) {
     cell.replaceChildren(el("span", { class: "muted small" }, `Could not list copies: ${err.message}`));
@@ -1561,12 +1595,36 @@ function tierCounts(counts) {
     .map((t) => `${fmtInt(counts[t].files)} ${TIER[t].label.toLowerCase()}`).join(" · ");
 }
 
+// The drives that hold copies of a card's files, by name: "X9 Pro (Working) and Flats 1 (Legacy)".
+function cardCopyNames(c, roles) {
+  return nameList((c.copies_by_volume || []).filter((v) => !roles || roles.includes(v.role))
+    .map((v) => `${driveName(v)} (${roleLabel(v.role)})`));
+}
+
+function cardHint(c) {
+  if (c.tier === "needs_backup") {
+    const on = cardCopyNames(c, ["WORKING", "LEGACY"]);
+    return on ? `They are on ${on}, but not on a backup (master) drive yet.` : TIER_HINT.needs_backup;
+  }
+  if (c.tier === "backed_up") {
+    const on = cardCopyNames(c, ["MASTER"]);
+    return on ? `Every file is on ${on}.` : TIER_HINT.backed_up;
+  }
+  return TIER_HINT[c.tier];
+}
+
 function cardHeadline(c) {
   const red = c.counts.only_on_card.files;
   if (c.tier === "only_on_card") return `Back up now: ${plural(red, "file")} only on this card.`;
   if (c.tier === "unchecked") return `Not checked: ${plural(c.counts.unchecked.files, "file")} still to compare.`;
-  if (c.tier === "needs_backup") return `Needs backup: ${plural(c.counts.needs_backup.files, "file")} not on a backup drive yet.`;
-  if (c.tier === "backed_up") return "Safe to remove: every file is on a backup drive.";
+  if (c.tier === "needs_backup") {
+    const on = cardCopyNames(c, ["WORKING", "LEGACY"]);
+    return `Needs backup: ${plural(c.counts.needs_backup.files, "file")} ${on ? `only on ${on}, ` : ""}not on a backup drive yet.`;
+  }
+  if (c.tier === "backed_up") {
+    const on = cardCopyNames(c, ["MASTER"]);
+    return `Safe to remove: every file is on ${on ? `backup drive ${on}` : "a backup drive"}.`;
+  }
   return TIER.empty.headline;
 }
 
@@ -1582,7 +1640,7 @@ function openCards(volumeId) {
   if (st.driveView) closeDrive();
   st.cardsOpen = true;
   st.cardView = volumeId;
-  st.cardFiles = { tier: "", camera: "", offset: 0 };
+  st.cardFiles = { tier: "", copies: "", other: "", camera: "", offset: 0 };
   $("#photo-panel").hidden = true;
   $("#drive-view").hidden = true;
   $("#cards-view").hidden = false;
@@ -1633,7 +1691,7 @@ function cardTile(c) {
     if (busy) actions[0].disabled = true;
     actions.push(button("Import…", () => openImport(cardDrive(c))));
   }
-  if (c.volume_id) actions.push(button("Show files", () => { st.cardView = c.volume_id; st.cardFiles = { tier: "", camera: "", offset: 0 }; loadCardDetail().catch(reportError); }));
+  if (c.volume_id) actions.push(button("Show files", () => { st.cardView = c.volume_id; st.cardFiles = { tier: "", copies: "", other: "", camera: "", offset: 0 }; loadCardDetail().catch(reportError); }));
   const when = c.mounted
     ? (c.checked_at ? `Checked ${relTime(c.checked_at)}` : "Never checked")
     : `Not connected${c.last_seen_at ? ` · last seen ${relTime(c.last_seen_at)}` : ""} · as last checked`;
@@ -1691,6 +1749,8 @@ async function loadCardDetail() {
   const params = new URLSearchParams({ limit: String(CARD_PAGE), offset: String(st.cardFiles.offset) });
   if (st.cardFiles.tier) params.set("tier", st.cardFiles.tier);
   if (st.cardFiles.camera) params.set("camera", st.cardFiles.camera);
+  if (st.cardFiles.copies) params.set("copies", st.cardFiles.copies);
+  if (st.cardFiles.other) params.set("other", st.cardFiles.other);
   const data = await api("GET", `/api/cards/${encodeURIComponent(id)}/files?${params}`);
   if (st.cardView !== id || !st.cardsOpen) return;
   renderCardDetail(data);
@@ -1712,18 +1772,23 @@ function renderCardDetail(data) {
     el("span", { class: "stat-num" }, fmtInt(c.counts[t].files)),
     el("span", { class: "muted small" }, fmtBytes(c.counts[t].bytes)));
   });
-  const camSelect = el("select", { "aria-label": "Camera", onchange: (e) => setCardFilter({ camera: e.currentTarget.value }) },
-    el("option", { value: "" }, "All cameras"),
-    c.cameras.map((m) => el("option", { value: m.camera }, `${m.name} (${fmtInt(m.files)})`)));
-  camSelect.value = st.cardFiles.camera;
+  const copiesValue = st.cardFiles.other ? `on:${st.cardFiles.other}` : st.cardFiles.copies;
+  const filterBar = fileFilterBar({
+    show: { options: [["", "All files"]].concat(TIER_ORDER.map((t) => [t, TIER[t].label])), value: st.cardFiles.tier,
+      onchange: (tier) => setCardFilter({ tier }) },
+    copies: { options: copyFilterOptions("this card", c.copies_by_volume || []), value: copiesValue,
+      onchange: (v) => setCardFilter(v.startsWith("on:") ? { copies: "", other: v.slice(3) } : { copies: v, other: "" }) },
+    camera: { options: cameraFilterOptions(c.cameras), value: st.cardFiles.camera,
+      onchange: (camera) => setCardFilter({ camera }) },
+    shown: data.total, total: c.files,
+  });
   const rows = files.map((f) => el("tr", null,
     el("td", null, tierPill(f.tier)),
     el("td", { class: "path" }, f.rel_path, el("div", { class: "reason" }, f.reason)),
     el("td", { class: "num" }, fmtBytes(f.size)),
     el("td", null, f.camera_name),
-    el("td", { class: "where" }, f.copies.length
-      ? f.copies.map((x) => `${x.label} (${roleLabel(x.role)})`).join(", ")
-      : "–")));
+    el("td", null, copyCell({ ...f, hashed: f.tier !== "unchecked",
+      copy_drives: f.copies }, c.volume_id, "this card"))));
   const pager = el("div", { class: "pager" },
     button("Previous", () => { st.cardFiles.offset = Math.max(0, st.cardFiles.offset - CARD_PAGE); loadCardDetail().catch(reportError); }),
     el("span", { class: "muted small" }, files.length
@@ -1741,7 +1806,7 @@ function renderCardDetail(data) {
     el("div", { class: "section-head" }, el("h2", null, c.label), tierPill(c.tier)),
     el("div", { class: "bulkbar" }, actions),
     el("p", { class: "card-headline" }, cardHeadline(c)),
-    el("p", { class: "muted small" }, [TIER_HINT[c.tier],
+    el("p", { class: "muted small" }, [cardHint(c),
       c.mounted ? (c.checked_at ? `Checked ${relTime(c.checked_at)}.` : "Never checked.") : "Not connected: as last checked."]
       .filter(Boolean).join(" ")),
     tierBar(c.counts, c.files),
@@ -1749,11 +1814,11 @@ function renderCardDetail(data) {
     el("h3", { class: "sub" }, "Cameras"),
     cameraTable(c.cameras),
     el("h3", { class: "sub" }, "Files, least safe first"),
-    el("div", { class: "toolbar" }, el("label", { class: "field" }, "Camera", camSelect)),
+    filterBar,
     rows.length
       ? el("div", { class: "table-wrap" }, el("table", { class: "file-table" },
         el("thead", null, el("tr", null, el("th", null, "Status"), el("th", null, "File"), el("th", { class: "num" }, "Size"),
-          el("th", null, "Camera"), el("th", null, "Also on"))),
+          el("th", null, "Camera"), el("th", null, "Copies"))),
         el("tbody", null, rows)))
       : el("p", { class: "muted small" }, "No files in this view."),
     pager);

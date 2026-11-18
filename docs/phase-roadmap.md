@@ -103,6 +103,7 @@ Note: seq-1 to seq-3 are pure and fixture-driven, so they make good parallel Hai
 | P5a.9 | ui-7 drive summary (**done 2026-11-17**) | ui-6 | **[user]** visual check |
 | P5a.10 | ui-8 copies across drives (**done 2026-11-17**) | ui-7 | **[user]** visual check |
 | P5a.11 | ui-9 ignore drives (**done 2026-11-17**) | ui-6 | **[user]** visual check |
+| P5a.12 | ui-10 one filter bar for drives and cards (**done 2026-11-17**) | ui-8, card-3 | **[user]** visual check |
 
 ## Phase 5: app (spec `app`)
 

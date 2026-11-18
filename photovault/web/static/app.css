@@ -399,6 +399,8 @@ details.earlier > div { display: flex; flex-direction: column; gap: 8px; padding
 .toolbar { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 8px; }
 .field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: rgb(var(--c-muted)); min-width: 170px; }
 .field select { font-size: 15px; color: rgb(var(--c-ink)); }
+.filter-count { display: flex; align-items: baseline; gap: 6px; margin-left: auto; align-self: flex-end; padding-bottom: 6px; }
+.filter-count-num { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
 .bulkbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 16px; }
 .bulkbar button { font-size: 13px; }

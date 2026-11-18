@@ -21,7 +21,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
-from collections import deque
+from collections import Counter, deque
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -707,11 +707,14 @@ def _volume_route(app: WebApp, conn, method: str, volume_id: str, sub: str | Non
         other = _opt_param(query, "other")
         if other is not None and (other == volume_id or repo.get_volume(conn, other) is None):
             raise BadRequest("other must be another known drive")
+        camera = _camera_param(query)
         limit = _int_param(query, "limit", 200, 1, 1000)
         offset = _int_param(query, "offset", 0, 0, 2**62)
-        rows = repo.volume_files(conn, volume_id, state=state, limit=limit, offset=offset, copies=copies,
-                                 other_volume_id=other)
-        return 200, {"files": [_file_row(r) for r in rows], "limit": limit, "offset": offset}
+        filters = {"state": state, "copies": copies, "other_volume_id": other, "camera": camera}
+        rows = repo.volume_files(conn, volume_id, limit=limit, offset=offset, **filters)
+        names = cards.camera_names(conn)
+        return 200, {"files": [_file_row(r, names) for r in rows], "limit": limit, "offset": offset,
+                     "total": repo.volume_files_count(conn, volume_id, **filters)}
     return 200, _volume_summary(app, conn, volume_id)
 
 
@@ -724,6 +727,12 @@ def _card_files(app: WebApp, conn, volume_id: str, query: dict) -> dict:
     if tier is not None and tier not in cards.TIERS:
         raise BadRequest(f"tier must be one of: {', '.join(cards.TIERS)}")
     camera = _opt_param(query, "camera")
+    copies = _opt_param(query, "copies")
+    if copies is not None and copies not in repo.COPY_FILTERS:
+        raise BadRequest(f"copies must be one of: {', '.join(repo.COPY_FILTERS)}")
+    other = _opt_param(query, "other")
+    if other is not None and (other == volume_id or repo.get_volume(conn, other) is None):
+        raise BadRequest("other must be another known drive")
     limit = _int_param(query, "limit", 200, 1, 1000)
     offset = _int_param(query, "offset", 0, 0, 2**62)
     drive = next((d for d in _drive_list(conn, app.volumes_root) if d["volume_id"] == volume_id), None)
@@ -731,13 +740,23 @@ def _card_files(app: WebApp, conn, volume_id: str, query: dict) -> dict:
     files = cards.card_files(conn, volume_id, mount=mount)
     names = cards.camera_names(conn)
     summary = cards.card_summary(conn, volume_id, files=files)
+    on_card = Counter(f["asset_id"] for f in files if f["asset_id"] is not None)
     for f in files:
         f["camera"] = str(f["body_id"]) if f["body_id"] is not None else cards.UNKNOWN_CAMERA
         f["camera_name"] = names.get(f["body_id"], "Unknown camera") if f["body_id"] is not None else "Unknown camera"
+        f["dup_here"] = on_card[f["asset_id"]] - 1 if f["asset_id"] is not None else 0
     if tier is not None:
         files = [f for f in files if f["tier"] == tier]
     if camera is not None:
         files = [f for f in files if f["camera"] == camera]
+    if copies == "elsewhere":
+        files = [f for f in files if f["copies"]]
+    elif copies == "only_here":
+        files = [f for f in files if not f["copies"] and f["tier"] != "unchecked"]
+    elif copies == "dup_here":
+        files = [f for f in files if f["dup_here"] > 0]
+    if other is not None:
+        files = [f for f in files if any(c["volume_id"] == other for c in f["copies"])]
     return {"card": {"volume_id": volume_id, "label": vol["label"], "mounted": mount is not None,
                      "mount": str(mount) if mount else None, "last_seen_at": vol["last_seen_at"], **summary},
             "files": files[offset:offset + limit], "total": len(files), "limit": limit, "offset": offset}
@@ -754,8 +773,21 @@ def _asset_copies(app: WebApp, conn, asset_id: int) -> dict:
     return {"asset_id": asset_id, "size": asset["size"], "kind": asset["kind"], "copies": copies}
 
 
-def _file_row(row) -> dict:
+def _camera_param(query: dict) -> str | None:
+    """A camera filter: a body_id, or ``unknown`` for files with no known camera."""
+    camera = _opt_param(query, "camera")
+    if camera is not None and camera != repo.UNKNOWN_CAMERA and not camera.isdigit():
+        raise BadRequest(f"camera must be a camera id or {repo.UNKNOWN_CAMERA}")
+    return camera
+
+
+def _file_row(row, names: dict[int, str]) -> dict:
     d = dict(row)
+    bid = d.pop("body_id")
+    d["camera"] = str(bid) if bid is not None else repo.UNKNOWN_CAMERA
+    d["camera_name"] = names.get(bid, "Camera") if bid is not None else "Unknown camera"
+    names_raw = d.pop("copy_names") or ""
+    d["copy_drives"] = [dict(zip(("label", "role"), x.split("\x1d", 1))) for x in names_raw.split("\x1f") if x]
     d["hashed"] = bool(d["hashed"])
     if not d["hashed"]:
         d["copies"] = d["dup_here"] = None  # unknown until the file is hashed
@@ -788,7 +820,19 @@ def _volume_summary(app: WebApp, conn, volume_id: str) -> dict:
         "runs": runs,
         "steps": repo.volume_last_steps(conn, volume_id),
         "copies": _copy_summary(conn, volume_id, drives),
+        "cameras": _volume_cameras(conn, volume_id),
     }
+
+
+def _volume_cameras(conn, volume_id: str) -> list[dict]:
+    """Files per camera on a drive, for the Camera filter; files with no known camera come last."""
+    names = cards.camera_names(conn)
+    out = [{"camera": str(r["body_id"]) if r["body_id"] is not None else repo.UNKNOWN_CAMERA,
+            "name": names.get(r["body_id"], "Camera") if r["body_id"] is not None else "Unknown camera",
+            "files": r["files"], "bytes": r["bytes"]}
+           for r in repo.volume_camera_counts(conn, volume_id)]
+    out.sort(key=lambda c: (c["camera"] == repo.UNKNOWN_CAMERA, -c["files"], c["name"]))
+    return out
 
 
 def _copy_summary(conn, volume_id: str, drives: list[dict]) -> dict:

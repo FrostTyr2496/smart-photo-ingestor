@@ -667,6 +667,47 @@ def test_file_list_marks_and_filters_copies(srv: Client) -> None:
     assert srv.call("GET", "/api/volumes/vol-work/files?other=nope")[0] == 400
 
 
+def test_file_list_totals_names_and_camera_filter(srv: Client) -> None:
+    seed_copies(srv)
+    c = db.connect(srv.app.catalog_path)
+    with repo.transaction(c):
+        body = repo.get_or_create_body(c, "Z 6_2", "", "Z6II")
+        group = repo.insert_group(c, body_id=body, shutter_count=1, capture_time=None, capture_offset=None,
+                                  time_source="exif", canonical_stem="s", original_stem="X", original_num=1,
+                                  shoot_id=None)
+        c.execute("UPDATE assets SET group_id = ? WHERE sha256 = ?", (group, "x" * 64))
+    c.close()
+
+    _, summary = srv.call("GET", "/api/volumes/vol-work")
+    assert [(m["camera"], m["name"], m["files"]) for m in summary["cameras"]] == [
+        (str(body), "Z6II", 2), ("unknown", "Unknown camera", summary["files"] - 2)]
+    _, all_files = srv.call("GET", "/api/volumes/vol-work/files?limit=1")
+    assert all_files["total"] == summary["files"] and len(all_files["files"]) == 1  # total spans every page
+    _, cam = srv.call("GET", f"/api/volumes/vol-work/files?camera={body}")
+    assert cam["total"] == 2 and {f["camera_name"] for f in cam["files"]} == {"Z6II"}
+    assert cam["files"][0]["copy_drives"] == [{"label": "OLD", "role": "LEGACY"}]  # the other drive is named, not only counted
+    _, unknown = srv.call("GET", "/api/volumes/vol-work/files?camera=unknown&copies=only_here")
+    assert [f["rel_path"] for f in unknown["files"]] == ["A/Y.NEF", "A/Z.NEF"] and unknown["total"] == 2
+    assert srv.call("GET", "/api/volumes/vol-work/files?camera=nikon")[0] == 400
+
+
+def test_card_files_filter_by_copies(srv: Client) -> None:
+    seed_card(srv)
+
+    def names(qs: str) -> list[str]:
+        status, body = srv.call("GET", f"/api/cards/vol-card/files?{qs}")
+        assert status == 200, body
+        return [f["rel_path"].rsplit("/", 1)[1] for f in body["files"]]
+
+    assert names("copies=elsewhere") == ["P.NEF"]
+    assert names("copies=only_here") == ["N.NEF"]
+    assert names("copies=dup_here") == []
+    assert names("other=vol-work") == ["P.NEF"]
+    assert names("copies=elsewhere&tier=only_on_card") == []
+    assert srv.call("GET", "/api/cards/vol-card/files?copies=bogus")[0] == 400
+    assert srv.call("GET", "/api/cards/vol-card/files?other=nope")[0] == 400
+
+
 def test_asset_copies_lists_every_drive(srv: Client) -> None:
     assets = seed_copies(srv)
     status, body = srv.call("GET", f"/api/assets/{assets['x']}/copies")
@@ -718,7 +759,10 @@ def test_cards_list_and_ranked_files(srv: Client) -> None:
     assert status == 200 and body["total"] == 2
     assert [(f["rel_path"].rsplit("/", 1)[1], f["tier"]) for f in body["files"]] == [
         ("N.NEF", "only_on_card"), ("P.NEF", "needs_backup")]  # most urgent first
-    assert body["files"][1]["copies"] == [{"role": "WORKING", "label": "WORK"}]
+    assert body["files"][1]["copies"] == [{"role": "WORKING", "label": "WORK", "volume_id": "vol-work"}]
+    assert body["files"][1]["reason"] == "Only on WORK, not on a backup drive yet"  # names the drive
+    assert body["card"]["copies_by_volume"] == [{"volume_id": "vol-work", "label": "WORK", "role": "WORKING",
+                                                 "files": 1, "bytes": 50}]
     assert body["card"]["tier"] == "only_on_card"
     _, only = srv.call("GET", "/api/cards/vol-card/files?tier=needs_backup")
     assert [f["tier"] for f in only["files"]] == ["needs_backup"]

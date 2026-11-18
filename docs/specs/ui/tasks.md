@@ -232,7 +232,7 @@ still naive, apply the `settings` value `default_offset` (default "+00:00"). The
     keep their numbers in `jobs.params_json` under `result` (no schema change); older runs have none.
     `GET /api/volumes/<id>`, `GET /api/volumes/<id>/files?state=&limit=&offset=`, `POST /api/volumes/<id>/reveal`.
   - Verify: `uv run pytest tests/test_web_api.py tests/test_baseline_hash.py -q`
-  - Result (2026-11-17): `uv run pytest tests/test_web_api.py -q` → 48 passed (with ui-8, ui-9).
+  - Result (2026-11-17): `uv run pytest tests/test_web_api.py -q` → 50 passed (with ui-8..ui-10).
 
 - [x] 8. Copies across drives (visual check pending, user)
   - ID: ui-8 (after ui-7)
@@ -240,7 +240,7 @@ still naive, apply the `settings` value `default_offset` (default "+00:00"). The
     file list has a Copies column and filter (`copies=`, `other=`), and each file expands to every location
     (`GET /api/assets/<id>/copies`) with Show in Finder. Full hash only; CARD copies never count. Read-only.
   - Verify: `uv run pytest tests/test_web_api.py -q`
-  - Result (2026-11-17): `uv run pytest tests/test_web_api.py -q` → 48 passed (with ui-7, ui-9).
+  - Result (2026-11-17): `uv run pytest tests/test_web_api.py -q` → 50 passed (with ui-7, ui-9, ui-10).
 
 - [x] 9. Ignore drives (visual check pending, user)
   - ID: ui-9
@@ -248,4 +248,14 @@ still naive, apply the `settings` value `default_offset` (default "+00:00"). The
     as the `ignored_drives` setting (JSON keys: volume_id, else `mount:<name>`); `POST /api/drives/ignore`.
     Display only: the engine ignores it.
   - Verify: `uv run pytest tests/test_web_api.py -q`
-  - Result (2026-11-17): `uv run pytest tests/test_web_api.py -q` → 48 passed (with ui-7, ui-8).
+  - Result (2026-11-17): `uv run pytest tests/test_web_api.py -q` → 50 passed (with ui-7, ui-8, ui-10).
+
+- [x] 10. One filter bar for drives and cards (visual check pending, user)
+  - ID: ui-10 (after ui-8, card-3)
+  - The drive and card file lists share one bar: Show (file state on a drive, tier on a card), Copies (on other
+    drives, only here, duplicated here, also on a named drive) and Camera, plus "x / N files" (filtered total
+    over the whole drive or card). Both endpoints return `total`; drive files gain `camera=`, card files gain
+    `copies=` and `other=`. Other drives are always named (copy pills, card reasons and headlines), never only
+    counted. Camera on a drive file comes from its asset's capture group; no schema change.
+  - Verify: `uv run pytest tests/test_web_api.py -q`
+  - Result (2026-11-17): `uv run pytest tests/test_web_api.py -q` → 50 passed; full suite 442 passed, 4 skipped.

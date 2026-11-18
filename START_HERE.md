@@ -24,31 +24,27 @@ Reference docs:
 - `docs/legacy/handoff-v0.md`: v0 findings, including the ExifTool benchmarks.
 - `docs/UTILITY_ASSESSMENT.md`: does the app have real utility yet, the live-run findings, candidate tasks.
 
-## Now (2026-11-12)
-- **Card milestone built:** the CLI imports a card onto WORKING with verified copies and answers
-  `card-status`. Commands: `drives`, `volumes assign`, `ingest [--dry-run]`, `resume`, `card-status`, `jobs`.
-  User guides: `docs/user/CARD_WORKFLOW.md` (cards) and `docs/user/INDEX_WORKFLOW.md` (old drives). `uv run pytest -q` → 328 passed, 4 skipped (`live`).
-- Index modules done: idx-1 to idx-4 and idx-11 (`hash` on a failing drive: unreadable files are marked, folder and
-  run breakers, `--skip-prefix`, `--retry-unreadable`; D-044). Flats 1 is indexed and hashed (27,326 files, 956 GB, 45 min); the duplicate
-  report found 113.5 GB reclaimable, matching the ~113 GB survey estimate (`docs/private/IDX5_FLATS1_RESULTS.md`).
-  `lrcat mark` is still not run on a real catalog, so the idx-3 schema stays unverified.
-- eval-1 done: search segmentation and the camera's bracket flag beat the flat floor; recommendation awaits the
-  user (`docs/reviews/2026-11-11-eval-1-sequencing.md`).
-- Built modules: config, catalog (db, repo), volumes, metadata, hashing, scan, groups, naming, copy engine,
-  ingest (plan/run), status, index, report, protocol, cli, sequences, preview, live harness and survey, sequence_eval (evaluation only).
+## Now (2026-11-17)
+- **Card milestone built:** the CLI imports a card onto WORKING with verified copies and answers `card-status`
+  (`drives`, `volumes assign`, `ingest [--dry-run]`, `resume`, `card-status`, `jobs`). Guides:
+  `docs/user/CARD_WORKFLOW.md`, `docs/user/INDEX_WORKFLOW.md`. `uv run pytest -q` → 442 passed, 4 skipped (`live`).
+- Index done: idx-1..4, idx-11 (D-044). Flats 1 is indexed and hashed; its duplicate report found 113.5 GB
+  reclaimable (`docs/private/IDX5_FLATS1_RESULTS.md`). `lrcat mark` not run on a real catalog yet (idx-3 unverified).
+- ing-12 done: a frame first seen on a legacy drive or a card check gets the D-005 name at import.
+- eval-1 done; its recommendation awaits the user (`docs/reviews/2026-11-11-eval-1-sequencing.md`).
 - A live dry run planned both real cards (D-031); no real import has run yet (ing-11 is the user's).
-- The old v0 code is on local branch `archive/v0-cli-2026-11-11` (port with `git show`).
-- Hooks: `guard_volumes.py` blocks agent writes and engine runs on `/Volumes`; `preflight.sh` prints the
-  pre-flight. Live tests read mounts only under `-m live` (vault-rules 2, D-028, D-031).
+- Drives: cards exFAT; X9 Pro (1 TB exFAT) WORKING; Flats 1 (1 TB APFS, 98 % full) LEGACY, hashed; PP 1 (4 TB
+  APFS HDD, LEGACY) indexed, its hash paused on I/O errors (resume with idx-11); the 12 TB is offline.
+- Policy: one verified copy on WORKING = safe to format (D-003). The Cards view's colours are a separate, stricter
+  answer (D-046): green only when a MASTER holds the file.
+- **Web UI (D-045, specs `docs/specs/ui`, `docs/specs/cards`):** `uv run photovault serve` → 127.0.0.1:8765.
+  Drives (with Ignore, ui-9), tasks, a metadata view, a drive summary (ui-7) with copies across drives (ui-8), a
+  Cards view (card-3; `cards check <mount>` = index + hash, read-only), and one filter bar for drive and card file
+  lists (ui-10: Show · Copies · Camera, "x / N files", drives always named). ui-7..10 and card-3 not seen in a
+  browser yet. The Mac folder (`mac_folder`, default `~/Sandbox`) is a drive (D-047).
+- Hooks: `guard_volumes.py` blocks agent writes and engine runs on `/Volumes`; live tests read mounts only under
+  `-m live` (D-028, D-031). Old v0 code: local branch `archive/v0-cli-2026-11-11`.
 - The repo is public. Real-drive facts and photos stay in `docs/private/` and `testdata/` (gitignored).
-- Drives: cards exFAT; X9 Pro (1 TB exFAT) is WORKING; Flats 1 (1 TB APFS, 98 % full) is LEGACY, indexed and hashed; the 4 TB
-  (PP 1, 4.0 TB APFS, a spinning HDD, LEGACY) is indexed (69,626 files); its hash hit I/O errors in one folder and
-  is paused, waiting for the user to resume it with idx-11; the 12 TB is offline.
-- Policy: one verified copy on WORKING = safe to format (D-003).
-
-- **Web UI built (D-045, spec `docs/specs/ui`):** `uv run photovault serve` opens 127.0.0.1:8765: remembered drives,
-  engine commands as tasks, and a metadata view (missing GPS/creator/keywords, geotag suggestions, map/search,
-  clock shift). Edits go to the catalog; `meta sidecars` writes XMP next to raws on WORKING only.
 
 ## In progress
 - Task: none.
@@ -63,22 +59,19 @@ task's commit:
 ```
 
 ## Next
-0. **[user] ui-5 visual check:** run `uv run photovault serve`, try the drive list and the metadata editor, report issues.
-1. **ing-12, then ing-13 [stronger]** (D-042): a card frame already indexed from Flats 1 would be named by its camera
-   stem; fix first, and ing-13 stops a double card read. Then:
+0. **[user] visual check (ui-5..10, card-3):** run `uv run photovault serve`, try drives, cards and the editor.
+1. **ing-13 [stronger]** (D-042): stops a double card read at import (ing-12 is done). Then:
 2. **[user] ing-11:** the first real import (commands in `docs/user/CARD_WORKFLOW.md`), after ing-12, then paste back the
    timings, `sync_method` and counts.
 3. **[user] idx-6:** resume the PP 1 hash with `--skip-prefix` on the damaged folder, then run `report duplicates`
    ("If a drive shows I/O errors" in `docs/user/INDEX_WORKFLOW.md`). idx-5 is done except `lrcat mark`.
 4. **seq-2 [stronger]** waits for the user's answers on eval-1 (`docs/reviews/2026-11-11-eval-1-sequencing.md`).
-5. Backlog items from this milestone: rental bodies and variants, shoot names from geo or a local LLM, video
-   body inference (`docs/specs/backlog.md`).
-6. **idx-12, idx-8 [stronger]:** idx-12 bounds a stuck read (needs your OK for `--read-timeout`); idx-8 is
+5. **idx-12, idx-8 [stronger]:** idx-12 bounds a stuck read (needs your OK for `--read-timeout`); idx-8 is
    `lrcat mark --force-exit`. Neither is on the critical path.
 
 ## Waiting on user
 - **Push the archive branch?** Run `git push -u origin archive/v0-cli-2026-11-11` if you want it on GitHub.
-  (`main` is pushed up to live-1's harness commit; later commits are local.)
+  (`main` is pushed.)
 - **Corpus gaps (fnd-7):** the wish list still lacks a Z6II pair, a night run, a GoPro set and an iPhone
   HEIC+AAE (`docs/private/CORPUS.md`). Copy them when you can.
 - **X9 sample:** should `testdata/x9_sample/` move into `testdata/corpus/x9/` (D-017)?
@@ -93,13 +86,12 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
-- D-044 (user): `hash` on a failing drive (idx-11): EIO → unreadable (`mismatch`); a missing mount pauses and marks
-  nothing; breakers at 3 per folder and 10 in a row; `--skip-prefix`; the report gives copy hints.
-- D-043 (agent): eval-1 harness lives in `photovault/sequence_eval.py`; tempo is start-to-start; the recommendation is a proposal.
-- D-042 (agent): outside review of 4 suspected bugs: stem reuse (ing-12) and double card read (ing-13) confirmed,
-  lrcat renamed-mount gap (idx-10, needs your OK), dry-run partial hashes declined (backlog).
-- D-041 (user): the 4 TB is PP 1 (LEGACY); Flats 1 runs as is, no cleanup first; the two may run in parallel.
-- D-040 (agent): duplicate report (idx-4): verified non-CARD copies only; unhashed files listed; output never under `/Volumes`.
+- D-048 (agent): `cards check` = register + index + hash, read-only; a mounted card is walked so new or changed
+  files show as not checked.
+- D-047 (user): the Mac is a working drive, only inside one folder (`mac_folder`, default `~/Sandbox`).
+- D-046 (user): card file colours: green on MASTER, yellow on WORKING/LEGACY only, red only on the card; worst wins.
+- D-045 (user): local web UI before the SwiftUI app; user metadata in the catalog, XMP sidecars on WORKING only.
+- D-044 (user): `hash` on a failing drive (idx-11): EIO → unreadable; breakers; `--skip-prefix`.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

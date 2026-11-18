@@ -70,14 +70,14 @@ def _catalog_rows(conn: sqlite3.Connection, volume_id: str) -> dict[str, sqlite3
     rows = conn.execute(
         """
         SELECT i.rel_path, i.rel_path_key, i.size, i.mtime_ns, i.kind, i.state, i.asset_id,
-          (SELECT GROUP_CONCAT(x.role || char(31) || x.label, char(30)) FROM (
-             SELECT DISTINCT v.role, v.label FROM instances o JOIN volumes v ON v.volume_id = o.volume_id
+          (SELECT GROUP_CONCAT(x.role || char(31) || x.label || char(31) || x.volume_id, char(30)) FROM (
+             SELECT DISTINCT v.role, v.label, v.volume_id FROM instances o JOIN volumes v ON v.volume_id = o.volume_id
              WHERE o.asset_id = i.asset_id AND o.state = 'verified' AND v.role != 'CARD') x) AS copies,
-          CASE WHEN i.asset_id IS NULL AND i.partial_sha256 IS NOT NULL THEN EXISTS (
-             SELECT 1 FROM assets a JOIN instances o ON o.asset_id = a.asset_id
+          CASE WHEN i.asset_id IS NULL AND i.partial_sha256 IS NOT NULL THEN (
+             SELECT MIN(v.label) FROM assets a JOIN instances o ON o.asset_id = a.asset_id
              JOIN volumes v ON v.volume_id = o.volume_id
              WHERE a.size = i.size AND a.partial_sha256 = i.partial_sha256 AND o.state = 'verified'
-               AND v.role != 'CARD') ELSE 0 END AS candidate
+               AND v.role != 'CARD') END AS candidate
         FROM instances i WHERE i.volume_id = ? AND i.state != 'missing'
         """,
         (volume_id,),
@@ -90,21 +90,26 @@ def _classify(row: sqlite3.Row) -> tuple[str, str, list[dict]]:
     copies = []
     for part in (row["copies"] or "").split("\x1e"):
         if part:
-            role, label = part.split("\x1f", 1)
-            copies.append({"role": role, "label": label})
+            role, label, vid = part.split("\x1f", 2)
+            copies.append({"role": role, "label": label, "volume_id": vid})
     copies.sort(key=lambda c: (c["role"] != "MASTER", c["role"] != "WORKING", c["label"]))
     if row["state"] == "mismatch":
         return "only_on_card", "The card could not read this file", copies
     if row["asset_id"] is None:
         if row["candidate"]:
-            return "unchecked", "Looks like a file on another drive; check the card to confirm", copies
+            return "unchecked", f"Looks like a file on {row['candidate']}; check the card to confirm", copies
         return "only_on_card", "No other drive has this file", copies
-    roles = {c["role"] for c in copies}
-    if "MASTER" in roles:
-        return "backed_up", "On a backup drive", copies
-    if roles:
-        return "needs_backup", "Not on a backup drive yet", copies
+    masters = [c["label"] for c in copies if c["role"] == "MASTER"]
+    if masters:
+        return "backed_up", f"On backup drive {_names(masters)}", copies
+    if copies:
+        return "needs_backup", f"Only on {_names([c['label'] for c in copies])}, not on a backup drive yet", copies
     return "only_on_card", "No other drive has this file", copies
+
+
+def _names(labels: list[str]) -> str:
+    """``A``, ``A and B``, ``A, B and C``."""
+    return labels[0] if len(labels) == 1 else f"{', '.join(labels[:-1])} and {labels[-1]}"
 
 
 def _cameras_by_file(conn: sqlite3.Connection, volume_id: str) -> dict[str, int | None]:
@@ -202,6 +207,18 @@ def camera_rows(files: list[dict], names: dict[int, str]) -> list[dict]:
     return out
 
 
+def copies_by_volume(files: list[dict]) -> list[dict]:
+    """Each other (non-CARD) drive holding a verified copy of the card's files, most files first."""
+    by: dict[str, dict] = {}
+    for f in files:
+        for c in f["copies"]:
+            v = by.setdefault(c["volume_id"], {"volume_id": c["volume_id"], "label": c["label"], "role": c["role"],
+                                               "files": 0, "bytes": 0})
+            v["files"] += 1
+            v["bytes"] += f["size"]
+    return sorted(by.values(), key=lambda v: (-v["files"], v["label"]))
+
+
 def card_summary(conn: sqlite3.Connection, volume_id: str | None, *, mount: Path | None = None,
                  files: list[dict] | None = None) -> dict:
     """Tier counts, the card's worst tier, and its cameras."""
@@ -212,6 +229,7 @@ def card_summary(conn: sqlite3.Connection, volume_id: str | None, *, mount: Path
         "bytes": sum(f["size"] for f in files),
         "counts": _counts(files),
         "cameras": camera_rows(files, camera_names(conn)),
+        "copies_by_volume": copies_by_volume(files),
         "checked_at": _checked_at(conn, volume_id) if volume_id else None,
     }
 

@@ -54,4 +54,4 @@ the worst tier among its files; no files gives `empty`.
     `card_check` (mount). A Cards view (header button) lists connected cards first, each with a stacked colour
     bar; a card opens its ranked file list; a Cameras table colours each camera worst first.
   - Verify: `uv run pytest tests/test_web_api.py -q`; the user does the visual check.
-  - Result (2026-11-17): `uv run pytest tests/test_web_api.py -q` → 50 passed (with ui-7..ui-9). Visual check open.
+  - Result (2026-11-17): `uv run pytest tests/test_web_api.py -q` → 50 passed (with ui-7..ui-10). Visual check open.
