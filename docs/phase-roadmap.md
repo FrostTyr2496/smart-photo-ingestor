@@ -149,8 +149,8 @@ rep-1 is replaced by bk-5; rep-0 still covers legacy content on the 12 TB.
 | P5d.5 | rv-8 clean up what the classic UI left behind (**done 2026-11-18**) | rv-6 | none |
 | P5d.6 | rv-9 Photos: apply edits to related photos (**done 2026-11-18**) | rv-7 | **[user]** visual check |
 | P5d.7 | sp-1 spike: phone locations (spec `phone-gps`) (**done 2026-11-18**); resumed by D-070 with osxphotos as an external tool | rv-7 | — |
-| P5d.10 | rv-16 related photos: gap ladder 1 min..day + Auto, a scope per field, clock shift per camera (spec `curation`) | rv-9 | **[user]** visual check |
-| P5d.11 | sp-2 iPhone locations from an osxphotos JSON export (+ V6 `geo_points` columns), then sp-3 place names + rv-10 | sp-1 | **[user]** run the export in iTerm |
+| P5d.10 | rv-16 related photos: gap ladder 1 min..day + Auto, a scope per field, clock shift per camera (spec `curation`) (**done 2026-11-18**) | rv-9 | **[user]** visual check |
+| P5d.11 | sp-2 iPhone locations from an osxphotos JSON export (+ V6 `geo_points` columns) (**sp-2 done 2026-11-18**), then sp-3 place names + rv-10 | sp-1 | **[user]** run the export in iTerm |
 | P5d.12 | sp-6 sessions over the phone track + Follow the track; sp-7 time-zone suggestions per camera | sp-2, rv-16 | **[user]** visual check |
 | P5d.13 | sp-4 suggested shoots across cameras and the phone (then cu-2, cu-3) | sp-2 | **[user]** visual check |
 | P5d.8 | rv-12..rv-15 file system tag, clickable tiles, drive rename, fast drive list (**done 2026-11-18**) | rv-6 | none |
