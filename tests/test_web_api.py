@@ -71,12 +71,16 @@ class Client:
     def __init__(self, port: int) -> None:
         self.port = port
 
-    def call(self, method: str, path: str, body=None, *, host: str | None = None, raw: bytes | None = None):
+    def call(self, method: str, path: str, body=None, *, host: str | None = None, raw: bytes | None = None,
+             content_type: str | None = "application/json", origin: str | None = None):
         data = raw if raw is not None else (json.dumps(body).encode() if body is not None else None)
         req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}", data=data, method=method)
-        req.add_header("Content-Type", "application/json")
+        if content_type is not None:
+            req.add_header("Content-Type", content_type)
         if host is not None:
             req.add_header("Host", host)
+        if origin is not None:
+            req.add_header("Origin", origin)
         try:
             with urllib.request.urlopen(req, timeout=10) as r:
                 status, payload, ctype = r.status, r.read(), r.headers.get("Content-Type", "")
@@ -145,6 +149,35 @@ def test_static_files_stay_inside_static_dir(srv: Client) -> None:
     assert srv.call("GET", "/static/%2e%2e/%2e%2e/cli.py")[0] == 404
     assert srv.call("GET", "/static/does-not-exist.js")[0] == 404
     assert srv.call("GET", "/api/nope")[0] == 404
+
+
+# --------------------------------------------------------------------------- POST content type and origin
+
+def test_post_requires_json_content_type(srv: Client) -> None:
+    for ctype in ("text/plain", "application/x-www-form-urlencoded", "multipart/form-data; boundary=x"):
+        status, _ = srv.call("POST", "/api/settings", {"creator": "X"}, content_type=ctype)
+        assert status == 403
+    status, _ = srv.call("POST", "/api/settings", raw=b'{"creator":"X"}', content_type=None)
+    assert status == 403
+    assert srv.call("GET", "/api/settings")[1]["settings"]["creator"] == ""
+    status, _ = srv.call("POST", "/api/settings", {"creator": "Kept"})
+    assert status == 200
+
+
+def test_post_rejects_foreign_origin(srv: Client) -> None:
+    for origin in ("http://evil.example", f"https://127.0.0.1:{srv.port}", f"http://127.0.0.1:1",
+                   "null", f"http://127.0.0.1:{srv.port}.evil.example"):
+        assert srv.call("POST", "/api/settings", {"creator": "X"}, origin=origin)[0] == 403
+    assert srv.call("GET", "/api/settings")[1]["settings"]["creator"] == ""
+
+
+def test_post_accepts_local_origin_or_none(srv: Client) -> None:
+    for origin in (None, f"http://127.0.0.1:{srv.port}", f"http://localhost:{srv.port}"):
+        status, _ = srv.call("POST", "/api/settings", {"creator": "Local"}, origin=origin)
+        assert status == 200
+    status, _ = srv.call("POST", "/api/settings", {"creator": "Charset"},
+                         content_type="application/json; charset=utf-8")
+    assert status == 200
 
 
 # --------------------------------------------------------------------------- drives, jobs, shoots

@@ -196,7 +196,7 @@ still naive, apply the `settings` value `default_offset` (default "+00:00"). The
     base argv so tests can use `[sys.executable, "-c", "print('{\"event\":\"result\"}')"]`).
   - Verify: `uv run pytest tests/test_web_api.py -q`, then `uv run pytest -q`.
 
-- [ ] 5. Front end
+- [x] 5. Front end (visual check pending, user)
   - ID: ui-5 (after ui-4)
   - Files: `photovault/web/static/index.html`, `app.js`, `app.css`. Plain JS (ES modules ok), no build step,
     no framework. Leaflet 1.9.4 CSS/JS from `https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/`.

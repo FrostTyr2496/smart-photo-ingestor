@@ -46,6 +46,10 @@ Reference docs:
   is paused, waiting for the user to resume it with idx-11; the 12 TB is offline.
 - Policy: one verified copy on WORKING = safe to format (D-003).
 
+- **Web UI built (D-045, spec `docs/specs/ui`):** `uv run photovault serve` opens 127.0.0.1:8765: remembered drives,
+  engine commands as tasks, and a metadata view (missing GPS/creator/keywords, geotag suggestions, map/search,
+  clock shift). Edits go to the catalog; `meta sidecars` writes XMP next to raws on WORKING only.
+
 ## In progress
 - Task: none.
 
@@ -59,6 +63,7 @@ task's commit:
 ```
 
 ## Next
+0. **[user] ui-5 visual check:** run `uv run photovault serve`, try the drive list and the metadata editor, report issues.
 1. **ing-12, then ing-13 [stronger]** (D-042): a card frame already indexed from Flats 1 would be named by its camera
    stem; fix first, and ing-13 stops a double card read. Then:
 2. **[user] ing-11:** the first real import (commands in `docs/user/CARD_WORKFLOW.md`), after ing-12, then paste back the

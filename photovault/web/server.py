@@ -597,6 +597,8 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             if not self._host_ok():
                 return self._send_json(403, {"error": "host not allowed"})
+            if method == "POST" and not self._post_ok():
+                return self._send_json(403, {"error": "POST needs application/json and a local Origin"})
             url = urlsplit(self.path)
             path = unquote(url.path)
             if method == "GET" and path == "/":
@@ -624,6 +626,17 @@ class _Handler(BaseHTTPRequestHandler):
     def _host_ok(self) -> bool:
         port = self.server.server_address[1]
         return self.headers.get("Host") in {fmt.format(port=port) for fmt in ALLOWED_HOSTS_FMT}
+
+    def _post_ok(self) -> bool:
+        """Cross-site form and text POSTs cannot send `application/json` without a preflight; an Origin from
+        another site is refused too (an absent Origin is a same-origin or non-browser client)."""
+        if not self.headers.get("Content-Type", "").lower().startswith("application/json"):
+            return False
+        origin = self.headers.get("Origin")
+        if origin is None:
+            return True
+        port = self.server.server_address[1]
+        return origin in {f"http://{fmt.format(port=port)}" for fmt in ALLOWED_HOSTS_FMT}
 
     def _read_body(self) -> Any:
         try:
