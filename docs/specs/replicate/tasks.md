@@ -22,7 +22,7 @@ Rules:
   - Then expand the placeholders below.
   - Verify: the user approves.
 
-- [ ] 1. **[user]** Assign the 12 TB as MASTER (`volumes assign … --role MASTER --label 12TB_MASTER`) (ID rep-1)
+- [ ] 1. **[user]** Assign the 12 TB as MASTER (ID rep-1). Moved to bk-5 (D-050, `docs/specs/backup/tasks.md`).
 - [ ] 2. Placeholder: `replicate` job using `copy_verified` (ID rep-2)
 - [ ] 3. Placeholder: catalog snapshot after every job (ID rep-3)
 - [ ] 4. Placeholder: sampled fixity audit (ID rep-4)

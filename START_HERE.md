@@ -66,8 +66,8 @@ task's commit:
 3. **[user] idx-6:** resume the PP 1 hash with `--skip-prefix` on the damaged folder, then run `report duplicates`
    ("If a drive shows I/O errors" in `docs/user/INDEX_WORKFLOW.md`). idx-5 is done except `lrcat mark`.
 4. **seq-2 [stronger]** waits for the user's answers on eval-1 (`docs/reviews/2026-11-11-eval-1-sequencing.md`).
-5. **idx-12, idx-8 [stronger]:** idx-12 bounds a stuck read (needs your OK for `--read-timeout`); idx-8 is
-   `lrcat mark --force-exit`. Neither is on the critical path.
+5. **Card backup (spec `docs/specs/backup`, D-050..D-052):** bk-1 drive health, bk-3 backup job (after ing-13),
+   vn-1 volume name on hover, then bk-2, bk-4, vn-2, vn-3. bk-5 [user]: plug in and assign the 12 TB.
 
 ## Waiting on user
 - **Push the archive branch?** Run `git push -u origin archive/v0-cli-2026-11-11` if you want it on GitHub.
@@ -86,13 +86,12 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
-- D-049 (user): at most 1–2 finished tasks uncommitted; commit each task as it finishes unless concurrent work
-  in the same files requires otherwise (reason under "In progress").
-- D-048 (agent): `cards check` = register + index + hash, read-only; a mounted card is walked so new or changed
-  files show as not checked.
-- D-047 (user): the Mac is a working drive, only inside one folder (`mac_folder`, default `~/Sandbox`).
-- D-046 (user): card file colours: green on MASTER, yellow on WORKING/LEGACY only, red only on the card; worst wins.
-- D-045 (user): local web UI before the SwiftUI app; user metadata in the catalog, XMP sidecars on WORKING only.
+- D-052 (user): show a drive's volume name on hover; rename to match on any role, with a Lightroom warning
+  (rule 1 exception); relink method is a spike (vn-3).
+- D-051 (user): copies over 1 GB need a fresh drive health check; `stop` refuses, `warn` needs an accept.
+- D-050 (user): card workflow = import onto WORKING plus a trailing WORKING → MASTER backup job; no LEGACY targets.
+- D-049 (user): at most 1–2 finished tasks uncommitted; commit each task as it finishes.
+- D-048 (agent): `cards check` = register + index + hash, read-only.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

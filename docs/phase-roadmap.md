@@ -105,6 +105,24 @@ Note: seq-1 to seq-3 are pure and fixture-driven, so they make good parallel Hai
 | P5a.11 | ui-9 ignore drives (**done 2026-11-17**) | ui-6 | **[user]** visual check |
 | P5a.12 | ui-10 one filter bar for drives and cards (**done 2026-11-17**) | ui-8, card-3 | **[user]** visual check |
 
+## Phase 5b: card backup, drive health, volume names (spec `backup`, D-050..D-052)
+
+| Item | Task | Blocks on | Gate |
+|---|---|---|---|
+| P5b.1 | bk-1 drive health check **[stronger]** | — | — |
+| P5b.2 | bk-2 the 1 GB gate **[stronger]** | bk-1 | — |
+| P5b.3 | bk-3 backup job, trailing an import **[stronger]** | ing-13 | — |
+| P5b.4 | bk-4 card workflow in the web UI **[stronger]** | bk-2, bk-3 | **[user]** visual check |
+| P5b.5 | bk-5 plug in and assign the 12 TB as MASTER | bk-1 | **[user]** |
+| P5b.6 | bk-6 first card backup | ing-11, bk-4, bk-5 | **[user]** |
+| P5b.7 | vn-1 volume name on hover | — | — |
+| P5b.8 | vn-2 rename a volume **[stronger]** | vn-1 | — |
+| P5b.9 | vn-3 Lightroom relink spike **[stronger]** | — | **[user]** approve |
+| P5b.10 | vn-4 real rename + relink test | vn-2, vn-3 | **[user]**, fully backed-up drive only |
+
+Notes: bk-3 and `ingest.py` share the job and resume code, so bk-3 waits for ing-13. vn-* is independent of bk-*.
+rep-1 is replaced by bk-5; rep-0 still covers legacy content on the 12 TB.
+
 ## Phase 5: app (spec `app`)
 
 | Item | Task | Blocks on | Gate |
@@ -117,7 +135,7 @@ Note: seq-1 to seq-3 are pure and fixture-driven, so they make good parallel Hai
 | Item | Task | Blocks on | Gate |
 |---|---|---|---|
 | P6.0 | rep-0 design **[stronger]** | idx-7 | **[user]** approve |
-| P6.1 | rep-1 assign 12 TB | rep-0 | **[user]** |
+| P6.1 | rep-1 assign 12 TB (moved to bk-5, D-050) | — | — |
 | P6.x | rep-2 to rep-4 | rep-1 | written by rep-0 |
 | P6.5 | rep-5 dual-copy policy | dedupe done | **[user]** (D-003) |
 

@@ -5,6 +5,8 @@ Imported by `CLAUDE.md`. These hold for every task. Changing one is a proposal t
 1. **Sources are read-only.** Nothing (agent, test, or engine) writes, renames, moves or deletes anything on a
    source volume. CARD volumes are read-only to everyone, including the engine. Marker files are written only
    to WORKING and MASTER volumes, never to CARD or LEGACY volumes.
+   **Exception (D-052, user-approved):** the user-triggered `volumes rename` may change a volume's name on any
+   role, after a warning. It changes no file on the volume.
 2. **Agents never write to `/Volumes`.** The PreToolUse hook `.claude/hooks/guard_volumes.py` enforces it.
    Real-drive runs (ingest, `volumes assign`, indexing, hashing) are **[user]** steps: print the exact
    command for the user. Tests use `tmp_path`, never `/Volumes`.
