@@ -28,8 +28,8 @@ function DriveRow({ d, active }: { d: Drive; active: boolean }) {
   const free = parseSize(d.free);
   const used = size && free !== null ? (size - free) / size : null;
   const key = isNew ? 'new' : roleKey(d.role);
-  // Cards and new drives are not ported yet: they open the classic UI.
-  const href = d.volume_id && !isCardDrive(d) ? hrefFor({ view: 'drive', id: d.volume_id }) : CLASSIC;
+  // A card opens in Cards; a new drive is set up in the classic UI until rv-4.
+  const href = isCardDrive(d) ? hrefFor({ view: 'cards', id: d.volume_id }) : d.volume_id ? hrefFor({ view: 'drive', id: d.volume_id }) : CLASSIC;
 
   return (
     <a
@@ -121,7 +121,7 @@ function DriveList({ route }: { route: Route }) {
                     <div className="flex flex-col gap-1.5 pb-2">
                       {list.map((d, i) => (
                         <motion.div key={d.key} {...rise(i)}>
-                          <DriveRow d={d} active={route.view === 'drive' && route.id === d.volume_id} />
+                          <DriveRow d={d} active={(route.view === 'drive' || route.view === 'cards') && route.id !== null && route.id === d.volume_id} />
                         </motion.div>
                       ))}
                     </div>
@@ -137,7 +137,7 @@ function DriveList({ route }: { route: Route }) {
 }
 
 function TaskList() {
-  const { tasks, elsewhere, stale, drives, now } = useStore();
+  const { tasks, elsewhere, stale, drives, now, driveFiles } = useStore();
   const [earlierOpen, setEarlierOpen] = useState(false);
   const [staleOpen, setStaleOpen] = useState(false);
   const running = tasks.filter((t) => !t.final);
@@ -159,12 +159,12 @@ function TaskList() {
         <AnimatePresence initial={false}>
           {running.map((t) => (
             <motion.div key={`t${t.id}`} {...rise()}>
-              <RunningCard vm={taskVM(t, drives, now)} compact />
+              <RunningCard vm={taskVM(t, drives, now, driveFiles)} compact />
             </motion.div>
           ))}
           {elsewhere.map((e) => (
             <motion.div key={`p${e.pid}`} {...rise()}>
-              <RunningCard vm={extVM(e, drives, now)} compact />
+              <RunningCard vm={extVM(e, drives, now, driveFiles)} compact />
             </motion.div>
           ))}
         </AnimatePresence>

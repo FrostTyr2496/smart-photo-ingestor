@@ -2,7 +2,8 @@ import { AnimatePresence, MotionConfig, motion } from 'framer-motion';
 import { AmbientGlow } from './components/AmbientGlow';
 import { DevTools } from './components/DevTools';
 import { ConfirmDialog, Toasts } from './components/Overlays';
-import { useRoute } from './lib/route';
+import { routeKey, useRoute } from './lib/route';
+import { Cards } from './views/Cards';
 import { StoreProvider, useStore } from './lib/store';
 import { ThemeProvider } from './lib/theme';
 import { DriveView } from './views/DriveView';
@@ -24,13 +25,13 @@ function Shell() {
           <div className="min-w-0">
             <AnimatePresence mode="wait" initial={false}>
               <motion.div
-                key={route.view === 'drive' ? `d:${route.id}` : 'home'}
+                key={route.view === 'cards' ? 'cards' : routeKey(route)}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -6, transition: { duration: 0.12 } }}
                 transition={{ type: 'spring', stiffness: 420, damping: 34 }}
               >
-                {route.view === 'drive' ? <DriveView id={route.id} /> : <Home />}
+                {route.view === 'drive' ? <DriveView id={route.id} /> : route.view === 'cards' ? <Cards id={route.id} /> : <Home />}
               </motion.div>
             </AnimatePresence>
           </div>

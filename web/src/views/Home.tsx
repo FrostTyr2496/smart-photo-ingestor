@@ -18,7 +18,7 @@ import {
   taskTitle,
 } from '../lib/labels';
 import { rise } from '../lib/motion';
-import { CLASSIC, hrefFor } from '../lib/route';
+import { hrefFor } from '../lib/route';
 import { useStore } from '../lib/store';
 import type { Drive, StaleJob, TaskRec } from '../lib/types';
 
@@ -44,7 +44,7 @@ function DeviceBlock({ dev, idle }: { dev: Dev; idle: boolean }) {
   const [staleOpen, setStaleOpen] = useState(false);
   const d = dev.drive;
   const name = d ? driveName(d) : baseName(dev.mount) || 'drive';
-  const href = d && d.volume_id && !isCardDrive(d) ? hrefFor({ view: 'drive', id: d.volume_id }) : d && isCardDrive(d) ? CLASSIC : null;
+  const href = d && isCardDrive(d) ? hrefFor({ view: 'cards', id: d.volume_id }) : d && d.volume_id ? hrefFor({ view: 'drive', id: d.volume_id }) : null;
   const last = dev.finished[0];
   const s = last ? summarize(last) : null;
 
@@ -105,7 +105,7 @@ function DeviceBlock({ dev, idle }: { dev: Dev; idle: boolean }) {
 
 /** The home page (ui-14): what is running, grouped by the drive it runs on, then the idle drives. */
 export function Home() {
-  const { drives, tasks, elsewhere, stale, now, loaded } = useStore();
+  const { drives, tasks, elsewhere, stale, now, loaded, driveFiles } = useStore();
   const [staleOpen, setStaleOpen] = useState(false);
 
   const devs = new Map<string, Dev>();
@@ -119,22 +119,22 @@ export function Home() {
   for (const t of tasks) {
     const mounts = taskMounts(argvWords(t.argv));
     if (!mounts.length) {
-      if (!t.final) other.push(taskVM(t, drives, now));
+      if (!t.final) other.push(taskVM(t, drives, now, driveFiles));
       continue;
     }
     for (const m of mounts) {
       const dev = devOf(m);
       if (t.final) dev.finished.push(t);
-      else dev.running.push(taskVM(t, drives, now));
+      else dev.running.push(taskVM(t, drives, now, driveFiles));
     }
   }
   for (const e of elsewhere) {
     const mounts = taskMounts(e.words || []);
     if (!mounts.length) {
-      other.push(extVM(e, drives, now));
+      other.push(extVM(e, drives, now, driveFiles));
       continue;
     }
-    for (const m of mounts) devOf(m).running.push(extVM(e, drives, now));
+    for (const m of mounts) devOf(m).running.push(extVM(e, drives, now, driveFiles));
   }
   const staleLeft: StaleJob[] = [];
   for (const j of stale) {

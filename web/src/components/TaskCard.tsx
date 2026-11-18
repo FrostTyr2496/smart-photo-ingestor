@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion';
 import { useState } from 'react';
 import { fmtElapsed, fmtInt, relTime } from '../lib/format';
-import { longLine, pace, shortLine, splitMessage, summarize, taskTitle, unitFor, type Pace } from '../lib/labels';
+import { argvWords, hashOverall, isHash, longLine, pace, shortLine, splitMessage, summarize, taskTitle, unitFor, type Pace } from '../lib/labels';
 import { useStore } from '../lib/store';
 import type { Drive, ExtRun, TaskRec } from '../lib/types';
 import { Disclosure, Icon, StatePill } from './bits';
@@ -13,7 +13,7 @@ const QUIET_WARN_S = 600; // a terminal run with no catalog write for this long 
 export interface TaskVM {
   key: string;
   title: string;
-  pace: Pace;
+  pace: Pace & { run?: { current: number; total: number } };
   unit: string;
   stats: string;
   path: string;
@@ -24,13 +24,15 @@ export interface TaskVM {
   pauseId: number | null;
 }
 
-export function taskVM(t: TaskRec, drives: Drive[], now: number): TaskVM {
+export function taskVM(t: TaskRec, drives: Drive[], now: number, driveFiles: Record<string, number> = {}): TaskVM {
+  const words = argvWords(t.argv);
+  const p = pace(t.progress, t.startMs, now);
   const msg = splitMessage(t.note);
   const isProgressMsg = Boolean(t.progress?.message) && t.note === t.progress?.message;
   return {
     key: `t${t.id}`,
     title: taskTitle(t.argv, drives),
-    pace: pace(t.progress, t.startMs, now),
+    pace: isHash(words) ? hashOverall(p, driveFiles[words[1] ?? '']) : p,
     unit: unitFor(t.argv),
     stats: isProgressMsg ? msg.stats : '',
     path: isProgressMsg ? msg.path : '',
@@ -42,7 +44,7 @@ export function taskVM(t: TaskRec, drives: Drive[], now: number): TaskVM {
   };
 }
 
-export function extVM(e: ExtRun, drives: Drive[], now: number): TaskVM {
+export function extVM(e: ExtRun, drives: Drive[], now: number, driveFiles: Record<string, number> = {}): TaskVM {
   const words = e.words || [];
   const j = e.job;
   const fromFile = e.source === 'progress_file';
@@ -65,7 +67,7 @@ export function extVM(e: ExtRun, drives: Drive[], now: number): TaskVM {
   return {
     key: `p${e.pid}`,
     title: taskTitle(['--json', ...words], drives),
-    pace: pace(progress, start, now, fromFile ? 5 : 60),
+    pace: isHash(words) && fromFile ? hashOverall(pace(progress, start, now), driveFiles[words[1] ?? '']) : pace(progress, start, now, fromFile ? 5 : 60),
     unit: j?.unit || unitFor(['--json', ...words]),
     stats: fromFile ? msg.stats : '',
     path: fromFile ? msg.path : '',

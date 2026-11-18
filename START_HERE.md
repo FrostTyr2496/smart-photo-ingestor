@@ -46,7 +46,7 @@ Reference docs:
   The Mac folder (`mac_folder`, default `~/Sandbox`) is a drive (D-047).
 - **UI revamp (D-059, spec `docs/specs/revamp`):** rv-1 at `127.0.0.1:8765/next`: React + Tailwind + framer-motion
   like Argus, ambient glow, dev palette picker with contrast grades. Source `web/`, build committed under
-  `photovault/web/static/next/` (`cd web && npm install && npm run build`). Cards, photos, settings still classic.
+  `photovault/web/static/next/` (`cd web && npm install && npm run build`). Cards ported (rv-2); photos, settings, file lists, setup still classic.
 - Hooks: `guard_volumes.py` blocks agent writes and engine runs on `/Volumes`; live tests read mounts only under
   `-m live` (D-028, D-031). Old v0 code: local branch `archive/v0-cli-2026-11-11`. The repo is public: real-drive
   facts and photos stay in `docs/private/` and `testdata/` (gitignored).
@@ -94,11 +94,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-061 (agent, rv-2): a hash shows the drive's progress (files hashed before the run count); pace stays the run's.
 - D-060 (agent, rv-1): `/next` beside classic; dev palette picker on by default with contrast grades; calmer task cards.
 - D-059 (user, rv-1): UI rebuilt in Vite + React + TS + Tailwind + framer-motion at `/next`; build committed; palette engine vendored.
 - D-058 (agent, ui-15): NTFS drives walk via `lstat` and can only be LEGACY (read-only on macOS); Windows/Synology system folders skipped.
 - D-057 (user ask, ui-14): the home page is tasks by drive; photos behind a Photos button; sidebar grouped by connection.
-- D-056 (agent, ui-13): a finished hash with indexed files still waiting shows as incomplete, never done.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

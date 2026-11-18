@@ -2,6 +2,7 @@ import { motion, useReducedMotion } from 'framer-motion';
 import { useCallback, useEffect, useState } from 'react';
 import { CountUp, Disclosure, Icon, RolePill } from '../components/bits';
 import { ProgressBar } from '../components/ProgressBar';
+import { extVM, taskVM } from '../components/TaskCard';
 import { api } from '../lib/api';
 import { fmtBytes, fmtInt, plural } from '../lib/format';
 import {
@@ -71,15 +72,13 @@ const WHEN: Record<StepTone, string> = {
 };
 
 function Timeline({ d, steps, summary }: { d: Drive; steps: WorkflowStep[]; summary: DriveSummary }) {
-  const { tasks, elsewhere, workflow, now, runStep, busy } = useStore();
+  const { tasks, elsewhere, workflow, now, runStep, busy, drives, driveFiles } = useStore();
   const live = liveStep(d, tasks, elsewhere);
   const wf = workflow && workflow.volumeId === d.volume_id && !workflow.outcome ? workflow : null;
   const isBusy = busy(d) || Boolean(live);
-  const liveProgress = live?.task
-    ? pace(live.task.progress, live.task.startMs, now)
-    : live?.ext
-      ? pace(live.ext.progress || (live.ext.job ? { current: live.ext.job.current ?? 0, total: live.ext.job.total ?? 0 } : null), null, now)
-      : null;
+  // The same numbers as the task cards, so a resumed hash shows the drive's progress here too.
+  const files = { ...driveFiles, [d.mount]: summary.files };
+  const liveProgress = live?.task ? taskVM(live.task, drives, now, files).pace : live?.ext ? extVM(live.ext, drives, now, files).pace : null;
 
   const views = steps.map((s, i) => {
     const queued = Boolean(wf && i > wf.at);

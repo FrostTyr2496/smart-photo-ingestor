@@ -3,6 +3,7 @@ import { fmtBytes, fmtElapsed, fmtLeft, parseSize } from './format';
 import {
   commandKey,
   driveStatus,
+  hashOverall,
   liveStep,
   longLine,
   pace,
@@ -17,6 +18,7 @@ import {
 import { Palette } from './palette';
 import { PRESETS, SCHEME_TOKENS } from './presets';
 import { absorb } from './store';
+import { cardHeadline, worstTier, type Card } from './tiers';
 import type { Drive, TaskRec } from './types';
 
 const drive = (over: Partial<Drive> = {}): Drive => ({
@@ -150,5 +152,39 @@ describe('palette', () => {
       const t = Palette.preview(p, SCHEME_TOKENS);
       expect(Palette.contrast(t.ink!, t.surface!), p.id).toBeGreaterThanOrEqual(4.5);
     }
+  });
+});
+
+describe('resumed hash', () => {
+  it('shows the drive progress, not only the files this run started with', () => {
+    const now = 1_000_000;
+    const run = pace({ current: 4683, total: 54725 }, now - 266_000, now);
+    const all = hashOverall(run, 112797);
+    expect(all.current).toBe(112797 - 54725 + 4683);
+    expect(Math.floor(all.fraction! * 100)).toBe(55);
+    expect(all.leftS).toBe(run.leftS); // the files left are the same either way
+    expect(longLine(all, 'files')).toMatch(/^62,755 of 112,797 files on the drive · this run 4,683 of 54,725 · /);
+    expect(hashOverall(run, undefined)).toBe(run); // unknown drive size: the run's own numbers
+  });
+});
+
+describe('cards', () => {
+  const counts = (o: number, u: number, n: number, b: number) => ({
+    only_on_card: { files: o, bytes: 0 },
+    unchecked: { files: u, bytes: 0 },
+    needs_backup: { files: n, bytes: 0 },
+    backed_up: { files: b, bytes: 0 },
+  });
+  const card = (tier: Card['tier'], c: Card['counts'], copies: Card['copies_by_volume'] = []): Card => ({
+    volume_id: 'c1', label: 'Card A', mount: '/mnt/a', mounted: true, last_seen_at: null, tier,
+    files: 10, bytes: 0, counts: c, cameras: [], copies_by_volume: copies, checked_at: null,
+  });
+  it('words each tier as the classic UI did', () => {
+    expect(cardHeadline(card('only_on_card', counts(3, 0, 7, 0)))).toBe('Back up now: 3 files only on this card.');
+    expect(cardHeadline(card('needs_backup', counts(0, 0, 10, 0), [{ volume_id: 'x', label: 'X9', role: 'WORKING', files: 10, bytes: 0 }]))).toBe(
+      'Needs backup: 10 files only on X9 (Working drive), not on a backup drive yet.',
+    );
+    expect(worstTier([{ mounted: true, tier: 'backed_up' }, { mounted: true, tier: 'needs_backup' }, { mounted: false, tier: 'only_on_card' }])).toBe('needs_backup');
+    expect(worstTier([{ mounted: false, tier: 'only_on_card' }])).toBeNull();
   });
 });

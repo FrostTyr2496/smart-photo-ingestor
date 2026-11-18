@@ -43,8 +43,17 @@ Rules for every task:
     page was checked in headless Chrome for console errors, not only the dev server.
     Not in rv-1: cards, file lists, setup dialogs, photos, settings (they open the classic UI).
 
-- [ ] 2. Cards view and card file lists (card-3, ui-10 filter bar)
+- [x] 2. Cards view and card file lists (card-3, ui-10 filter bar) (visual check pending, user)
   - ID: rv-2 (after rv-1)
+  - `#/cards` lists connected cards (tier pill, headline, tier bar, cameras, Check card, Import…, Show files),
+    the cameras table, and cards seen before; `#/cards/<id>` has the tier tiles (click to filter), cameras, and
+    the file list with the shared filter bar, pager and a copies cell that opens every copy (Show in Finder).
+    The Import dialog is ported (dry run, or import after a confirm). The header dot and Cards nav stay in `/next`.
+  - Also: a hash shows the drive's progress, not only the files its run started with (a resumed hash read 6 %
+    on a drive 55 % hashed). Pace and time left stay the run's (D-061).
+  - Verify: `cd web && npm test && npm run build`; built page checked for console errors on each route.
+  - Result (2026-11-18): `npm test` 14 passed, build clean; `uv run pytest -q` 490 passed, 4 skipped. Headless
+    Chrome on live data: cards list, Card A detail, home showing "62,755 of 112,797 files on the drive".
 - [ ] 3. Drive file lists and the filter bar (ui-7, ui-10)
   - ID: rv-3 (after rv-1)
 - [ ] 4. New-drive setup, assign / ignore / rename dialogs, import (ui-9, ui-15)

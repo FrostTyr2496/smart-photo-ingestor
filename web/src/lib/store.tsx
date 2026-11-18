@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api } from './api';
-import { driveName, workflowSteps, liveStep, STEP_NAME, type WorkflowStep } from './labels';
+import { readPref, writePref } from './prefs';
+import { argvWords, driveName, isHash, workflowSteps, liveStep, STEP_NAME, type WorkflowStep } from './labels';
 import type { Drive, ExtRun, StaleJob, TaskDetail, TaskRec, TaskSummary, CardInfo } from './types';
 
 // Same cadence as the classic UI.
@@ -39,6 +40,8 @@ interface Store {
   stale: StaleJob[];
   cards: CardInfo[];
   pausing: Set<number>;
+  /** Files on each drive (by mount) that a hash is running on, so a resumed hash shows the drive's progress. */
+  driveFiles: Record<string, number>;
   workflow: Workflow | null;
   /** Bumps whenever a run ends, so open views reload their numbers. */
   epoch: number;
@@ -325,6 +328,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const tasks = useMemo(() => [...taskMap.values()].sort((a, b) => b.id - a.id), [taskMap]);
 
+  // The file count of each drive a hash runs on, read once per drive from its summary.
+  // Remembered per browser, so a reload shows the drive's progress at once (the summary takes seconds on a big drive).
+  const [driveFiles, setDriveFilesRaw] = useState<Record<string, number>>(() => readPref('pv:driveFiles', {}));
+  const setDriveFiles = useCallback((fn: (f: Record<string, number>) => Record<string, number>) => {
+    setDriveFilesRaw((f) => {
+      const next = fn(f);
+      writePref('pv:driveFiles', next);
+      return next;
+    });
+  }, []);
+  const asked = useRef(new Set<string>());
+  useEffect(() => {
+    const mounts = [
+      ...tasks.filter((t) => !t.final && isHash(argvWords(t.argv))).map((t) => argvWords(t.argv)[1]),
+      ...elsewhere.filter((e) => isHash(e.words || [])).map((e) => (e.words || [])[1]),
+    ];
+    for (const m of mounts) {
+      if (!m || asked.current.has(m)) continue;
+      const d = drives.find((x) => x.mount === m && x.volume_id);
+      if (!d) continue;
+      asked.current.add(m);
+      api<{ files: number }>('GET', `/api/volumes/${encodeURIComponent(d.volume_id!)}`)
+        .then((s) => setDriveFiles((f) => ({ ...f, [m]: s.files })))
+        .catch(() => asked.current.delete(m));
+    }
+  }, [tasks, elsewhere, drives, setDriveFiles]);
+  // A new index can change the count; ask again after any run ends.
+  useEffect(() => {
+    asked.current.clear();
+  }, [epoch]);
+
   /** A run started in a terminal on this drive (ui-11) counts too, so the UI never starts a second one beside it. */
   const busy = useCallback(
     (d: Drive) =>
@@ -417,6 +451,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     stale,
     cards,
     pausing,
+    driveFiles,
     workflow,
     epoch,
     now,

@@ -1,14 +1,40 @@
 import { useEffect, useState } from 'react';
 
-/** Hash routes, so a reload keeps the open view: #/ (tasks) and #/drive/<volume id>. */
-export type Route = { view: 'home' } | { view: 'drive'; id: string };
+/** Hash routes, so a reload keeps the open view. */
+export type Route =
+  | { view: 'home' }
+  | { view: 'drive'; id: string }
+  | { view: 'cards'; id: string | null }
+  | { view: 'photos' }
+  | { view: 'settings' };
 
 export function parseRoute(hash: string): Route {
-  const m = /^#\/drive\/(.+)$/.exec(hash);
-  return m && m[1] ? { view: 'drive', id: decodeURIComponent(m[1]) } : { view: 'home' };
+  const m = /^#\/(drive|cards|photos|settings)(?:\/(.+))?$/.exec(hash);
+  if (!m) return { view: 'home' };
+  const id = m[2] ? decodeURIComponent(m[2]) : null;
+  if (m[1] === 'drive' && id) return { view: 'drive', id };
+  if (m[1] === 'cards') return { view: 'cards', id };
+  if (m[1] === 'photos') return { view: 'photos' };
+  if (m[1] === 'settings') return { view: 'settings' };
+  return { view: 'home' };
 }
 
-export const hrefFor = (r: Route): string => (r.view === 'drive' ? `#/drive/${encodeURIComponent(r.id)}` : '#/');
+export function hrefFor(r: Route): string {
+  switch (r.view) {
+    case 'drive':
+      return `#/drive/${encodeURIComponent(r.id)}`;
+    case 'cards':
+      return r.id ? `#/cards/${encodeURIComponent(r.id)}` : '#/cards';
+    case 'photos':
+      return '#/photos';
+    case 'settings':
+      return '#/settings';
+    default:
+      return '#/';
+  }
+}
+
+export const routeKey = (r: Route): string => hrefFor(r);
 
 export function useRoute(): Route {
   const [route, setRoute] = useState(() => parseRoute(window.location.hash));

@@ -1,12 +1,12 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { Icon, Logo } from '../components/bits';
 import { ProgressBar } from '../components/ProgressBar';
-import { pace, taskTitle } from '../lib/labels';
+import { extVM, taskVM } from '../components/TaskCard';
 import { springs } from '../lib/motion';
 import { CLASSIC, type Route } from '../lib/route';
 import { useStore } from '../lib/store';
+import { worstTier } from '../lib/tiers';
 
-const TIER_ORDER = ['only_on_card', 'unchecked', 'needs_backup', 'backed_up'];
 const TIER_DOT: Record<string, string> = {
   only_on_card: 'bg-err',
   unchecked: 'bg-skip',
@@ -24,14 +24,11 @@ const TIER_WORD: Record<string, string> = {
 
 /** The overall progress of everything running: the mean when every run is countable, else a sliding bar. */
 function GlobalProgress() {
-  const { tasks, elsewhere, drives, now } = useStore();
+  const { tasks, elsewhere, drives, now, driveFiles } = useStore();
   const running = [
-    ...tasks.filter((t) => !t.final).map((t) => ({ title: taskTitle(t.argv, drives), p: pace(t.progress, t.startMs, now) })),
-    ...elsewhere.map((e) => ({
-      title: taskTitle(['--json', ...(e.words || [])], drives),
-      p: pace(e.progress || (e.job && e.job.current != null ? { current: e.job.current, total: e.job.total || 0 } : null), null, now),
-    })),
-  ];
+    ...tasks.filter((t) => !t.final).map((t) => taskVM(t, drives, now, driveFiles)),
+    ...elsewhere.map((e) => extVM(e, drives, now, driveFiles)),
+  ].map((vm) => ({ title: vm.title, p: vm.pace }));
   const counted = running.filter((r) => r.p.fraction !== null);
   const value = running.length && counted.length === running.length ? counted.reduce((s, r) => s + (r.p.fraction ?? 0), 0) / counted.length : null;
   const text = running.length === 1 ? running[0]!.title : `${running.length} tasks running`;
@@ -77,8 +74,7 @@ function NavItem({ label, href, active, external, dot, title }: { label: string;
 
 export function Header({ route }: { route: Route }) {
   const { cards } = useStore();
-  const connected = cards.filter((c) => c.mounted);
-  const worst = connected.length ? TIER_ORDER.find((t) => connected.some((c) => c.tier === t)) || 'empty' : null;
+  const worst = worstTier(cards);
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-bg/70 backdrop-blur-xl">
       <div className="mx-auto flex h-14 max-w-[1600px] items-center gap-4 px-4">
@@ -97,11 +93,10 @@ export function Header({ route }: { route: Route }) {
           <NavItem label="Photos" href={CLASSIC} active={false} external title="Opens in the classic UI (not ported yet)" />
           <NavItem
             label="Cards"
-            href={CLASSIC}
-            active={false}
-            external
+            href="#/cards"
+            active={route.view === 'cards'}
             dot={worst ? TIER_DOT[worst] : undefined}
-            title={worst ? `Connected cards: ${TIER_WORD[worst]}. Opens in the classic UI.` : 'Opens in the classic UI (not ported yet)'}
+            title={worst ? `Connected cards: ${TIER_WORD[worst]}` : 'Cards'}
           />
           <NavItem label="Settings" href={CLASSIC} active={false} external title="Opens in the classic UI (not ported yet)" />
         </nav>

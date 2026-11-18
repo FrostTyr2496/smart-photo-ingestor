@@ -153,6 +153,19 @@ export function pace(progress: Progress | null | undefined, startMs: number | nu
   return { current, total, fraction, elapsedS, perMin, leftS };
 }
 
+/**
+ * A hash run counts only the files still waiting when it started, so a resumed hash starts again at 0 %. With the
+ * drive's file count, its progress becomes the drive's: files hashed before the run plus this run's count, out of
+ * every file. Time left and pace stay the run's own (the files left are the same either way).
+ */
+export function hashOverall(p: Pace, driveFiles: number | undefined): Pace & { run?: { current: number; total: number } } {
+  if (!driveFiles || !p.total || p.total > driveFiles) return p;
+  const before = driveFiles - p.total;
+  return { ...p, fraction: Math.min(1, (before + p.current) / driveFiles), current: before + p.current, total: driveFiles, run: { current: p.current, total: p.total } };
+}
+
+export const isHash = (words: string[]): boolean => commandKey(words) === 'hash';
+
 /** The one line a compact task card shows: "5% · 3h 20m left". */
 export function shortLine(p: Pace): string {
   if (p.fraction === null) return p.current ? fmtInt(p.current) : 'Starting…';
@@ -161,9 +174,12 @@ export function shortLine(p: Pace): string {
 }
 
 /** "4,635 of 95,389 files · 10m 11s elapsed": the details line. */
-export function longLine(p: Pace, unit: string): string {
+export function longLine(p: Pace & { run?: { current: number; total: number } }, unit: string): string {
   const parts: string[] = [];
-  if (p.total) parts.push(`${fmtInt(p.current)} of ${fmtInt(p.total)} ${unit}`);
+  if (p.run) {
+    parts.push(`${fmtInt(p.current)} of ${fmtInt(p.total)} ${unit} on the drive`);
+    parts.push(`this run ${fmtInt(p.run.current)} of ${fmtInt(p.run.total)}`);
+  } else if (p.total) parts.push(`${fmtInt(p.current)} of ${fmtInt(p.total)} ${unit}`);
   else if (p.current) parts.push(`${fmtInt(p.current)} ${unit}`);
   if (p.elapsedS) parts.push(`${fmtElapsed(p.elapsedS)} elapsed`);
   if (p.perMin !== null) parts.push(`${fmtInt(p.perMin)} per min`);
