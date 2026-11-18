@@ -357,6 +357,10 @@ def list_volumes(conn: sqlite3.Connection) -> list[Row]:
     return conn.execute("SELECT * FROM volumes ORDER BY role, label").fetchall()
 
 
+def get_volume(conn: sqlite3.Connection, volume_id: str) -> Row | None:
+    return conn.execute("SELECT * FROM volumes WHERE volume_id = ?", (volume_id,)).fetchone()
+
+
 def volume_instances(conn: sqlite3.Connection, volume_id: str) -> dict[str, Row]:
     """Every instance on a volume, keyed by ``rel_path_key``."""
     rows = conn.execute("SELECT * FROM instances WHERE volume_id = ?", (volume_id,)).fetchall()

@@ -195,7 +195,7 @@ def test_drives_lists_mounted_then_remembered(srv: Client) -> None:
     assert old["mounted"] is False and old["mount"] is None and old["role"] == "LEGACY"
     assert old["last_seen_at"]
     assert set(work) == {"mount", "role", "label", "fs", "size", "free", "volume_id", "mounted",
-                         "looks_like_card", "last_seen_at"}
+                         "looks_like_card", "last_seen_at", "local"}
     # mounted first
     assert [d["mounted"] for d in drives] == sorted([d["mounted"] for d in drives], reverse=True)
 

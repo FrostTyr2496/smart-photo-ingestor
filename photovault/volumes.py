@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import plistlib
+import shutil
 import sqlite3
 import subprocess
 import uuid
@@ -98,13 +99,53 @@ def write_marker(mount: Path, volume_id: str) -> None:
         raise
 
 
+def is_folder_volume(path: Path) -> bool:
+    """A folder on the Mac used as a drive (D-047): a directory inside the home folder that is not a mount point."""
+    path = Path(path).expanduser()
+    try:
+        home = Path.home().resolve()
+        resolved = path.resolve()
+    except (OSError, RuntimeError):
+        return False
+    return resolved != home and resolved.is_relative_to(home) and path.is_dir() and not os.path.ismount(path)
+
+
+def _containing_mount(path: Path) -> Path:
+    p = Path(path).resolve()
+    while not os.path.ismount(p) and p != p.parent:
+        p = p.parent
+    return p
+
+
+def probe_folder(folder: Path, *, run=subprocess.run) -> VolumeProbe:
+    """Describe a Mac folder used as a drive. It has no volume UUID of its own (the disk's UUID would match every
+    other folder on it), so it is found again only by its marker; it is never a card."""
+    folder = Path(folder).expanduser()
+    fs_type = ""
+    result = run(["diskutil", "info", "-plist", str(_containing_mount(folder))], capture_output=True, check=False)
+    if result.returncode == 0:
+        try:
+            fs_type = str(plistlib.loads(result.stdout).get("FilesystemType") or "").lower()
+        except Exception:  # noqa: BLE001 - the filesystem name is only shown to people
+            fs_type = ""
+    try:
+        capacity: int | None = shutil.disk_usage(folder).total
+    except OSError:
+        capacity = None
+    return VolumeProbe(mount=folder, name=folder.name, fs_type=fs_type, da_volume_uuid=None, capacity_bytes=capacity,
+                       internal=True, marker_id=read_marker(folder), looks_like_card=False)
+
+
 def probe(mount: Path, *, run=subprocess.run) -> VolumeProbe:
     """Describe the volume mounted at ``mount`` using ``diskutil info -plist`` (read-only).
 
+    A folder inside the home folder that is not a mount point is probed as a folder volume (``probe_folder``).
     Missing plist keys give None (UUID, capacity) or False (internal); a missing name falls back to the mount
     directory name and a missing filesystem type to an empty string.
     """
     mount = Path(mount)
+    if is_folder_volume(mount):
+        return probe_folder(mount, run=run)
     result = run(["diskutil", "info", "-plist", str(mount)], capture_output=True, check=False)
     if result.returncode != 0:
         stderr = result.stderr.decode(errors="replace") if isinstance(result.stderr, bytes) else result.stderr

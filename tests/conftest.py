@@ -23,6 +23,12 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
             item.add_marker(skip)
 
 
+@pytest.fixture(autouse=True)
+def _isolated_home(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point `~` at an empty folder so no test sees the real home (the Mac folder drive, D-047, lives there)."""
+    monkeypatch.setenv("HOME", str(tmp_path_factory.mktemp("home")))
+
+
 @pytest.fixture
 def live_sources() -> list[LiveSource]:
     """Every source in the live registry; skips the test when there is no registry or it is empty."""
