@@ -86,12 +86,13 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-049 (user): at most 1–2 finished tasks uncommitted; commit each task as it finishes unless concurrent work
+  in the same files requires otherwise (reason under "In progress").
 - D-048 (agent): `cards check` = register + index + hash, read-only; a mounted card is walked so new or changed
   files show as not checked.
 - D-047 (user): the Mac is a working drive, only inside one folder (`mac_folder`, default `~/Sandbox`).
 - D-046 (user): card file colours: green on MASTER, yellow on WORKING/LEGACY only, red only on the card; worst wins.
 - D-045 (user): local web UI before the SwiftUI app; user metadata in the catalog, XMP sidecars on WORKING only.
-- D-044 (user): `hash` on a failing drive (idx-11): EIO → unreadable; breakers; `--skip-prefix`.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

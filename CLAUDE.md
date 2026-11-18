@@ -27,6 +27,8 @@ task IDs, a decisions log, and `/close-the-loop`.
   Real-photo tests run with `uv run pytest -m realfiles` and skip when `testdata/corpus` is absent.
 - CLI (from fnd-6): `uv run photovault --json <command>`. Against real drives, it is the user who runs it.
 - Commits: `feat(<task-id>): …  [<task-id>]`, one per task, staged with `git add <paths>`.
+  - Commit each task as it finishes: at most 1–2 finished tasks uncommitted, more only when concurrent work
+    in the same files requires it (D-049, `task-execution.md` §1.6).
   - Don't push unless asked.
   - No attribution trailers (D-009). `.claude/settings.json` turns them off.
 - Run `/close-the-loop` before each task commit.

@@ -21,6 +21,10 @@ the hard rules are in `vault-rules.md` and the system map is in `system-design.m
    Explore agent for unfamiliar code. To port code from the old CLI, use
    `git show archive/v0-cli-2026-11-11:photo_ingest/<file>`.
 5. Before your first edit, write the "In progress" block in `START_HERE.md` (format given there).
+6. **Small uncommitted backlog (D-049).** Don't start a task while more than one finished task sits uncommitted:
+   commit it first (§4), one commit per task. Two finished tasks may wait together only when they are built in
+   the same files at the same time and can't be committed apart; say so under "In progress". Beyond two needs a
+   reason the user agrees to, recorded under "In progress".
 
 ## 2. While implementing
 - Shell tricks to avoid: `guard_volumes.py` blocks any Bash call that mixes `/Volumes` with a command
@@ -76,7 +80,9 @@ the hard rules are in `vault-rules.md` and the system map is in `system-design.m
    - **No** attribution trailers (D-009). **No** commit hashes in the docs.
    - Stage specific paths with `git add <paths>`.
    - Never use `--no-verify`, never amend after a hook failure, and don't push unless asked.
-4. End with an empty `git status --short`, or describe what is left under "In progress".
+4. End with an empty `git status --short`, or describe what is left under "In progress". Commit each task when
+   it is done, not in a batch later (D-049): work left uncommitted across several tasks tangles in shared files
+   and can't be split into clean per-task commits.
 
 ## 5. When to stop and ask
 - Two documents conflict, or a document conflicts with `vault-rules.md`.
