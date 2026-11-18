@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>PhotoVault</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
   <link rel="stylesheet" href="/static/app.css">
@@ -10,106 +11,124 @@
   <script src="/static/app.js" defer></script>
 </head>
 <body>
+  <a class="skip" href="#main">Skip to photos</a>
+
   <header class="topbar">
-    <h1>PhotoVault</h1>
-    <span id="status" class="status" role="status" aria-live="polite"></span>
+    <div class="brand">
+      <span class="logo" aria-hidden="true"></span>
+      <h1>PhotoVault</h1>
+    </div>
+    <div id="global" class="global" hidden>
+      <div class="global-track"><div id="global-fill" class="global-fill"></div></div>
+      <span id="global-text" class="muted small"></span>
+    </div>
     <button id="btn-settings" type="button">Settings</button>
   </header>
 
-  <div class="layout">
-    <aside class="sidebar">
-      <section>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <div id="layout" class="layout">
+    <aside class="sidebar" aria-label="Drives and tasks">
+      <section class="panel">
         <h2>Drives</h2>
-        <div id="drives"></div>
+        <div id="drives" class="drive-list"></div>
         <button id="btn-refs" type="button" class="link">Add GPS reference folder…</button>
       </section>
-      <section>
+      <section class="panel">
         <h2>Tasks</h2>
         <div id="tasks"></div>
       </section>
     </aside>
 
-    <main class="main">
-      <section>
-        <h2>Metadata</h2>
-        <div class="filters">
-          <label>Drive
+    <main id="main" class="main" tabindex="-1">
+      <section class="panel">
+        <div class="section-head">
+          <h2>Photos</h2>
+          <span id="counts" class="muted small"></span>
+        </div>
+        <div class="toolbar">
+          <label class="field">Drive
             <select id="f-drive"></select>
           </label>
-          <label>Shoot
+          <label class="field">Shoot
             <select id="f-shoot"></select>
           </label>
-          <label>Missing
+          <label class="field">Show
             <select id="f-missing">
-              <option value="">All frames</option>
-              <option value="any">Any field</option>
-              <option value="gps">GPS</option>
-              <option value="creator">Creator</option>
-              <option value="keywords">Keywords</option>
+              <option value="">All photos</option>
+              <option value="any">Missing anything</option>
+              <option value="gps">Missing location</option>
+              <option value="creator">Missing creator</option>
+              <option value="keywords">Missing keywords</option>
             </select>
           </label>
         </div>
-        <p id="counts" class="muted"></p>
         <div class="bulkbar">
           <button id="btn-all" type="button">Select all on page</button>
           <button id="btn-clear" type="button">Clear selection</button>
-          <span id="sel-count" class="muted"></span>
+          <span id="sel-count" class="count-pill" hidden></span>
           <span class="pager">
             <button id="btn-prev" type="button">Previous</button>
-            <span id="page-label" class="muted"></span>
+            <span id="page-label" class="muted small"></span>
             <button id="btn-next" type="button">Next</button>
           </span>
         </div>
-        <div id="grid" class="grid"></div>
+        <div id="grid" class="grid" aria-label="Photos"></div>
       </section>
     </main>
 
-    <aside id="editor" class="editor" hidden>
-      <h2>Edit selection</h2>
-      <p id="ed-summary" class="muted"></p>
+    <aside id="editor" class="editor panel" aria-label="Edit selection" hidden>
+      <div class="editor-head">
+        <h2>Edit selection</h2>
+      </div>
+      <p id="ed-summary" class="muted small"></p>
 
-      <fieldset>
+      <fieldset class="group">
         <legend>Location</legend>
         <div id="suggest" class="suggest"></div>
         <div id="map" class="map"></div>
-        <p id="map-note" class="muted"></p>
+        <p id="map-note" class="muted small"></p>
         <div class="row">
-          <input id="place-q" type="search" placeholder="Place, then Enter" aria-label="Place search">
+          <input id="place-q" type="search" placeholder="Search a place, then Enter" aria-label="Place search">
           <button id="btn-search" type="button">Search</button>
         </div>
         <ul id="place-results" class="results"></ul>
-        <label class="stack">Place name
+        <label class="field-stack">
+          <span>Place name</span>
           <input id="place-name" type="text">
         </label>
-        <p id="loc-info" class="muted"></p>
+        <p id="loc-info" class="muted small"></p>
       </fieldset>
 
-      <fieldset>
+      <fieldset class="group">
         <legend>Credit and title</legend>
-        <label class="stack">Creator
+        <label class="field-stack">
+          <span>Creator</span>
           <input id="ed-creator" type="text">
         </label>
-        <label class="stack">Copyright
+        <label class="field-stack">
+          <span>Copyright</span>
           <input id="ed-copyright" type="text">
         </label>
-        <label class="stack">Title
+        <label class="field-stack">
+          <span>Title</span>
           <input id="ed-title" type="text">
         </label>
       </fieldset>
 
-      <fieldset>
+      <fieldset class="group">
         <legend>Keywords</legend>
         <div id="kw-chips" class="chips"></div>
-        <input id="kw-input" type="text" placeholder="Add keyword, Enter" aria-label="Add keyword">
-        <p class="muted small">Adds and removes apply to every selected frame.</p>
+        <input id="kw-input" type="text" placeholder="Add a keyword, then Enter" aria-label="Add keyword">
+        <p class="muted small">Adds and removes apply to every selected photo.</p>
       </fieldset>
 
-      <fieldset>
+      <fieldset class="group">
         <legend>Clock shift</legend>
         <div class="row shift">
           <select id="sh-sign" aria-label="Shift direction">
-            <option value="+">+</option>
-            <option value="-">−</option>
+            <option value="+">Later (+)</option>
+            <option value="-">Earlier (−)</option>
           </select>
           <label>h <input id="sh-h" type="number" min="0" value="0"></label>
           <label>m <input id="sh-m" type="number" min="0" max="59" value="0"></label>
@@ -120,69 +139,109 @@
 
       <div class="savebar">
         <button id="btn-save" type="button" class="primary">Save</button>
-        <span id="save-msg" class="muted"></span>
+        <span id="save-msg" class="muted small"></span>
       </div>
     </aside>
   </div>
 
-  <dialog id="dlg-settings">
-    <form id="f-settings">
-      <h2>Settings</h2>
-      <label class="stack">Creator <input name="creator" type="text"></label>
-      <label class="stack">Copyright <input name="copyright" type="text"></label>
-      <label class="stack">Default UTC offset (for naive times) <input name="default_offset" type="text" placeholder="+01:00"></label>
-      <label class="stack">GPS match window (seconds) <input name="match_window_s" type="number" min="0" max="86400"></label>
-      <div class="dialog-actions">
+  <dialog id="dlg-settings" class="dlg" aria-labelledby="t-settings">
+    <form id="f-settings" class="dlg-form">
+      <div class="dlg-head"><h2 id="t-settings">Settings</h2></div>
+      <div class="dlg-body">
+        <label class="field-stack"><span>Creator</span><input name="creator" type="text"></label>
+        <label class="field-stack"><span>Copyright</span><input name="copyright" type="text"></label>
+        <label class="field-stack">
+          <span>Default time zone for photos without one</span>
+          <input name="default_offset" type="text" placeholder="+01:00">
+        </label>
+        <label class="field-stack">
+          <span>Match GPS points within (seconds)</span>
+          <input name="match_window_s" type="number" min="0" max="86400">
+        </label>
+      </div>
+      <div class="dlg-foot">
         <button type="button" data-close>Cancel</button>
         <button type="submit" class="primary">Save settings</button>
       </div>
     </form>
   </dialog>
 
-  <dialog id="dlg-assign">
-    <form id="f-assign">
-      <h2>Assign drive</h2>
-      <p id="assign-mount" class="muted small"></p>
-      <label class="stack">Role
-        <select name="role">
-          <option value="WORKING">WORKING</option>
-          <option value="MASTER">MASTER</option>
-          <option value="LEGACY">LEGACY</option>
-        </select>
-      </label>
-      <label class="stack">Label <input name="label" type="text"></label>
-      <div class="dialog-actions">
+  <dialog id="dlg-assign" class="dlg" aria-labelledby="t-assign">
+    <form id="f-assign" class="dlg-form">
+      <div class="dlg-head"><h2 id="t-assign">Set up drive</h2></div>
+      <div class="dlg-body">
+        <p id="assign-name" class="muted small"></p>
+        <label class="field-stack">
+          <span>Role</span>
+          <select name="role">
+            <option value="WORKING">Working drive (copy target)</option>
+            <option value="MASTER">Master backup</option>
+            <option value="LEGACY">Legacy drive (existing photos)</option>
+          </select>
+        </label>
+        <label class="field-stack">
+          <span>Name</span>
+          <input name="label" type="text" placeholder="For example, X9 Pro">
+        </label>
+      </div>
+      <div class="dlg-foot">
         <button type="button" data-close>Cancel</button>
-        <button type="submit" class="primary">Assign</button>
+        <button type="submit" class="primary">Set up drive</button>
       </div>
     </form>
   </dialog>
 
-  <dialog id="dlg-import">
-    <form id="f-import">
-      <h2>Import card</h2>
-      <p id="import-source" class="muted small"></p>
-      <label class="stack">Working drive
-        <select name="target" required></select>
-      </label>
-      <label class="stack">Shoot name (optional) <input name="name" type="text"></label>
-      <p id="import-note" class="muted small"></p>
-      <div class="dialog-actions">
+  <dialog id="dlg-import" class="dlg" aria-labelledby="t-import">
+    <form id="f-import" class="dlg-form">
+      <div class="dlg-head"><h2 id="t-import">Import from card</h2></div>
+      <div class="dlg-body">
+        <p id="import-source" class="muted small"></p>
+        <label class="field-stack">
+          <span>Copy onto</span>
+          <select name="target" required></select>
+        </label>
+        <label class="field-stack">
+          <span>Shoot name (optional)</span>
+          <input name="name" type="text" placeholder="Chosen from the photo dates if empty">
+        </label>
+        <p id="import-note" class="muted small"></p>
+      </div>
+      <div class="dlg-foot">
         <button type="button" data-close>Cancel</button>
         <button type="button" id="btn-dry">Dry run</button>
-        <button type="button" id="btn-import" class="primary">Import</button>
+        <button type="button" id="btn-import" class="primary">Import…</button>
       </div>
     </form>
   </dialog>
 
-  <dialog id="dlg-refs">
-    <form id="f-refs">
-      <h2>GPS reference folder</h2>
-      <label class="stack">Folder path (absolute) <input name="folder" type="text" placeholder="/Users/you/Phone export"></label>
-      <label class="stack">Source label <input name="label" type="text" placeholder="phone"></label>
-      <div class="dialog-actions">
+  <dialog id="dlg-refs" class="dlg" aria-labelledby="t-refs">
+    <form id="f-refs" class="dlg-form">
+      <div class="dlg-head"><h2 id="t-refs">Add GPS reference folder</h2></div>
+      <div class="dlg-body">
+        <label class="field-stack">
+          <span>Folder path</span>
+          <input name="folder" type="text" placeholder="/Users/you/Phone export">
+          <small class="muted">Use the full path. The folder is read, never changed.</small>
+        </label>
+        <label class="field-stack">
+          <span>Source name</span>
+          <input name="label" type="text" placeholder="Phone">
+        </label>
+      </div>
+      <div class="dlg-foot">
         <button type="button" data-close>Cancel</button>
         <button type="submit" class="primary">Scan folder</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-confirm" class="dlg" aria-labelledby="confirm-title">
+    <form method="dialog" class="dlg-form">
+      <div class="dlg-head"><h2 id="confirm-title"></h2></div>
+      <div id="confirm-body" class="dlg-body"></div>
+      <div class="dlg-foot">
+        <button type="submit" value="cancel">Cancel</button>
+        <button type="submit" value="ok" id="confirm-ok" class="primary">Confirm</button>
       </div>
     </form>
   </dialog>

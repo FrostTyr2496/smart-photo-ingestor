@@ -15,6 +15,7 @@ import logging
 import mimetypes
 import os
 import re
+import select
 import signal
 import sqlite3
 import subprocess
@@ -268,12 +269,137 @@ ALLOWED_CMDS = ("assign", "ingest", "resume", "card_status", "index", "hash", "m
 
 # --------------------------------------------------------------------------- app and helpers
 
+SSE_PING_S = 25.0          # a comment line keeps idle event streams open
+STAT_POLL_S = 2.0          # fallback check interval when kqueue is unavailable
+O_EVTONLY = 0x8000         # macOS: open a path for events only (not exposed by Python's os module)
+
+
+class VolumeWatcher:
+    """Counts changes under the volumes root so the UI can refetch drives at once.
+
+    On macOS a kqueue watch on the root blocks in kevent() until the folder changes; there is no polling.
+    A self-pipe wakes that wait so `stop()` returns promptly. Without kqueue, the root's mtime is checked every
+    `poll_s` seconds. Each change bumps `generation` and notifies `cond`.
+    """
+
+    def __init__(self, root: Path, *, use_kqueue: bool = True, poll_s: float = STAT_POLL_S) -> None:
+        self.root = Path(root)
+        self.use_kqueue = use_kqueue and hasattr(select, "kqueue")
+        self.poll_s = poll_s
+        self.cond = threading.Condition()
+        self.generation = 0
+        self._stop = threading.Event()
+        self._ready = threading.Event()
+        self._wake_lock = threading.Lock()
+        self._wake_r: int | None = None
+        self._wake_w: int | None = None
+        self._thread: threading.Thread | None = None
+
+    @property
+    def stopped(self) -> bool:
+        return self._stop.is_set()
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._thread = threading.Thread(target=self._run, name="volume-watcher", daemon=True)
+        self._thread.start()
+        self._ready.wait(2.0)  # changes made after start() returns are seen
+
+    def stop(self, timeout: float = 2.0) -> None:
+        self._stop.set()
+        with self._wake_lock:
+            if self._wake_w is not None:
+                try:
+                    os.write(self._wake_w, b"x")
+                except OSError:
+                    pass
+        with self.cond:
+            self.cond.notify_all()
+        if self._thread is not None and self._thread is not threading.current_thread():
+            self._thread.join(timeout)
+
+    def wait_change(self, since: int, timeout: float) -> bool:
+        """True when the generation moved past `since`. False on timeout or after stop()."""
+        with self.cond:
+            self.cond.wait_for(lambda: self.generation != since or self._stop.is_set(), timeout)
+            return self.generation != since
+
+    def _bump(self) -> None:
+        with self.cond:
+            self.generation += 1
+            self.cond.notify_all()
+
+    def _run(self) -> None:
+        if self.use_kqueue and self._run_kqueue():
+            return
+        self._run_stat()
+
+    def _run_kqueue(self) -> bool:
+        """Watch with kqueue until stop(). True when it ran and stopped; False when it could not start."""
+        flag = O_EVTONLY if sys.platform == "darwin" else os.O_RDONLY
+        try:
+            fd = os.open(self.root, flag)
+        except OSError:
+            return False
+        try:
+            kq = select.kqueue()
+        except OSError:
+            os.close(fd)
+            return False
+        r, w = os.pipe()
+        with self._wake_lock:
+            self._wake_r, self._wake_w = r, w
+        fflags = (select.KQ_NOTE_WRITE | select.KQ_NOTE_DELETE | select.KQ_NOTE_RENAME
+                  | select.KQ_NOTE_LINK)
+        try:
+            kq.control([
+                select.kevent(fd, filter=select.KQ_FILTER_VNODE, flags=select.KQ_EV_ADD | select.KQ_EV_CLEAR,
+                              fflags=fflags),
+                select.kevent(r, filter=select.KQ_FILTER_READ, flags=select.KQ_EV_ADD),
+            ], 0, None)
+            self._ready.set()
+            while not self._stop.is_set():
+                for event in kq.control(None, 8, None):  # blocks until the root changes or stop() wakes us
+                    if event.ident == r:
+                        return True
+                    if event.ident == fd:
+                        self._bump()
+            return True
+        except OSError:
+            logger.warning("kqueue watch failed; checking the volumes folder every %s s", self.poll_s,
+                           exc_info=True)
+            return False
+        finally:
+            with self._wake_lock:
+                self._wake_r = self._wake_w = None
+            kq.close()
+            for handle in (fd, r, w):
+                os.close(handle)
+
+    def _mtime(self) -> int | None:
+        try:
+            return os.stat(self.root).st_mtime_ns
+        except OSError:
+            return None
+
+    def _run_stat(self) -> None:
+        last = self._mtime()
+        self._ready.set()
+        while not self._stop.wait(self.poll_s):
+            now = self._mtime()
+            if now != last:
+                last = now
+                self._bump()
+
+
 @dataclass
 class WebApp:
     catalog_path: Path
     home: Path
     volumes_root: Path
     runner: TaskRunner
+    watcher: VolumeWatcher | None = None
 
 
 class _NullEmitter:
@@ -579,6 +705,13 @@ class _Server(ThreadingHTTPServer):
     def __init__(self, address: tuple[str, int], app: WebApp) -> None:
         super().__init__(address, _Handler)
         self.app = app
+        self.closing = threading.Event()  # set before the watcher stops, so event streams end
+
+    def server_close(self) -> None:
+        self.closing.set()
+        if self.app.watcher is not None:
+            self.app.watcher.stop()
+        super().server_close()
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -601,6 +734,8 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._send_json(403, {"error": "POST needs application/json and a local Origin"})
             url = urlsplit(self.path)
             path = unquote(url.path)
+            if method == "GET" and path == "/api/events":
+                return self._events()
             if method == "GET" and path == "/":
                 return self._static("index.html")
             if method == "GET" and path.startswith("/static/"):
@@ -637,6 +772,33 @@ class _Handler(BaseHTTPRequestHandler):
             return True
         port = self.server.server_address[1]
         return origin in {f"http://{fmt.format(port=port)}" for fmt in ALLOWED_HOSTS_FMT}
+
+    def _events(self) -> None:
+        """Server-Sent Events: `event: drives` once at connect and again on each change; a comment every 25 s.
+        The stream ends when the client goes away or the server closes."""
+        srv = self.server
+        watcher = srv.app.watcher
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        try:
+            with watcher.cond:
+                gen = watcher.generation
+            self._sse(f"event: drives\ndata: {json.dumps({'generation': gen})}\n\n")
+            while not srv.closing.is_set() and not watcher.stopped:
+                if watcher.wait_change(gen, SSE_PING_S):
+                    with watcher.cond:
+                        gen = watcher.generation
+                    self._sse(f"event: drives\ndata: {json.dumps({'generation': gen})}\n\n")
+                else:
+                    self._sse(": ping\n\n")
+        except OSError:  # BrokenPipeError and ConnectionResetError are OSErrors: the client left
+            return
+
+    def _sse(self, text: str) -> None:
+        self.wfile.write(text.encode("utf-8"))
+        self.wfile.flush()
 
     def _read_body(self) -> Any:
         try:
@@ -676,5 +838,10 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 def make_server(app: WebApp, port: int = 8765) -> _Server:
-    """A server bound to 127.0.0.1. Port 0 picks a free port (read it from `server_address`)."""
-    return _Server(("127.0.0.1", port), app)
+    """A server bound to 127.0.0.1. Port 0 picks a free port (read it from `server_address`).
+    The drive watcher starts with the server and stops in `server_close()`."""
+    httpd = _Server(("127.0.0.1", port), app)
+    if app.watcher is None:
+        app.watcher = VolumeWatcher(app.volumes_root)
+    app.watcher.start()
+    return httpd

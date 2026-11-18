@@ -6,6 +6,7 @@ Everything runs on tmp_path roots and a tmp catalog through a real server thread
 from __future__ import annotations
 
 import json
+import select
 import sys
 import threading
 import time
@@ -121,7 +122,7 @@ def srv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     port = httpd.server_address[1]
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     client = Client(port)
-    client.root, client.ids, client.home = root, ids, home
+    client.root, client.ids, client.home, client.app = root, ids, home, app
     yield client
     httpd.shutdown()
     httpd.server_close()
@@ -203,6 +204,90 @@ def test_drives_shows_unregistered_card(srv: Client) -> None:
     drives = {d["mount"]: d for d in srv.call("GET", "/api/drives")[1]["drives"] if d["mount"]}
     card = drives[str(srv.root / "CARD1")]
     assert card["role"] == "CARD (new)" and card["looks_like_card"] is True and card["volume_id"] is None
+
+
+def open_events(client: Client, host: str | None = None):
+    """A raw SSE connection. The socket timeout is 3 s, so a stream that stalls fails the test."""
+    req = urllib.request.Request(f"http://127.0.0.1:{client.port}/api/events",
+                                 headers={"Host": host or host_of(client)})
+    return urllib.request.urlopen(req, timeout=3)
+
+
+def read_event(resp, name: bytes = b"event: drives") -> bytes:
+    """Read SSE lines until one starts with `name`; the 3 s socket timeout bounds each read."""
+    deadline = time.time() + 3.0
+    while time.time() < deadline:
+        line = resp.readline()
+        if not line:
+            break
+        if line.startswith(name):
+            return line
+    pytest.fail(f"no {name!r} line within 3 s")
+
+
+def wait_for(predicate, timeout: float = 3.0) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.02)
+    return False
+
+
+def test_new_folder_bumps_generation_and_sse_reports_it(srv: Client) -> None:
+    resp = open_events(srv)
+    try:
+        assert resp.headers["Content-Type"].startswith("text/event-stream")
+        assert resp.headers["Cache-Control"] == "no-cache"
+        read_event(resp)  # the initial event
+        before = srv.app.watcher.generation
+        (srv.root / "NEWDRIVE").mkdir()
+        assert wait_for(lambda: srv.app.watcher.generation > before)
+        read_event(resp)  # the change event, within the socket timeout
+    finally:
+        resp.close()
+
+
+def test_sse_does_not_block_other_requests(srv: Client) -> None:
+    resp = open_events(srv)
+    try:
+        read_event(resp)
+        assert srv.call("GET", "/api/settings")[0] == 200
+        assert srv.call("GET", "/api/drives")[0] == 200
+    finally:
+        resp.close()
+
+
+def test_events_host_guard(srv: Client) -> None:
+    status, body = srv.call("GET", "/api/events", host=f"evil.example:{srv.port}")
+    assert status == 403 and body == {"error": "host not allowed"}
+
+
+def test_kqueue_watch_reports_changes_without_polling(tmp_path: Path) -> None:
+    if not hasattr(select, "kqueue"):
+        pytest.skip("kqueue is not available on this platform")
+    root = tmp_path / "vols"
+    root.mkdir()
+    watcher = web.VolumeWatcher(root, poll_s=60)  # only kqueue can answer within the wait below
+    watcher.start()
+    try:
+        (root / "NEW").mkdir()
+        assert watcher.wait_change(0, timeout=3.0)
+    finally:
+        watcher.stop()
+    assert watcher.stopped
+
+
+def test_stat_fallback_reports_changes(tmp_path: Path) -> None:
+    root = tmp_path / "vols"
+    root.mkdir()
+    watcher = web.VolumeWatcher(root, use_kqueue=False, poll_s=0.05)
+    watcher.start()
+    try:
+        (root / "NEW").mkdir()
+        assert watcher.wait_change(0, timeout=3.0)
+    finally:
+        watcher.stop()
 
 
 def test_jobs_and_shoots_are_lists(srv: Client) -> None:
