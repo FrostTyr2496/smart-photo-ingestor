@@ -353,12 +353,198 @@ def list_jobs(conn: sqlite3.Connection, limit: int = 20) -> list[Row]:
     ).fetchall()
 
 
+def set_job_result(conn: sqlite3.Connection, job_id: int, result: dict) -> None:
+    """Keep a run's final numbers in the job's ``params_json`` under ``result`` (no schema change).
+
+    A resumed job keeps one row, so its ``result`` is the newest run's.
+    """
+    row = conn.execute("SELECT params_json FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+    if row is None:
+        return
+    params = json.loads(row["params_json"] or "{}")
+    params["result"] = result
+    conn.execute("UPDATE jobs SET params_json = ? WHERE job_id = ?", (json.dumps(params, sort_keys=True), job_id))
+
+
 def list_volumes(conn: sqlite3.Connection) -> list[Row]:
     return conn.execute("SELECT * FROM volumes ORDER BY role, label").fetchall()
 
 
 def get_volume(conn: sqlite3.Connection, volume_id: str) -> Row | None:
     return conn.execute("SELECT * FROM volumes WHERE volume_id = ?", (volume_id,)).fetchone()
+
+
+def meta_scan_status(conn: sqlite3.Connection) -> dict[str, tuple[int, int]]:
+    """Per volume: ``(groups, scanned)``, counting the same groups ``meta scan`` reads (their primary file is indexed
+    or verified there). A group is scanned once it has a ``group_meta`` row."""
+    rows = conn.execute(
+        """
+        SELECT i.volume_id, COUNT(DISTINCT g.group_id) AS groups, COUNT(DISTINCT m.group_id) AS scanned
+        FROM instances i
+        JOIN assets a ON a.asset_id = i.asset_id AND a.group_role = 'primary'
+        JOIN capture_groups g ON g.group_id = a.group_id
+        LEFT JOIN group_meta m ON m.group_id = g.group_id
+        WHERE i.state IN ('indexed', 'verified')
+        GROUP BY i.volume_id
+        """
+    ).fetchall()
+    return {r["volume_id"]: (r["groups"], r["scanned"]) for r in rows}
+
+
+def volume_state_counts(conn: sqlite3.Connection, volume_id: str) -> list[Row]:
+    """Per instance state: file count, bytes, and how many are linked to an asset (hashed)."""
+    return conn.execute(
+        """
+        SELECT state, COUNT(*) AS files, COALESCE(SUM(size), 0) AS bytes, SUM(asset_id IS NOT NULL) AS hashed
+        FROM instances WHERE volume_id = ? GROUP BY state
+        """,
+        (volume_id,),
+    ).fetchall()
+
+
+def volume_kind_counts(conn: sqlite3.Connection, volume_id: str) -> list[Row]:
+    return conn.execute(
+        "SELECT kind, COUNT(*) AS files, COALESCE(SUM(size), 0) AS bytes FROM instances "
+        "WHERE volume_id = ? GROUP BY kind ORDER BY files DESC",
+        (volume_id,),
+    ).fetchall()
+
+
+def volume_runs(conn: sqlite3.Connection, volume_id: str, limit: int = 20) -> list[Row]:
+    """Index and hash runs on a volume, newest first."""
+    return conn.execute(
+        """
+        SELECT job_id, kind, state, params_json, created_at, finished_at FROM jobs
+        WHERE source_volume_id = ? AND kind IN ('index_volume', 'baseline_hash')
+        ORDER BY job_id DESC LIMIT ?
+        """,
+        (volume_id, limit),
+    ).fetchall()
+
+
+def volume_last_steps(conn: sqlite3.Connection, volume_id: str) -> dict[str, dict | None]:
+    """When each workflow step last ran on a volume: ``{step: {"at", "state"} | None}``.
+
+    Index and hash come from their newest job. Scan metadata and sidecars have no job rows (no schema change), so
+    they use the newest ``group_meta.updated_at`` (also moved by a metadata edit) and ``sidecars.seen_at``."""
+    out: dict[str, dict | None] = {"index": None, "hash": None, "scan": None, "sidecars": None}
+    for kind, step in (("index_volume", "index"), ("baseline_hash", "hash")):
+        row = conn.execute(
+            "SELECT state, COALESCE(finished_at, created_at) AS at FROM jobs "
+            "WHERE source_volume_id = ? AND kind = ? ORDER BY job_id DESC LIMIT 1", (volume_id, kind)).fetchone()
+        if row:
+            out[step] = {"at": row["at"], "state": row["state"]}
+    scan = conn.execute(
+        """
+        SELECT MAX(m.updated_at) AS at FROM group_meta m
+        JOIN assets a ON a.group_id = m.group_id AND a.group_role = 'primary'
+        JOIN instances i ON i.asset_id = a.asset_id WHERE i.volume_id = ?
+        """, (volume_id,)).fetchone()
+    if scan and scan["at"]:
+        out["scan"] = {"at": scan["at"], "state": "done"}
+    side = conn.execute("SELECT MAX(seen_at) AS at FROM sidecars WHERE volume_id = ?", (volume_id,)).fetchone()
+    if side and side["at"]:
+        out["sidecars"] = {"at": side["at"], "state": "done"}
+    return out
+
+
+# Copies (ui-8). Identity is the full hash (vault-rules 5): only `verified` instances linked to an asset count, and
+# CARD volumes never count as a copy (a card is formatted after import), the same rule as the duplicate report.
+_COPIES_ELSEWHERE = """(SELECT COUNT(DISTINCT o.volume_id) FROM instances o JOIN volumes ov ON ov.volume_id = o.volume_id
+    WHERE o.asset_id = i.asset_id AND o.state = 'verified' AND o.volume_id != i.volume_id AND ov.role != 'CARD')"""
+_COPIES_HERE = """(SELECT COUNT(*) FROM instances d WHERE d.asset_id = i.asset_id AND d.volume_id = i.volume_id
+    AND d.state = 'verified' AND d.instance_id != i.instance_id)"""
+COPY_FILTERS = ("elsewhere", "only_here", "dup_here")
+
+
+def volume_copy_summary(conn: sqlite3.Connection, volume_id: str) -> dict:
+    """Where this volume's hashed files also exist: on other (non-CARD) volumes, only here, or twice here.
+
+    File counts are instances on this volume; ``dup_here.extra_bytes`` is what the extra copies on this volume take.
+    ``by_volume`` lists each other volume with how many of this volume's files it also holds.
+    """
+    r = conn.execute(
+        f"""
+        SELECT COUNT(*) AS hashed,
+               COALESCE(SUM(e > 0), 0) AS elsewhere, COALESCE(SUM(CASE WHEN e > 0 THEN size END), 0) AS elsewhere_bytes,
+               COALESCE(SUM(e = 0), 0) AS only_here, COALESCE(SUM(CASE WHEN e = 0 THEN size END), 0) AS only_here_bytes
+        FROM (SELECT i.size, {_COPIES_ELSEWHERE} AS e FROM instances i
+              WHERE i.volume_id = ? AND i.state = 'verified' AND i.asset_id IS NOT NULL)
+        """,
+        (volume_id,),
+    ).fetchone()
+    dup = conn.execute(
+        """
+        SELECT COUNT(*) AS assets, COALESCE(SUM(n), 0) AS files, COALESCE(SUM(size * (n - 1)), 0) AS extra_bytes
+        FROM (SELECT COUNT(*) AS n, MAX(size) AS size FROM instances
+              WHERE volume_id = ? AND state = 'verified' AND asset_id IS NOT NULL
+              GROUP BY asset_id HAVING COUNT(*) >= 2)
+        """,
+        (volume_id,),
+    ).fetchone()
+    by_volume = conn.execute(
+        """
+        SELECT v.volume_id, v.label, v.role, COUNT(*) AS files, COALESCE(SUM(x.size), 0) AS bytes
+        FROM (SELECT DISTINCT i.instance_id, i.size, o.volume_id AS vid FROM instances i
+              JOIN instances o ON o.asset_id = i.asset_id AND o.state = 'verified' AND o.volume_id != i.volume_id
+              WHERE i.volume_id = ? AND i.state = 'verified' AND i.asset_id IS NOT NULL) x
+        JOIN volumes v ON v.volume_id = x.vid
+        WHERE v.role != 'CARD'
+        GROUP BY v.volume_id ORDER BY files DESC, v.label
+        """,
+        (volume_id,),
+    ).fetchall()
+    return {
+        "hashed": r["hashed"],
+        "elsewhere": {"files": r["elsewhere"], "bytes": r["elsewhere_bytes"]},
+        "only_here": {"files": r["only_here"], "bytes": r["only_here_bytes"]},
+        "dup_here": {"assets": dup["assets"], "files": dup["files"], "extra_bytes": dup["extra_bytes"]},
+        "by_volume": [dict(v) for v in by_volume],
+    }
+
+
+def volume_files(conn: sqlite3.Connection, volume_id: str, *, state: str | None, limit: int, offset: int,
+                 copies: str | None = None, other_volume_id: str | None = None) -> list[Row]:
+    """One page of a volume's files. Each row has ``copies`` (other non-CARD volumes with a verified copy) and
+    ``dup_here`` (other verified copies on this volume). ``copies`` filters by one of ``COPY_FILTERS``;
+    ``other_volume_id`` keeps files with a verified copy on that volume. Both filters imply ``verified``."""
+    sql = ("SELECT i.rel_path, i.size, i.mtime_ns, i.kind, i.state, i.asset_id, i.asset_id IS NOT NULL AS hashed, "
+           f"i.verified_sha256, {_COPIES_ELSEWHERE} AS copies, {_COPIES_HERE} AS dup_here "
+           "FROM instances i WHERE i.volume_id = ?")
+    args: list = [volume_id]
+    if state is not None:
+        sql += " AND i.state = ?"
+        args.append(state)
+    if copies is not None or other_volume_id is not None:
+        sql += " AND i.state = 'verified' AND i.asset_id IS NOT NULL"
+    if copies == "elsewhere":
+        sql += f" AND {_COPIES_ELSEWHERE} > 0"
+    elif copies == "only_here":
+        sql += f" AND {_COPIES_ELSEWHERE} = 0"
+    elif copies == "dup_here":
+        sql += f" AND {_COPIES_HERE} > 0"
+    elif copies is not None:
+        raise ValueError(f"copies must be one of: {', '.join(COPY_FILTERS)}")
+    if other_volume_id is not None:
+        sql += (" AND EXISTS (SELECT 1 FROM instances o WHERE o.asset_id = i.asset_id AND o.volume_id = ? "
+                "AND o.state = 'verified')")
+        args.append(other_volume_id)
+    sql += " ORDER BY i.rel_path LIMIT ? OFFSET ?"
+    args += [limit, offset]
+    return conn.execute(sql, args).fetchall()
+
+
+def asset_locations(conn: sqlite3.Connection, asset_id: int) -> list[Row]:
+    """Every verified copy of one asset, on any volume (CARD included, so the UI can label it), by volume and path."""
+    return conn.execute(
+        """
+        SELECT i.volume_id, v.label, v.role, i.rel_path, i.size, i.state, i.lr_referenced, i.verified_at
+        FROM instances i JOIN volumes v ON v.volume_id = i.volume_id
+        WHERE i.asset_id = ? AND i.state = 'verified'
+        ORDER BY v.role = 'CARD', v.label, i.rel_path
+        """,
+        (asset_id,),
+    ).fetchall()
 
 
 def volume_instances(conn: sqlite3.Connection, volume_id: str) -> dict[str, Row]:

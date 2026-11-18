@@ -224,3 +224,28 @@ still naive, apply the `settings` value `default_offset` (default "+00:00"). The
   - Light/dark via `prefers-color-scheme`; works at 1280 px wide; no external fonts.
   - Verify: `uv run pytest -q` still green, and `node --check photovault/web/static/app.js` if node exists.
     The user does the visual check.
+
+- [x] 7. Drive summary (visual check pending, user)
+  - ID: ui-7 (after ui-6)
+  - Clicking a registered drive replaces the photo grid with its files by state, its index and hash runs with
+    their final numbers, and Show in Finder (`open`, macOS only, inside the drive's mount). `index` and `hash`
+    keep their numbers in `jobs.params_json` under `result` (no schema change); older runs have none.
+    `GET /api/volumes/<id>`, `GET /api/volumes/<id>/files?state=&limit=&offset=`, `POST /api/volumes/<id>/reveal`.
+  - Verify: `uv run pytest tests/test_web_api.py tests/test_baseline_hash.py -q`
+  - Result (2026-11-17): `uv run pytest tests/test_web_api.py -q` → 48 passed (with ui-8, ui-9).
+
+- [x] 8. Copies across drives (visual check pending, user)
+  - ID: ui-8 (after ui-7)
+  - The drive summary counts hashed files also on other drives, only here, or twice here, per other drive; the
+    file list has a Copies column and filter (`copies=`, `other=`), and each file expands to every location
+    (`GET /api/assets/<id>/copies`) with Show in Finder. Full hash only; CARD copies never count. Read-only.
+  - Verify: `uv run pytest tests/test_web_api.py -q`
+  - Result (2026-11-17): `uv run pytest tests/test_web_api.py -q` → 48 passed (with ui-7, ui-9).
+
+- [x] 9. Ignore drives (visual check pending, user)
+  - ID: ui-9
+  - Any sidebar drive (or the setup dialog) has Ignore; ignored drives fold under "Ignored drives (N)". Stored
+    as the `ignored_drives` setting (JSON keys: volume_id, else `mount:<name>`); `POST /api/drives/ignore`.
+    Display only: the engine ignores it.
+  - Verify: `uv run pytest tests/test_web_api.py -q`
+  - Result (2026-11-17): `uv run pytest tests/test_web_api.py -q` → 48 passed (with ui-7, ui-8).

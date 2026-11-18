@@ -21,6 +21,13 @@ const GPS_LABEL = { match: "Matched by time", map: "Picked on map", search: "Pla
 
 const st = {
   settings: {},
+  showIgnored: readPref("showIgnoredDrives") === "1", // the folded "Ignored drives" list is expanded
+  driveView: null,     // volume_id of the drive whose summary replaces the photo grid, or null
+  driveFiles: { state: "", copies: "", offset: 0 }, // file list filter and paging inside that summary
+  cardsOpen: false,    // the Cards view replaces the photo grid
+  cardView: null,      // volume_id of the card whose ranked file list is open, or null for the card list
+  cardFiles: { tier: "", camera: "", offset: 0 },
+  cards: null,         // last /api/cards answer
   drives: [],
   groups: [],          // the current page, in grid order
   byId: new Map(),     // group_id -> last known row (survives paging, so the selection can be edited)
@@ -74,6 +81,14 @@ function el(tag, props, ...children) {
     node.append(child instanceof Node ? child : document.createTextNode(String(child)));
   }
   return node;
+}
+
+// Per-browser conveniences only; storage can be missing or throw (private windows), so failures are ignored.
+function readPref(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function writePref(key, value) {
+  try { localStorage.setItem(key, value); } catch { /* not kept */ }
 }
 
 function button(label, onclick, cls) {
@@ -137,6 +152,16 @@ function mountName(path) {
 
 // Sizes arrive as text such as "1.0 TB". Parse them back to bytes for the capacity bar.
 const UNIT_BYTES = { B: 1, KB: 1e3, MB: 1e6, GB: 1e9, TB: 1e12 };
+// Bytes for people, in the same decimal units the server uses (1 KB = 1000 B).
+function fmtBytes(n) {
+  if (n === null || n === undefined) return "";
+  let v = Number(n);
+  let i = 0;
+  while (v >= 1000 && i < 4) { v /= 1000; i++; }
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  return i === 0 ? `${fmtInt(v)} B` : `${v >= 100 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
+}
+
 function parseSize(text) {
   const m = /([\d.]+)\s*(B|KB|MB|GB|TB)/.exec(text || "");
   return m ? Number(m[1]) * UNIT_BYTES[m[2]] : null;
@@ -280,26 +305,160 @@ function confirmDialog({ title, lines, action }) {
 
 // ---------------------------------------------------------------- drives
 
-// A drive the catalog does not know yet (no volume_id) gets "Set up…" first; a camera card can also be imported.
-function driveActions(d) {
+// ---------------------------------------------------------------- workflow
+
+// A drive's workflow is a fixed run of engine steps. Cards have none: they are imported, not indexed.
+const STEP_NAME = { index: "Index", hash: "Hash", scan: "Scan metadata", sidecars: "Write sidecars" };
+const STEP_HINT = {
+  index: "List every file", hash: "Verify each file's bytes", scan: "Read dates and locations",
+  sidecars: "Save edits next to the photos",
+};
+const STEP_BY_CMD = { index: "index", hash: "hash", meta_scan: "scan", meta_sidecars: "sidecars" };
+
+function workflowSteps(d) {
   const key = roleKey(d.role);
-  const m = d.mount;
-  const run = (label, cmd, args) => runButton(label, `${cmd}:${m}`, () => startTask(cmd, args));
-  if (!d.volume_id) {
-    const out = [button("Set up…", () => openAssign(d), "primary")];
-    if (d.looks_like_card) out.push(button("Import…", () => openImport(d)));
-    return out;
+  if (!d.volume_id || key === "card") return [];
+  const mount = d.mount;
+  const steps = [
+    { id: "index", cmd: "index", args: { mount } },
+    { id: "hash", cmd: "hash", args: { mount } },
+    { id: "scan", cmd: "meta_scan", args: { mount } },
+  ];
+  if (key === "working") steps.push({ id: "sidecars", cmd: "meta_sidecars", args: { mount, dry_run: false } });
+  return steps;
+}
+
+// The step a live (unfinished) task is running on this drive, with its task, or null.
+function liveStep(d) {
+  if (!d || !d.mount) return null;
+  for (const t of st.tasks.values()) {
+    if (t.final) continue;
+    const words = argvWords(t.argv);
+    if (!words.includes(d.mount)) continue;
+    const key = commandKey(words);
+    const step = { index: "index", hash: "hash", meta_scan: "scan", meta_sidecars: "sidecars" }[key];
+    if (step) return { step, task: t };
   }
-  if (key === "card") {
-    return [run("Card status", "card_status", { mount: m }), button("Import…", () => openImport(d), "primary")];
+  return null;
+}
+
+// "Running · Hash", or "Last run: Hash · 2 hours ago", for a drive card in the sidebar.
+function driveStatus(d) {
+  const live = liveStep(d);
+  if (live) return { text: `Running · ${STEP_NAME[live.step]}`, cls: "running" };
+  const steps = d.steps || {};
+  let best = null;
+  for (const [id, v] of Object.entries(steps)) {
+    if (v && v.at && (!best || Date.parse(v.at) > Date.parse(best.at))) best = { id, ...v };
   }
-  if (key === "working") {
-    return [run("Scan metadata", "meta_scan", { mount: m }), button("Write sidecars…", () => writeSidecars(d))];
+  if (!best) return { text: roleKey(d.role) === "card" ? "Ready to import" : "Not run yet", cls: "" };
+  const lead = best.state === "paused" ? "Paused" : best.state === "failed" ? "Failed"
+    : best.state === "running" || best.state === "planned" ? "Interrupted" : "Last run";
+  return { text: `${lead}: ${STEP_NAME[best.id]} · ${relTime(best.at)}`, cls: lead === "Last run" ? "" : "warn" };
+}
+
+// One timeline step's display state, from live tasks, the workflow in progress, and the saved last run.
+function stepView(d, step, last) {
+  const wf = st.workflow && st.workflow.volumeId === d.volume_id ? st.workflow : null;
+  const live = liveStep(d);
+  if (live && live.step === step.id) return { cls: "running", when: "Running now", task: live.task };
+  if (wf && !wf.outcome) {
+    const at = wf.steps.findIndex((x) => x.id === step.id);
+    if (at > wf.at) return { cls: "queued", when: "Waiting" };
   }
-  if (key === "legacy") {
-    return [run("Index", "index", { mount: m }), run("Hash", "hash", { mount: m }), run("Scan metadata", "meta_scan", { mount: m })];
+  if (!last) return { cls: "never", when: "Never run" };
+  const ago = relTime(last.at);
+  if (last.state === "done") return { cls: "done", when: `Last run ${ago}` };
+  if (last.state === "paused") return { cls: "warn", when: `Paused ${ago}` };
+  if (last.state === "failed") return { cls: "warn", when: `Failed ${ago}` };
+  return { cls: "warn", when: `Interrupted ${ago}` };
+}
+
+function waitForTask(id) {
+  return new Promise((resolve) => {
+    const timer = setInterval(() => {
+      const t = st.tasks.get(id);
+      if (t && t.final) { clearInterval(timer); resolve(t); }
+    }, 500);
+  });
+}
+
+function workflowBusy(d) {
+  return Boolean(st.workflow) || Boolean(liveStep(d));
+}
+
+// Runs the steps one after another and stops at the first one that does not finish.
+async function runWorkflow(d) {
+  if (workflowBusy(d)) return;
+  const steps = workflowSteps(d);
+  if (!steps.length) return;
+  if (steps.some((s) => s.id === "sidecars")) {
+    const ok = await confirmDialog({
+      title: "Run the workflow?",
+      lines: [`On "${driveName(d)}": index, hash and scan metadata, then write XMP sidecar files next to photos with saved edits.`,
+        "Nothing is deleted or overwritten."],
+      action: "Run workflow",
+    });
+    if (!ok) return;
   }
-  return [button("Set up…", () => openAssign(d), "primary")];
+  const wf = { volumeId: d.volume_id, steps, at: 0, outcome: null };
+  st.workflow = wf;
+  try {
+    for (let i = 0; i < steps.length; i++) {
+      wf.at = i;
+      updateWorkflowUI();
+      const id = await startTask(steps[i].cmd, steps[i].args);
+      if (!id) { wf.outcome = "failed"; break; }
+      const t = await waitForTask(id);
+      if (t.state !== "done") {
+        wf.outcome = t.state;
+        toast(`Workflow stopped at ${STEP_NAME[steps[i].id]}. ${t.state === "paused" ? "It was paused." : "It did not finish."}`, "err");
+        break;
+      }
+    }
+    if (!wf.outcome) toast(`Workflow finished on ${driveName(d)}.`);
+  } finally {
+    st.workflow = null;
+    renderDrives();
+    if (st.driveView) loadDriveView().catch(reportError);
+  }
+}
+
+let timelineBox = null;
+let workflowBtn = null;
+
+// Repaints the timeline and the Run workflow button in place; called on every task poll.
+function updateWorkflowUI() {
+  if (!timelineBox || !st.driveView || !st.driveSummary) return;
+  const base = st.drives.find((x) => x.volume_id === st.driveView) || {};
+  const d = { ...base, ...(st.driveSummary.drive || {}), steps: st.driveSummary.steps };
+  const busy = workflowBusy(d);
+  if (workflowBtn) {
+    workflowBtn.disabled = busy || !d.mounted;
+    workflowBtn.textContent = busy ? "Workflow running…" : "Run workflow";
+    workflowBtn.title = d.mounted ? "" : "Connect this drive to run the workflow";
+  }
+  const steps = workflowSteps(d);
+  const items = steps.map((step, i) => {
+    const v = stepView(d, step, (d.steps || {})[step.id]);
+    const kids = [
+      el("span", { class: "tl-dot", "aria-hidden": "true" }, v.cls === "done" ? "✓" : String(i + 1)),
+      el("span", { class: "tl-name" }, STEP_NAME[step.id]),
+      el("span", { class: "tl-when", title: v.cls === "done" || v.cls === "warn" ? fmtDate((d.steps || {})[step.id]?.at) : "" }, v.when),
+      el("span", { class: "tl-hint muted small" }, STEP_HINT[step.id]),
+    ];
+    if (v.task) {
+      const total = v.task.progress && Number(v.task.progress.total) > 0 ? Number(v.task.progress.total) : 0;
+      const fill = el("div", { class: "fill" });
+      const bar = el("div", { class: `bar${total ? "" : " indet"}`, role: "progressbar", "aria-label": STEP_NAME[step.id] }, fill);
+      if (total) fill.style.width = `${Math.min(100, Math.floor(((Number(v.task.progress.current) || 0) / total) * 100))}%`;
+      kids.push(bar);
+      if (total) kids.push(el("span", { class: "tl-count muted small" }, `${fmtInt(v.task.progress.current)} of ${fmtInt(total)}`));
+    }
+    return el("li", { class: `tl-step is-${v.cls}` }, kids);
+  });
+  timelineBox.hidden = !steps.length;
+  timelineBox.replaceChildren(...items);
 }
 
 // Registered drives are solid and tinted by role. New drives (no volume_id) are dashed and neutral with a "New"
@@ -309,11 +468,20 @@ function driveCard(d) {
   const isNew = !d.volume_id;
   const pills = [el("span", { class: `pill role-${key}` }, roleLabel(d.role))];
   if (isNew) pills.push(el("span", { class: "pill role-new" }, "New"));
-  const kids = [el("div", { class: "drive-head" }, pills, el("span", { class: "drive-name" }, driveName(d)))];
+  const ignoreBtn = el("button", {
+    type: "button", class: "drive-ignore", title: d.ignored ? "Show this drive in the list again" : "Hide this drive under Ignored",
+    "aria-label": `${d.ignored ? "Stop ignoring" : "Ignore"} ${driveName(d)}`,
+    onclick: (e) => { e.stopPropagation(); setIgnored(d, !d.ignored).catch(reportError); },
+    onkeydown: (e) => e.stopPropagation(),
+  }, d.ignored ? "Unignore" : "Ignore");
+  const kids = [el("div", { class: "drive-head" }, pills, el("span", { class: "drive-name" }, driveName(d)), ignoreBtn)];
   if (d.mounted) {
-    const sub = isNew
-      ? (d.looks_like_card ? "A camera card, not set up yet." : "Not set up yet. Set it up to use it for photos.")
+    let sub = isNew
+      ? (d.looks_like_card ? "A camera card, not checked yet. Click to see what is backed up."
+        : d.local ? `The folder ${d.mount} on this Mac. Click to use it as a working drive.`
+          : "Not set up yet. Click to set it up.")
       : `${d.fs || "Unknown format"} · ${d.free ?? "?"} free of ${d.size || "?"}`;
+    if (d.local && !isNew) sub = `${d.mount} on this Mac · ${d.free ?? "?"} free`;
     kids.push(el("div", { class: "muted small" }, sub));
     const total = parseSize(d.size);
     const free = parseSize(d.free);
@@ -323,24 +491,75 @@ function driveCard(d) {
       fill.style.width = `${used.toFixed(1)}%`;
       kids.push(el("div", { class: `capbar${used >= 90 ? " high" : ""}`, role: "img", "aria-label": `${Math.round(used)} percent used` }, fill));
     }
-    const actions = driveActions(d);
-    if (actions.length) kids.push(el("div", { class: "actions" }, actions));
+    if (!isNew) {
+      const status = driveStatus(d);
+      kids.push(el("div", { class: `drive-status ${status.cls}` }, status.text));
+    }
   } else {
     const seen = d.last_seen_at ? ` · last seen ${relTime(d.last_seen_at)}` : "";
     kids.push(el("div", { class: "muted small", title: fmtDate(d.last_seen_at) }, `Not connected${seen}`));
   }
   const cls = ["drive", isNew ? "is-new" : "is-registered", `role-${key}`];
   if (!d.mounted) cls.push("gone");
-  return el("div", { class: cls.join(" ") }, kids);
+  if (isCardDrive(d)) {
+    // A camera card opens the Cards view: how much of it is backed up, and an Import button.
+    const open = st.cardsOpen && st.cardView === d.volume_id;
+    if (open) cls.push("open");
+    const go = () => openCards(d.volume_id || null);
+    return el("div", {
+      class: `${cls.join(" ")} is-clickable`, role: "button", tabindex: "0", title: "See what is backed up",
+      "aria-pressed": open ? "true" : "false", onclick: go,
+      onkeydown: (e) => { if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) { e.preventDefault(); go(); } },
+    }, kids);
+  }
+  if (isNew) {
+    // A drive the catalog does not know yet: the whole card opens the setup dialog.
+    return el("div", {
+      class: `${cls.join(" ")} is-clickable`, role: "button", tabindex: "0", title: "Set up this drive",
+      onclick: () => openAssign(d),
+      onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openAssign(d); } },
+    }, kids);
+  }
+  // A registered drive opens its summary in the middle view. A click on one of its buttons does only that button's job.
+  const open = st.driveView === d.volume_id;
+  if (open) cls.push("open");
+  return el("div", {
+    class: `${cls.join(" ")} is-clickable`, role: "button", tabindex: "0",
+    "aria-pressed": open ? "true" : "false",
+    onclick: () => openDrive(d.volume_id),
+    onkeydown: (e) => {
+      if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) { e.preventDefault(); openDrive(d.volume_id); }
+    },
+  }, kids);
 }
 
+// Ignored drives (system volumes, tool installers, anything that is not photos) fold under one toggle at the end.
 function renderDrives() {
   const box = $("#drives");
-  if (!st.drives.length) {
-    box.replaceChildren(el("p", { class: "muted small" }, "No drives yet. Plug one in, and it appears here."));
-    return;
+  const shown = st.drives.filter((d) => !d.ignored);
+  const ignored = st.drives.filter((d) => d.ignored);
+  const nodes = shown.map(driveCard);
+  if (!st.drives.length || !shown.length) {
+    nodes.unshift(el("p", { class: "muted small" }, st.drives.length
+      ? "Every drive is ignored. Open Ignored drives to bring one back."
+      : "No drives yet. Plug one in, and it appears here."));
   }
-  box.replaceChildren(...st.drives.map(driveCard));
+  if (ignored.length) {
+    const open = st.showIgnored;
+    nodes.push(el("button", {
+      type: "button", class: "link ignored-toggle", "aria-expanded": open ? "true" : "false",
+      onclick: () => { st.showIgnored = !st.showIgnored; writePref("showIgnoredDrives", st.showIgnored ? "1" : "0"); renderDrives(); },
+    }, `${open ? "▾" : "▸"} Ignored drives (${ignored.length})`));
+    if (open) nodes.push(el("div", { class: "drive-list ignored-list" }, ignored.map(driveCard)));
+  }
+  box.replaceChildren(...nodes);
+}
+
+async function setIgnored(d, ignored) {
+  await api("POST", "/api/drives/ignore", { key: d.key, ignored });
+  for (const x of st.drives) if (x.key === d.key) x.ignored = ignored;
+  renderDrives();
+  toast(ignored ? `${driveName(d)} is ignored. Find it under Ignored drives.` : `${driveName(d)} is back in the list.`);
 }
 
 function renderDriveFilter() {
@@ -360,14 +579,23 @@ async function loadDrives() {
   st.drives = data.drives;
   renderDrives();
   renderDriveFilter();
+  if (st.driveView) loadDriveView().catch(reportError); // keeps the open summary current after runs and plug events
+  loadCards().catch(() => {}); // the header dot, and the Cards view when it is open
 }
 
 // ---------------------------------------------------------------- dialogs for drive actions
 
 function openAssign(d) {
   st.assignDrive = d;
-  $("#assign-name").textContent = `Drive: ${baseName(d.mount) || driveName(d)}${d.fs ? ` · ${d.fs}` : ""}`;
+  $("#assign-name").textContent = d.local
+    ? `Folder on this Mac: ${d.mount}. Only this folder is used.`
+    : `Drive: ${baseName(d.mount) || driveName(d)}${d.fs ? ` · ${d.fs}` : ""}`;
   const form = $("#f-assign");
+  for (const opt of form.elements.role.options) {  // a Mac folder has no disk UUID, so it cannot be a legacy drive
+    const off = Boolean(d.local) && opt.hasAttribute("data-not-local");
+    opt.hidden = off;
+    opt.disabled = off;
+  }
   form.elements.role.value = "WORKING";
   form.elements.label.value = d.label || "";
   $("#dlg-assign").showModal();
@@ -446,6 +674,7 @@ function flagValue(words, flag) {
 function commandKey(words) {
   const [a, b] = words;
   if (a === "volumes" && b === "assign") return "assign";
+  if (a === "cards" && b === "check") return "card_check";
   if (a === "meta") return { scan: "meta_scan", refs: "meta_refs", sidecars: "meta_sidecars" }[b] || "meta";
   return a || "";
 }
@@ -459,6 +688,7 @@ function taskTitle(t) {
     case "ingest": return `Importing card → ${mountName(flagValue(w, "--target"))}${dry ? " (dry run)" : ""}`;
     case "resume": return "Resuming an import";
     case "card-status": return `Checking card ${mountName(w[1])}`;
+    case "card_check": return `Checking what is backed up on ${mountName(w[2])}`;
     case "index": return `Indexing ${mountName(w[1])}`;
     case "hash": return `Hashing ${mountName(w[1])}`;
     case "meta_scan": return `Scanning metadata on ${mountName(flagValue(w, "--volume"))}`;
@@ -516,6 +746,12 @@ function resultText(kind, r, dry) {
       return `Wrote ${plural(r.written, "sidecar file")}${r.conflicts ? `, ${fmtInt(r.conflicts)} conflicts` : ""}.`;
     case "assign":
       return `${r.label} is set up as ${ROLE_WORD[r.role] || "drive"}.`;
+    case "card_check": {
+      const c = r.counts || {};
+      const n = (t) => fmtInt((c[t] || {}).files);
+      return `${TIER[r.tier] ? TIER[r.tier].headline : ""} ${n("backed_up")} backed up, ${n("needs_backup")} need backup, `
+        + `${n("only_on_card")} only on the card${(c.unchecked || {}).files ? `, ${n("unchecked")} not checked` : ""}.`;
+    }
     case "card-status":
       if (r.state === "green") return `Safe to format: all ${plural(r.total, "file")} are verified on a working drive.`;
       return `Not safe to format. ${fmtInt(r.safe)} of ${fmtInt(r.total)} files verified, ${fmtInt(r.unknown)} not imported yet, ${fmtInt(r.changed)} changed, ${fmtInt(r.short)} short.`;
@@ -623,6 +859,7 @@ function renderTasks() {
   if (!all.length) {
     setChildren(box, [el("p", { class: "muted small" }, "Nothing has run yet. Tasks you start appear here.")]);
     updateGlobal();
+    syncDriveViews();
     return;
   }
   for (const t of all) {
@@ -646,6 +883,16 @@ function renderTasks() {
   }
   setChildren(box, nodes);
   updateGlobal();
+  syncDriveViews();
+}
+
+// Keeps the sidebar status lines and the open drive's timeline current. The sidebar is rebuilt only when what
+// is running changes, so a focused card keeps focus.
+let driveSig = "";
+function syncDriveViews() {
+  const sig = st.drives.map((d) => `${d.volume_id}:${liveStep(d)?.step || ""}`).join("|");
+  if (sig !== driveSig) { driveSig = sig; renderDrives(); }
+  updateWorkflowUI();
 }
 
 // The slim header bar: average progress when every running task is countable, else a moving bar.
@@ -676,8 +923,10 @@ async function startTask(cmd, args) {
     st.tasks.set(task_id, t);
     renderTasks();
     kick();
+    return task_id;
   } catch (err) {
     toast(err.message, "err");
+    return null;
   }
 }
 
@@ -751,6 +1000,7 @@ async function onTasksFinished(list) {
     toast(`${taskTitle(t)}. ${s.text}`, t.state === "failed" ? "err" : "ok");
   }
   await Promise.allSettled([loadDrives(), loadShoots(), loadGroups()]);
+  if (st.driveView && !st.workflow) await loadDriveView().catch(reportError);
 }
 
 // One loop for tasks: 1 s while anything runs, 5 s when idle. kick() runs it now.
@@ -944,6 +1194,569 @@ async function loadGroups() {
   renderCounts(data.missing_counts);
   renderGrid();
   updateSelection();
+}
+
+// ---------------------------------------------------------------- drive summary (middle view)
+
+// Opening a registered drive replaces the photo grid with what the drive holds: its files by state, the index and
+// hash runs with their numbers, and the file list (with Show in Finder). Read-only: nothing here changes the catalog.
+const FILE_FILTERS = [
+  ["", "All files"], ["indexed", "Not hashed yet"], ["verified", "Hashed"], ["mismatch", "Unreadable"], ["missing", "Missing"],
+];
+const FILE_STATE_TILES = [
+  ["indexed", "Not hashed yet"], ["verified", "Hashed"], ["mismatch", "Unreadable"], ["missing", "Missing"],
+];
+const FILE_STATE_NAME = { indexed: "Not hashed yet", verified: "Hashed", mismatch: "Unreadable", missing: "Missing" };
+const FILE_PAGE = 200;
+
+// Placeholder while a drive's summary loads: a spinner, then grey blocks in the shape of the real summary.
+function renderDriveLoading(volumeId) {
+  const d = st.drives.find((x) => x.volume_id === volumeId) || {};
+  $("#drive-view").replaceChildren(
+    el("div", { class: "section-head" },
+      el("h2", null, driveName(d)),
+      el("span", { class: "muted small" }, d.role ? roleLabel(d.role) : "")),
+    el("div", { class: "loading", role: "status" },
+      el("span", { class: "spinner", "aria-hidden": "true" }),
+      el("span", { class: "muted" }, "Reading this drive…")),
+    el("div", { class: "skel-stats", "aria-hidden": "true" }, [0, 1, 2, 3].map(() => el("div", { class: "skel-tile" }))),
+    el("div", { class: "skel-line", "aria-hidden": "true" }),
+    el("div", { class: "skel-line short", "aria-hidden": "true" }));
+}
+
+function openDrive(volumeId) {
+  hideCards();
+  st.driveView = volumeId;
+  st.driveSummary = null;
+  timelineBox = workflowBtn = null;
+  st.driveFiles = { state: "", copies: "", offset: 0 };
+  $("#photo-panel").hidden = true;
+  $("#drive-view").hidden = false;
+  renderDriveLoading(volumeId);
+  renderDrives();
+  loadDriveView().catch((err) => {
+    // Say why the panel is empty; a stale server (started before this UI) answers "unknown endpoint" here.
+    reportError(err);
+    if (st.driveView !== volumeId) return;
+    $("#drive-view").replaceChildren(el("div", { class: "empty" },
+      el("h3", null, "Could not load this drive"),
+      el("p", null, err.message),
+      button("Back to photos", closeDrive)));
+  });
+}
+
+function closeDrive() {
+  st.driveView = null;
+  st.driveSummary = null;
+  timelineBox = workflowBtn = null;
+  $("#photo-panel").hidden = false;
+  $("#drive-view").hidden = true;
+  $("#drive-view").replaceChildren();
+  renderDrives();
+}
+
+async function loadDriveView() {
+  const id = st.driveView;
+  if (!id) return;
+  const params = new URLSearchParams({ limit: String(FILE_PAGE), offset: String(st.driveFiles.offset) });
+  if (st.driveFiles.state) params.set("state", st.driveFiles.state);
+  const copies = st.driveFiles.copies;
+  if (copies.startsWith("on:")) params.set("other", copies.slice(3));
+  else if (copies) params.set("copies", copies);
+  const base = `/api/volumes/${encodeURIComponent(id)}`;
+  const [summary, files] = await Promise.all([api("GET", base), api("GET", `${base}/files?${params}`)]);
+  if (st.driveView !== id) return; // the user opened another drive, or closed this one, while this loaded
+  renderDriveView(summary, files.files);
+}
+
+async function revealOnDrive(relPath, volumeId = st.driveView) {
+  const id = volumeId;
+  if (!id) return;
+  try {
+    await api("POST", `/api/volumes/${encodeURIComponent(id)}/reveal`, relPath ? { rel_path: relPath } : {});
+  } catch (err) {
+    reportError(err);
+  }
+}
+
+// One line per run: what it did and its final numbers. Runs from before stats were saved say so.
+function runItem(r) {
+  const res = r.result;
+  let detail;
+  if (!res) detail = "No stats were saved for this run.";
+  else if (r.kind === "index_volume") {
+    detail = `${plural(res.files, "file")} seen · ${fmtInt(res.indexed)} indexed · ${fmtInt(res.unchanged)} unchanged · `
+      + `${fmtInt(res.missing)} missing · ${fmtInt(res.errors)} read errors`;
+  } else {
+    detail = `${fmtInt(res.hashed)} of ${fmtInt(res.files)} hashed (${fmtBytes(res.bytes)}) · ${fmtInt(res.skipped)} skipped · `
+      + `${fmtInt(res.unreadable)} unreadable · ${fmtInt(res.deferred)} deferred · ${fmtInt(res.excluded)} excluded`;
+  }
+  const when = `${STATE_LABEL[r.state] || r.state}${r.started_at ? ` · started ${fmtDate(r.started_at)}` : ""}`;
+  return el("li", { class: "run" },
+    el("div", null, el("strong", null, r.label), " ", el("span", { class: "muted small" }, when)),
+    el("div", { class: "small" }, detail));
+}
+
+function renderDriveView(s, files) {
+  const d = s.drive || {};
+  const isCard = roleKey(d.role) === "card";
+  st.driveSummary = s;
+  workflowBtn = null;
+  timelineBox = null;
+  const mounted = Boolean(d.mounted);
+  const hashed = Object.values(s.states).reduce((n, x) => n + x.hashed, 0);
+  const pct = s.files ? Math.round((hashed / s.files) * 100) : 0;
+  const isEmpty = s.files === 0;
+
+  const tiles = FILE_STATE_TILES.map(([key, label]) => {
+    const x = s.states[key];
+    const on = st.driveFiles.state === key;
+    return el("button", {
+      type: "button", class: `stat state-${key}${on ? " on" : ""}`, "aria-pressed": on ? "true" : "false",
+      onclick: () => setDriveFilter(key),
+    },
+      el("span", { class: "stat-label" }, label),
+      el("span", { class: "stat-num" }, fmtInt(x.files)),
+      el("span", { class: "muted small" }, fmtBytes(x.bytes)));
+  });
+
+  const kinds = s.kinds.map((k) => `${k.kind} ${fmtInt(k.files)}`).join(" · ");
+  const pager = el("div", { class: "pager" },
+    button("Previous", () => { st.driveFiles.offset = Math.max(0, st.driveFiles.offset - FILE_PAGE); loadDriveView().catch(reportError); }),
+    el("span", { class: "muted small" }, files.length ? `${fmtInt(st.driveFiles.offset + 1)}–${fmtInt(st.driveFiles.offset + files.length)}` : "No files"),
+    button("Next", () => { st.driveFiles.offset += FILE_PAGE; loadDriveView().catch(reportError); }));
+  pager.querySelector("button:first-child").disabled = st.driveFiles.offset === 0;
+  pager.querySelector("button:last-child").disabled = files.length < FILE_PAGE;
+
+  const rows = files.map((f) => el("tr", null,
+    el("td", { class: "path" }, f.rel_path),
+    el("td", { class: "num" }, fmtBytes(f.size)),
+    el("td", null, f.kind),
+    el("td", null, el("span", { class: `pill state-${f.state}` }, FILE_STATE_NAME[f.state] || f.state)),
+    el("td", null, copyCell(f)),
+    el("td", null, mounted ? button("Show in Finder", () => revealOnDrive(f.rel_path)) : null)));
+
+  const filter = el("select", { "aria-label": "Show files", onchange: (e) => setDriveFilter(e.currentTarget.value) },
+    FILE_FILTERS.map(([value, label]) => el("option", { value }, label)));
+  filter.value = st.driveFiles.state;
+  const copyOptions = COPY_FILTERS.concat(((s.copies && s.copies.by_volume) || [])
+    .map((v) => [`on:${v.volume_id}`, `Also on ${driveName(v)}`]));
+  const copyFilter = el("select", { "aria-label": "Filter by copies", onchange: (e) => setCopyFilter(e.currentTarget.value) },
+    copyOptions.map(([value, label]) => el("option", { value }, label)));
+  copyFilter.value = st.driveFiles.copies;
+
+  $("#drive-view").replaceChildren(
+    el("div", { class: "section-head" },
+      el("h2", null, driveName(d)),
+      el("span", { class: "muted small" }, d.role ? roleLabel(d.role) : "")),
+    el("div", { class: "bulkbar" },
+      isCard
+        ? button("Import…", () => openImport(d), "primary")
+        : (workflowBtn = el("button", { type: "button", class: "primary", onclick: () => runWorkflow({ ...d, steps: s.steps }) }, "Run workflow")),
+      el("button", {
+        type: "button", disabled: !mounted,
+        title: mounted ? undefined : "Connect this drive to show it in Finder",
+        onclick: () => revealOnDrive(""),
+      }, "Show in Finder"),
+      button("Back to photos", closeDrive)),
+    (timelineBox = el("ol", { class: "timeline", "aria-label": "Workflow" })),
+    el("p", { class: "muted small" },
+      [d.fs || "Unknown format", d.size ? `${d.size} total` : null,
+        mounted ? (d.free ? `${d.free} free` : null) : `Not connected${d.last_seen_at ? ` · last seen ${relTime(d.last_seen_at)}` : ""}`]
+        .filter(Boolean).join(" · ")),
+    isEmpty
+      ? el("div", { class: "empty" },
+        el("h3", null, "Nothing indexed on this drive yet"),
+        el("p", null, roleKey(d.role) === "card"
+          ? "No file records here yet. Files appear once a card is imported onto this drive."
+          : "Press Run workflow to list its files, verify them and read their metadata."))
+      : el("div", null,
+        el("div", { class: "overview" },
+          el("span", null, plural(s.files, "file")),
+          el("span", null, fmtBytes(s.bytes)),
+          el("span", null, `${pct}% hashed`),
+          kinds ? el("span", { class: "muted small" }, kinds) : null),
+        el("div", { class: "stats" }, tiles),
+        copySection(s),
+        el("h3", { class: "sub" }, "Runs"),
+        s.runs.length
+          ? el("ul", { class: "runs" }, s.runs.map(runItem))
+          : el("p", { class: "muted small" }, "No index or hash runs yet."),
+        el("h3", { class: "sub" }, "Files"),
+        el("div", { class: "toolbar" }, el("label", { class: "field" }, "Show", filter),
+          el("label", { class: "field" }, "Copies", copyFilter)),
+        rows.length
+          ? el("div", { class: "table-wrap" }, el("table", { class: "file-table" },
+            el("thead", null, el("tr", null,
+              el("th", null, "Path"), el("th", { class: "num" }, "Size"), el("th", null, "Kind"),
+              el("th", null, "State"), el("th", null, "Copies"), el("th", null, ""))),
+            el("tbody", null, rows)))
+          : el("p", { class: "muted small" }, "No files in this view."),
+        pager));
+  updateWorkflowUI();
+}
+
+function setDriveFilter(state) {
+  st.driveFiles = { ...st.driveFiles, state, offset: 0 };
+  loadDriveView().catch(reportError);
+}
+
+function setCopyFilter(copies) {
+  st.driveFiles = { ...st.driveFiles, copies, offset: 0 };
+  loadDriveView().catch(reportError);
+}
+
+// ---------------------------------------------------------------- copies across drives (ui-8)
+
+// Where this drive's files also live. Identity is the full hash: only hashed (verified) files are compared, and a
+// card never counts as a copy, the same rule as `report duplicates`. Read-only: nothing here deletes or marks a file.
+const COPY_FILTERS = [
+  ["", "All files"], ["elsewhere", "On other drives"], ["only_here", "Only on this drive"],
+  ["dup_here", "Duplicated on this drive"],
+];
+
+function copySection(s) {
+  const c = s.copies;
+  const head = el("h3", { class: "sub" }, "Copies on other drives");
+  if (!c || !c.hashed) {
+    return el("div", null, head,
+      el("p", { class: "muted small" }, "Hash this drive to see which of its files also live on other drives."));
+  }
+  const tile = (key, label, files, detail) => {
+    const on = st.driveFiles.copies === key;
+    return el("button", {
+      type: "button", class: `stat copy-${key}${on ? " on" : ""}`, "aria-pressed": on ? "true" : "false",
+      onclick: () => setCopyFilter(on ? "" : key),
+    },
+      el("span", { class: "stat-label" }, label),
+      el("span", { class: "stat-num" }, fmtInt(files)),
+      el("span", { class: "muted small" }, detail));
+  };
+  const pending = s.states.indexed ? s.states.indexed.files : 0;
+  const drives = c.by_volume.map((v) => {
+    const key = `on:${v.volume_id}`;
+    const on = st.driveFiles.copies === key;
+    return el("li", null, el("button", {
+      type: "button", class: `copy-drive${on ? " on" : ""}`, "aria-pressed": on ? "true" : "false",
+      onclick: () => setCopyFilter(on ? "" : key),
+    },
+      el("span", { class: `pill role-${roleKey(v.role)}` }, roleLabel(v.role)),
+      el("strong", null, driveName(v)),
+      el("span", { class: "muted small" }, v.mounted ? "Connected" : "Not connected"),
+      el("span", { class: "copy-drive-num" }, `${plural(v.files, "file")} · ${fmtBytes(v.bytes)}`)));
+  });
+  return el("div", null, head,
+    el("div", { class: "stats" },
+      tile("elsewhere", "On other drives", c.elsewhere.files, fmtBytes(c.elsewhere.bytes)),
+      tile("only_here", "Only on this drive", c.only_here.files, fmtBytes(c.only_here.bytes)),
+      tile("dup_here", "Duplicated on this drive", c.dup_here.files,
+        `${fmtBytes(c.dup_here.extra_bytes)} in extra copies`)),
+    drives.length
+      ? el("ul", { class: "copy-drives" }, drives)
+      : el("p", { class: "muted small" }, "No other drive holds a verified copy of these files yet."),
+    pending
+      ? el("p", { class: "muted small" }, `${plural(pending, "file")} not hashed yet, so not compared. `
+        + "Other drives count only once they are hashed too.")
+      : null);
+}
+
+// The Copies cell: how many other drives hold the same bytes, and whether this drive holds it twice. Click to list
+// every copy, each with Show in Finder when its drive is connected.
+function copyCell(f) {
+  if (f.state !== "verified" || f.copies === null || f.copies === undefined) {
+    return el("span", { class: "muted small" }, "–");
+  }
+  const pills = [
+    f.copies > 0
+      ? el("span", { class: "pill copy-elsewhere" }, `+${plural(f.copies, "drive")}`)
+      : el("span", { class: "pill copy-only_here" }, "Only here"),
+    f.dup_here > 0 ? el("span", { class: "pill copy-dup_here" }, `×${f.dup_here + 1} here`) : null,
+  ];
+  if (f.copies === 0 && !f.dup_here) return el("span", { class: "copy-pills" }, pills);
+  return el("button", {
+    type: "button", class: "copy-toggle", "aria-expanded": "false", title: "Show every copy",
+    onclick: (e) => toggleCopies(e.currentTarget, f),
+  }, pills);
+}
+
+async function toggleCopies(btn, f) {
+  const tr = btn.closest("tr");
+  const next = tr.nextElementSibling;
+  if (next && next.classList.contains("copy-row")) {
+    next.remove();
+    btn.setAttribute("aria-expanded", "false");
+    return;
+  }
+  btn.setAttribute("aria-expanded", "true");
+  const cell = el("td", { colspan: String(tr.children.length) }, el("span", { class: "muted small" }, "Finding copies…"));
+  const row = el("tr", { class: "copy-row" }, cell);
+  tr.after(row);
+  try {
+    const data = await api("GET", `/api/assets/${encodeURIComponent(f.asset_id)}/copies`);
+    cell.replaceChildren(el("ul", { class: "copy-list" }, data.copies.map((c) => {
+      const self = c.volume_id === st.driveView && c.rel_path === f.rel_path;
+      const isCard = roleKey(c.role) === "card";
+      return el("li", null,
+        el("span", { class: `pill role-${roleKey(c.role)}` }, roleLabel(c.role)),
+        el("strong", null, driveName(c)),
+        el("span", { class: "path" }, c.rel_path),
+        self ? el("span", { class: "muted small" }, "(this file)") : null,
+        isCard ? el("span", { class: "muted small" }, "(a card does not count as a copy)") : null,
+        c.lr_referenced ? el("span", { class: "pill" }, "Lightroom") : null,
+        c.mounted
+          ? button("Show in Finder", () => revealOnDrive(c.rel_path, c.volume_id))
+          : el("span", { class: "muted small" }, "Not connected"));
+    })));
+  } catch (err) {
+    cell.replaceChildren(el("span", { class: "muted small" }, `Could not list copies: ${err.message}`));
+  }
+}
+
+// ---------------------------------------------------------------- cards (card-3): what is safe to remove
+
+// Each file on a card is ranked by where else its bytes are (full hash; a card never counts as a copy, D-046):
+// green on a backup (master) drive, yellow only on a working or legacy drive, red only on this card, grey not
+// checked yet. A card and a camera take the worst colour of their files. Read-only: nothing here changes a card.
+const TIER = {
+  only_on_card: { label: "Only on this card", pill: "Back up now", headline: "Back up now." },
+  unchecked: { label: "Not checked", pill: "Not checked", headline: "Not checked yet." },
+  needs_backup: { label: "Needs backup", pill: "Needs backup", headline: "Needs backup." },
+  backed_up: { label: "Backed up", pill: "Safe to remove", headline: "Safe to remove." },
+  empty: { label: "Empty", pill: "Empty", headline: "No photos on this card." },
+};
+const TIER_ORDER = ["only_on_card", "unchecked", "needs_backup", "backed_up"]; // worst first
+const TIER_HINT = {
+  only_on_card: "No other drive has these files. Import or copy them before you format the card.",
+  unchecked: "Check the card to compare it with your other drives. Checking only reads the card.",
+  needs_backup: "They are on a working or legacy drive, but not on a backup (master) drive yet.",
+  backed_up: "Every file is on a backup (master) drive.",
+  empty: "",
+};
+const CARD_PAGE = 200;
+
+function isCardDrive(d) {
+  return roleKey(d.role) === "card" || Boolean(d.looks_like_card);
+}
+
+function tierPill(tier, text) {
+  return el("span", { class: `pill t-${tier}` }, el("span", { class: "tier-dot", "aria-hidden": "true" }),
+    text || (TIER[tier] || {}).pill || tier);
+}
+
+function tierBar(counts, total) {
+  const bar = el("div", { class: "tierbar", role: "img",
+    "aria-label": TIER_ORDER.map((t) => `${fmtInt(counts[t].files)} ${TIER[t].label.toLowerCase()}`).join(", ") });
+  if (!total) return bar;
+  for (const t of TIER_ORDER) {
+    if (!counts[t].files) continue;
+    const span = el("span", { class: `t-${t}`, title: `${TIER[t].label}: ${fmtInt(counts[t].files)}` });
+    span.style.width = `${((counts[t].files / total) * 100).toFixed(2)}%`;
+    bar.append(span);
+  }
+  return bar;
+}
+
+function tierCounts(counts) {
+  return TIER_ORDER.filter((t) => counts[t].files)
+    .map((t) => `${fmtInt(counts[t].files)} ${TIER[t].label.toLowerCase()}`).join(" · ");
+}
+
+function cardHeadline(c) {
+  const red = c.counts.only_on_card.files;
+  if (c.tier === "only_on_card") return `Back up now: ${plural(red, "file")} only on this card.`;
+  if (c.tier === "unchecked") return `Not checked: ${plural(c.counts.unchecked.files, "file")} still to compare.`;
+  if (c.tier === "needs_backup") return `Needs backup: ${plural(c.counts.needs_backup.files, "file")} not on a backup drive yet.`;
+  if (c.tier === "backed_up") return "Safe to remove: every file is on a backup drive.";
+  return TIER.empty.headline;
+}
+
+function hideCards() {
+  st.cardsOpen = false;
+  st.cardView = null;
+  $("#cards-view").hidden = true;
+  $("#cards-view").replaceChildren();
+  $("#btn-cards").setAttribute("aria-pressed", "false");
+}
+
+function openCards(volumeId) {
+  if (st.driveView) closeDrive();
+  st.cardsOpen = true;
+  st.cardView = volumeId;
+  st.cardFiles = { tier: "", camera: "", offset: 0 };
+  $("#photo-panel").hidden = true;
+  $("#drive-view").hidden = true;
+  $("#cards-view").hidden = false;
+  $("#btn-cards").setAttribute("aria-pressed", "true");
+  $("#cards-view").replaceChildren(el("div", { class: "loading", role: "status" },
+    el("span", { class: "spinner", "aria-hidden": "true" }), el("span", { class: "muted" }, "Reading cards…")));
+  renderDrives();
+  loadCards().catch((err) => {
+    reportError(err);
+    $("#cards-view").replaceChildren(el("div", { class: "empty" },
+      el("h3", null, "Could not load cards"), el("p", null, err.message), button("Back to photos", closeCards)));
+  });
+}
+
+function closeCards() {
+  hideCards();
+  $("#photo-panel").hidden = false;
+  renderDrives();
+}
+
+async function loadCards() {
+  const data = await api("GET", "/api/cards");
+  st.cards = data;
+  const connected = data.cards.filter((c) => c.mounted);
+  const dot = $("#cards-dot");
+  dot.hidden = connected.length === 0;
+  if (connected.length) {
+    const worstTier = TIER_ORDER.find((t) => connected.some((c) => c.tier === t)) || "empty";
+    dot.className = `tier-dot t-${worstTier}`;
+    $("#btn-cards").title = `Connected cards: ${TIER[worstTier].label.toLowerCase()}`;
+  }
+  if (!st.cardsOpen) return;
+  if (st.cardView) await loadCardDetail();
+  else renderCards(data);
+}
+
+function cardDrive(c) {
+  return st.drives.find((d) => d.mounted && d.mount === c.mount) || { mount: c.mount, label: c.label, mounted: c.mounted };
+}
+
+function cardTile(c) {
+  const busy = c.mount && [...st.tasks.values()].some((t) => t.state === "running"
+    && commandKey(argvWords(t.argv)) === "card_check" && argvWords(t.argv)[2] === c.mount);
+  const actions = [];
+  if (c.mounted) {
+    actions.push(runButton(busy ? "Checking…" : (c.checked_at ? "Check again" : "Check card"), `card_check:${c.mount}`,
+      () => startTask("card_check", { mount: c.mount })));
+    if (busy) actions[0].disabled = true;
+    actions.push(button("Import…", () => openImport(cardDrive(c))));
+  }
+  if (c.volume_id) actions.push(button("Show files", () => { st.cardView = c.volume_id; st.cardFiles = { tier: "", camera: "", offset: 0 }; loadCardDetail().catch(reportError); }));
+  const when = c.mounted
+    ? (c.checked_at ? `Checked ${relTime(c.checked_at)}` : "Never checked")
+    : `Not connected${c.last_seen_at ? ` · last seen ${relTime(c.last_seen_at)}` : ""} · as last checked`;
+  return el("article", { class: `card-tile t-${c.tier}${c.mounted ? "" : " gone"}` },
+    el("div", { class: "card-tile-head" }, el("strong", null, c.label), tierPill(c.tier)),
+    el("div", { class: "card-headline" }, cardHeadline(c)),
+    el("div", { class: "muted small" }, `${plural(c.files, "file")} · ${fmtBytes(c.bytes)} · ${when}`),
+    tierBar(c.counts, c.files),
+    el("div", { class: "muted small" }, tierCounts(c.counts)),
+    c.cameras.length ? el("div", { class: "cam-chips" }, c.cameras.map((m) => el("span", { class: `cam-chip t-${m.tier}`, title: TIER[m.tier].label },
+      el("span", { class: "tier-dot", "aria-hidden": "true" }), `${m.name} · ${fmtInt(m.files)}`))) : null,
+    actions.length ? el("div", { class: "card-actions" }, actions) : null);
+}
+
+function legend() {
+  return el("div", { class: "card-legend muted small" }, TIER_ORDER.map((t) => el("span", { class: `t-${t}` },
+    el("span", { class: "tier-dot", "aria-hidden": "true" }), `${TIER[t].label}: ${TIER_HINT[t].split(".")[0].toLowerCase()}`)));
+}
+
+function cameraTable(cameras) {
+  if (!cameras.length) return el("p", { class: "muted small" }, "Connect a card to see which cameras its photos come from.");
+  return el("div", { class: "table-wrap" }, el("table", { class: "file-table cam-table" },
+    el("thead", null, el("tr", null, el("th", null, "Camera"), el("th", null, "Status"), el("th", { class: "num" }, "Files"),
+      el("th", null, "Backed up so far"), el("th", null, "Breakdown"))),
+    el("tbody", null, cameras.map((m) => el("tr", null,
+      el("td", null, el("strong", null, m.name)),
+      el("td", null, tierPill(m.tier)),
+      el("td", { class: "num" }, fmtInt(m.files)),
+      el("td", null, tierBar(m.counts, m.files)),
+      el("td", { class: "small muted" }, tierCounts(m.counts)))))));
+}
+
+function renderCards(data) {
+  const connected = data.cards.filter((c) => c.mounted);
+  const remembered = data.cards.filter((c) => !c.mounted);
+  $("#cards-view").replaceChildren(
+    el("div", { class: "section-head" }, el("h2", null, "Cards"), button("Back to photos", closeCards)),
+    el("p", { class: "muted small" }, "Which files on your cards are safe to remove. A card takes the colour of its least safe file."),
+    legend(),
+    connected.length
+      ? el("div", { class: "card-tiles" }, connected.map(cardTile))
+      : el("div", { class: "empty" }, el("h3", null, "No card connected"), el("p", null, "Plug in a camera card. It appears here.")),
+    el("h3", { class: "sub" }, "Cameras on connected cards"),
+    cameraTable(data.cameras),
+    remembered.length
+      ? el("details", { class: "remembered" }, el("summary", null, `Cards seen before (${fmtInt(remembered.length)})`),
+        el("p", { class: "muted small" }, "As last checked. A card that was formatted since keeps its old record here."),
+        el("div", { class: "card-tiles" }, remembered.map(cardTile)))
+      : null);
+}
+
+async function loadCardDetail() {
+  const id = st.cardView;
+  if (!id) return;
+  const params = new URLSearchParams({ limit: String(CARD_PAGE), offset: String(st.cardFiles.offset) });
+  if (st.cardFiles.tier) params.set("tier", st.cardFiles.tier);
+  if (st.cardFiles.camera) params.set("camera", st.cardFiles.camera);
+  const data = await api("GET", `/api/cards/${encodeURIComponent(id)}/files?${params}`);
+  if (st.cardView !== id || !st.cardsOpen) return;
+  renderCardDetail(data);
+}
+
+function setCardFilter(patch) {
+  st.cardFiles = { ...st.cardFiles, ...patch, offset: 0 };
+  loadCardDetail().catch(reportError);
+}
+
+function renderCardDetail(data) {
+  const c = data.card;
+  const files = data.files;
+  const tiles = TIER_ORDER.map((t) => {
+    const on = st.cardFiles.tier === t;
+    return el("button", { type: "button", class: `stat t-${t}${on ? " on" : ""}`, "aria-pressed": on ? "true" : "false",
+      onclick: () => setCardFilter({ tier: on ? "" : t }) },
+    el("span", { class: "stat-label" }, TIER[t].label),
+    el("span", { class: "stat-num" }, fmtInt(c.counts[t].files)),
+    el("span", { class: "muted small" }, fmtBytes(c.counts[t].bytes)));
+  });
+  const camSelect = el("select", { "aria-label": "Camera", onchange: (e) => setCardFilter({ camera: e.currentTarget.value }) },
+    el("option", { value: "" }, "All cameras"),
+    c.cameras.map((m) => el("option", { value: m.camera }, `${m.name} (${fmtInt(m.files)})`)));
+  camSelect.value = st.cardFiles.camera;
+  const rows = files.map((f) => el("tr", null,
+    el("td", null, tierPill(f.tier)),
+    el("td", { class: "path" }, f.rel_path, el("div", { class: "reason" }, f.reason)),
+    el("td", { class: "num" }, fmtBytes(f.size)),
+    el("td", null, f.camera_name),
+    el("td", { class: "where" }, f.copies.length
+      ? f.copies.map((x) => `${x.label} (${roleLabel(x.role)})`).join(", ")
+      : "–")));
+  const pager = el("div", { class: "pager" },
+    button("Previous", () => { st.cardFiles.offset = Math.max(0, st.cardFiles.offset - CARD_PAGE); loadCardDetail().catch(reportError); }),
+    el("span", { class: "muted small" }, files.length
+      ? `${fmtInt(st.cardFiles.offset + 1)}–${fmtInt(st.cardFiles.offset + files.length)} of ${fmtInt(data.total)}` : "No files"),
+    button("Next", () => { st.cardFiles.offset += CARD_PAGE; loadCardDetail().catch(reportError); }));
+  pager.querySelector("button:first-child").disabled = st.cardFiles.offset === 0;
+  pager.querySelector("button:last-child").disabled = st.cardFiles.offset + files.length >= data.total;
+  const actions = [button("All cards", () => { st.cardView = null; loadCards().catch(reportError); })];
+  if (c.mounted) {
+    actions.unshift(button("Import…", () => openImport(cardDrive(c))));
+    actions.unshift(runButton(c.checked_at ? "Check again" : "Check card", `card_check:${c.mount}`,
+      () => startTask("card_check", { mount: c.mount })));
+  }
+  $("#cards-view").replaceChildren(
+    el("div", { class: "section-head" }, el("h2", null, c.label), tierPill(c.tier)),
+    el("div", { class: "bulkbar" }, actions),
+    el("p", { class: "card-headline" }, cardHeadline(c)),
+    el("p", { class: "muted small" }, [TIER_HINT[c.tier],
+      c.mounted ? (c.checked_at ? `Checked ${relTime(c.checked_at)}.` : "Never checked.") : "Not connected: as last checked."]
+      .filter(Boolean).join(" ")),
+    tierBar(c.counts, c.files),
+    el("div", { class: "stats" }, tiles),
+    el("h3", { class: "sub" }, "Cameras"),
+    cameraTable(c.cameras),
+    el("h3", { class: "sub" }, "Files, least safe first"),
+    el("div", { class: "toolbar" }, el("label", { class: "field" }, "Camera", camSelect)),
+    rows.length
+      ? el("div", { class: "table-wrap" }, el("table", { class: "file-table" },
+        el("thead", null, el("tr", null, el("th", null, "Status"), el("th", null, "File"), el("th", { class: "num" }, "Size"),
+          el("th", null, "Camera"), el("th", null, "Also on"))),
+        el("tbody", null, rows)))
+      : el("p", { class: "muted small" }, "No files in this view."),
+    pager);
 }
 
 // ---------------------------------------------------------------- editor
@@ -1226,7 +2039,7 @@ async function loadSettings() {
 
 function openSettings() {
   const form = $("#f-settings");
-  for (const key of ["creator", "copyright", "default_offset", "match_window_s"]) {
+  for (const key of ["creator", "copyright", "default_offset", "match_window_s", "mac_folder"]) {
     form.elements[key].value = st.settings[key] ?? "";
   }
   $("#dlg-settings").showModal();
@@ -1240,12 +2053,14 @@ async function saveSettings(event) {
     copyright: form.elements.copyright.value,
     default_offset: form.elements.default_offset.value,
     match_window_s: form.elements.match_window_s.value,
+    mac_folder: form.elements.mac_folder.value,
   };
   try {
     const res = await api("POST", "/api/settings", body);
     st.settings = res.settings;
     $("#dlg-settings").close();
     toast("Settings saved.");
+    refreshDrives(); // the Mac folder may have changed
   } catch (err) {
     toast(err.message, "err");
   }
@@ -1272,6 +2087,12 @@ async function assignDrive(event) {
   await startTask("assign", args);
 }
 
+async function ignoreAssignDrive() {
+  const d = st.assignDrive;
+  $("#dlg-assign").close();
+  if (d) await setIgnored(d, true);
+}
+
 // ---------------------------------------------------------------- keyboard
 
 function isTyping(target) {
@@ -1292,8 +2113,10 @@ function onGlobalKey(event) {
 
 function wire() {
   $("#btn-settings").addEventListener("click", openSettings);
+  $("#btn-cards").addEventListener("click", () => (st.cardsOpen ? closeCards() : openCards(null)));
   $("#f-settings").addEventListener("submit", saveSettings);
   $("#f-assign").addEventListener("submit", assignDrive);
+  $("#btn-assign-ignore").addEventListener("click", () => ignoreAssignDrive().catch(reportError));
   $("#f-refs").addEventListener("submit", addRefs);
   $("#f-import").addEventListener("submit", (e) => e.preventDefault());
   $("#btn-dry").addEventListener("click", () => startImport(true));

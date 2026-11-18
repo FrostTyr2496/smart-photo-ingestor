@@ -28,9 +28,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from photovault import preview, volumes
+from photovault import cards, preview, volumes
 from photovault.catalog import db, repo
-from photovault.drives import VOLUMES_ROOT, scan_mounts
+from photovault.drives import DEFAULT_MAC_FOLDER, VOLUMES_ROOT, scan_mounts
 from photovault.geo import offset_tz, suggest
 from photovault.protocol import EXIT_PAUSED, human_bytes
 
@@ -38,7 +38,8 @@ logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 ROLE_CHOICES = ("WORKING", "MASTER", "LEGACY")
-SETTING_DEFAULTS = {"creator": "", "copyright": "", "default_offset": "+00:00", "match_window_s": "1800"}
+SETTING_DEFAULTS = {"creator": "", "copyright": "", "default_offset": "+00:00", "match_window_s": "1800",
+                    "mac_folder": DEFAULT_MAC_FOLDER}
 GPS_SOURCES = ("match", "map", "search", "neighbour")
 EVENTS_KEPT = 500
 MAX_BODY = 1_000_000
@@ -250,9 +251,13 @@ def build_argv(cmd: str, args: dict) -> list[str]:
         _allow_only(args, {"mount"})
         word = {"card_status": "card-status", "index": "index", "hash": "hash"}[cmd]
         return [word, _path_arg(args, "mount")]
-    if cmd == "meta_scan":
+    if cmd == "card_check":
         _allow_only(args, {"mount"})
-        return ["meta", "scan", "--volume", _path_arg(args, "mount")]
+        return ["cards", "check", _path_arg(args, "mount")]
+    if cmd == "meta_scan":
+        _allow_only(args, {"mount", "rescan"})
+        argv = ["meta", "scan", "--volume", _path_arg(args, "mount")]
+        return argv + (["--rescan"] if _bool_arg(args, "rescan") else [])
     if cmd == "meta_refs":
         _allow_only(args, {"folder", "label"})
         return ["meta", "refs", "--folder", _path_arg(args, "folder"), "--label", _text_arg(args, "label")]
@@ -263,8 +268,8 @@ def build_argv(cmd: str, args: dict) -> list[str]:
     raise BadRequest(f"unknown command {cmd!r}")
 
 
-ALLOWED_CMDS = ("assign", "ingest", "resume", "card_status", "index", "hash", "meta_scan", "meta_refs",
-                "meta_sidecars")
+ALLOWED_CMDS = ("assign", "ingest", "resume", "card_status", "card_check", "index", "hash", "meta_scan",
+                "meta_refs", "meta_sidecars")
 
 
 # --------------------------------------------------------------------------- app and helpers
@@ -409,6 +414,41 @@ class _NullEmitter:
         return None
 
 
+IGNORED_DRIVES_KEY = "ignored_drives"  # a JSON list of drive keys the sidebar folds away (no schema change)
+
+
+def _drive_key(row: dict) -> str:
+    """A stable key for ignoring a drive: its volume_id once registered, else the folder name it mounts as."""
+    if row.get("volume_id"):
+        return row["volume_id"]
+    if row.get("local"):
+        return "local:"
+    return "mount:" + Path(row["mount"]).name
+
+
+def _ignored_drives(conn) -> list[str]:
+    try:
+        keys = json.loads(repo.get_setting(conn, IGNORED_DRIVES_KEY, "[]") or "[]")
+    except ValueError:
+        return []
+    return [k for k in keys if isinstance(k, str)] if isinstance(keys, list) else []
+
+
+def _post_ignore_drive(conn, body: Any) -> dict:
+    body = _body_dict(body)
+    key, ignored = body.get("key"), body.get("ignored")
+    if not isinstance(key, str) or not key.strip() or len(key) > 512:
+        raise BadRequest("key must be a drive key from /api/drives")
+    if not isinstance(ignored, bool):
+        raise BadRequest("ignored must be true or false")
+    keys = [k for k in _ignored_drives(conn) if k != key]
+    if ignored:
+        keys.append(key)
+    with repo.transaction(conn):
+        repo.set_setting(conn, IGNORED_DRIVES_KEY, json.dumps(keys))
+    return {"ignored": keys}
+
+
 def _drive_list(conn, root: Path) -> list[dict]:
     try:
         mounted = scan_mounts(conn, root, _NullEmitter())
@@ -423,8 +463,16 @@ def _drive_list(conn, root: Path) -> list[dict]:
             "mount": None, "role": v["role"], "label": v["label"], "fs": v["fs_type"] or "",
             "size": human_bytes(v["capacity_bytes"]) if v["capacity_bytes"] is not None else "?",
             "free": None, "volume_id": v["volume_id"], "mounted": False, "looks_like_card": False,
-            "last_seen_at": v["last_seen_at"],
+            "last_seen_at": v["last_seen_at"], "local": False,
         })
+    status = repo.meta_scan_status(conn)
+    ignored = set(_ignored_drives(conn))
+    for r in rows:
+        r["key"] = _drive_key(r)
+        r["ignored"] = r["key"] in ignored  # every photo on the drive has its metadata read: the UI offers "Scan Again"
+        groups, scanned = status.get(r.get("volume_id") or "", (0, 0))
+        r["meta_scanned"] = groups > 0 and scanned >= groups
+        r["steps"] = repo.volume_last_steps(conn, r["volume_id"]) if r.get("volume_id") else None
     return sorted(rows, key=lambda r: not r["mounted"])  # mounted first; stable within each group
 
 
@@ -593,8 +641,30 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
             raise NotFound(str(exc)) from exc
         return 200, {"suggestions": found}
 
+    m = re.fullmatch(r"/api/volumes/([^/]+)(?:/(files|reveal))?", path)
+    if m:
+        return _volume_route(app, conn, method, m.group(1), m.group(2), query, body)
+
+    if path == "/api/cards":
+        if method != "GET":
+            return 405, {"error": "method not allowed"}
+        return 200, cards.list_cards(conn, _drive_list(conn, app.volumes_root))
+
+    m = re.fullmatch(r"/api/cards/([^/]+)/files", path)
+    if m:
+        if method != "GET":
+            return 405, {"error": "method not allowed"}
+        return 200, _card_files(app, conn, m.group(1), query)
+
+    m = re.fullmatch(r"/api/assets/(\d+)/copies", path)
+    if m:
+        if method != "GET":
+            return 405, {"error": "method not allowed"}
+        return 200, _asset_copies(app, conn, int(m.group(1)))
+
     routes: dict[tuple[str, str], Any] = {
         ("GET", "/api/drives"): lambda: {"drives": _drive_list(conn, app.volumes_root)},
+        ("POST", "/api/drives/ignore"): lambda: _post_ignore_drive(conn, body),
         ("GET", "/api/jobs"): lambda: {"jobs": [dict(r) for r in repo.list_jobs(
             conn, _int_param(query, "limit", 20, 1, 200))]},
         ("POST", "/api/run"): lambda: _run(app, body),
@@ -611,6 +681,151 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
     if any(p == path for _, p in routes):
         return 405, {"error": "method not allowed"}
     return 404, {"error": "unknown endpoint"}
+
+
+FILE_STATES = ("indexed", "verified", "mismatch", "missing")
+RUN_LABELS = {"index_volume": "Index", "baseline_hash": "Hash"}
+
+
+def _volume_route(app: WebApp, conn, method: str, volume_id: str, sub: str | None, query: dict,
+                  body: Any) -> tuple[int, Any]:
+    if sub == "reveal":
+        if method != "POST":
+            return 405, {"error": "method not allowed"}
+        return 200, _reveal(app, conn, volume_id, _body_dict(body))
+    if method != "GET":
+        return 405, {"error": "method not allowed"}
+    if repo.get_volume(conn, volume_id) is None:
+        raise NotFound("unknown drive")
+    if sub == "files":
+        state = _opt_param(query, "state")
+        if state is not None and state not in FILE_STATES:
+            raise BadRequest(f"state must be one of: {', '.join(FILE_STATES)}")
+        copies = _opt_param(query, "copies")
+        if copies is not None and copies not in repo.COPY_FILTERS:
+            raise BadRequest(f"copies must be one of: {', '.join(repo.COPY_FILTERS)}")
+        other = _opt_param(query, "other")
+        if other is not None and (other == volume_id or repo.get_volume(conn, other) is None):
+            raise BadRequest("other must be another known drive")
+        limit = _int_param(query, "limit", 200, 1, 1000)
+        offset = _int_param(query, "offset", 0, 0, 2**62)
+        rows = repo.volume_files(conn, volume_id, state=state, limit=limit, offset=offset, copies=copies,
+                                 other_volume_id=other)
+        return 200, {"files": [_file_row(r) for r in rows], "limit": limit, "offset": offset}
+    return 200, _volume_summary(app, conn, volume_id)
+
+
+def _card_files(app: WebApp, conn, volume_id: str, query: dict) -> dict:
+    """One card's files, most urgent first, filtered by tier and camera. A plugged-in card is walked (no reads)."""
+    vol = repo.get_volume(conn, volume_id)
+    if vol is None or vol["role"] != "CARD":
+        raise NotFound("unknown card")
+    tier = _opt_param(query, "tier")
+    if tier is not None and tier not in cards.TIERS:
+        raise BadRequest(f"tier must be one of: {', '.join(cards.TIERS)}")
+    camera = _opt_param(query, "camera")
+    limit = _int_param(query, "limit", 200, 1, 1000)
+    offset = _int_param(query, "offset", 0, 0, 2**62)
+    drive = next((d for d in _drive_list(conn, app.volumes_root) if d["volume_id"] == volume_id), None)
+    mount = Path(drive["mount"]) if drive and drive["mounted"] and drive["mount"] else None
+    files = cards.card_files(conn, volume_id, mount=mount)
+    names = cards.camera_names(conn)
+    summary = cards.card_summary(conn, volume_id, files=files)
+    for f in files:
+        f["camera"] = str(f["body_id"]) if f["body_id"] is not None else cards.UNKNOWN_CAMERA
+        f["camera_name"] = names.get(f["body_id"], "Unknown camera") if f["body_id"] is not None else "Unknown camera"
+    if tier is not None:
+        files = [f for f in files if f["tier"] == tier]
+    if camera is not None:
+        files = [f for f in files if f["camera"] == camera]
+    return {"card": {"volume_id": volume_id, "label": vol["label"], "mounted": mount is not None,
+                     "mount": str(mount) if mount else None, "last_seen_at": vol["last_seen_at"], **summary},
+            "files": files[offset:offset + limit], "total": len(files), "limit": limit, "offset": offset}
+
+
+def _asset_copies(app: WebApp, conn, asset_id: int) -> dict:
+    """Every verified copy of one file across drives, with whether each drive is plugged in (for Show in Finder)."""
+    asset = conn.execute("SELECT asset_id, size, kind FROM assets WHERE asset_id = ?", (asset_id,)).fetchone()
+    if asset is None:
+        raise NotFound("unknown file")
+    mounted = {d["volume_id"]: d["mounted"] for d in _drive_list(conn, app.volumes_root) if d["volume_id"]}
+    copies = [{**dict(r), "lr_referenced": bool(r["lr_referenced"]), "mounted": mounted.get(r["volume_id"], False)}
+              for r in repo.asset_locations(conn, asset_id)]
+    return {"asset_id": asset_id, "size": asset["size"], "kind": asset["kind"], "copies": copies}
+
+
+def _file_row(row) -> dict:
+    d = dict(row)
+    d["hashed"] = bool(d["hashed"])
+    if not d["hashed"]:
+        d["copies"] = d["dup_here"] = None  # unknown until the file is hashed
+    d.pop("verified_sha256", None)
+    return d
+
+
+def _drive_row(app: WebApp, conn, volume_id: str) -> dict | None:
+    return next((d for d in _drive_list(conn, app.volumes_root) if d["volume_id"] == volume_id), None)
+
+
+def _volume_summary(app: WebApp, conn, volume_id: str) -> dict:
+    drives = _drive_list(conn, app.volumes_root)
+    states = {s: {"files": 0, "bytes": 0, "hashed": 0} for s in FILE_STATES}
+    for r in repo.volume_state_counts(conn, volume_id):
+        states[r["state"]] = {"files": r["files"], "bytes": r["bytes"], "hashed": r["hashed"] or 0}
+    kinds = [{"kind": r["kind"], "files": r["files"], "bytes": r["bytes"]}
+             for r in repo.volume_kind_counts(conn, volume_id)]
+    runs = []
+    for r in repo.volume_runs(conn, volume_id):
+        params = json.loads(r["params_json"] or "{}")
+        runs.append({"job_id": r["job_id"], "kind": r["kind"], "label": RUN_LABELS[r["kind"]], "state": r["state"],
+                     "started_at": r["created_at"], "finished_at": r["finished_at"], "result": params.get("result")})
+    return {
+        "drive": next((d for d in drives if d["volume_id"] == volume_id), None),
+        "states": states,
+        "files": sum(s["files"] for s in states.values()),
+        "bytes": sum(s["bytes"] for s in states.values()),
+        "kinds": kinds,
+        "runs": runs,
+        "steps": repo.volume_last_steps(conn, volume_id),
+        "copies": _copy_summary(conn, volume_id, drives),
+    }
+
+
+def _copy_summary(conn, volume_id: str, drives: list[dict]) -> dict:
+    mounted = {d["volume_id"]: d["mounted"] for d in drives if d["volume_id"]}
+    out = repo.volume_copy_summary(conn, volume_id)
+    for v in out["by_volume"]:
+        v["mounted"] = mounted.get(v["volume_id"], False)
+    return out
+
+
+def _reveal(app: WebApp, conn, volume_id: str, body: dict) -> dict:
+    """Show the drive, or one file on it, in Finder. Only paths inside the drive's current mount are allowed."""
+    if sys.platform != "darwin":
+        raise BadRequest("Show in Finder works on macOS only")
+    drive = _drive_row(app, conn, volume_id)
+    if drive is None:
+        raise NotFound("unknown drive")
+    if not drive["mounted"] or not drive["mount"]:
+        raise Conflict("connect this drive to show it in Finder")
+    mount = Path(drive["mount"]).resolve()
+    rel = body.get("rel_path") or ""
+    if not isinstance(rel, str):
+        raise BadRequest("rel_path must be text")
+    if rel:
+        target = (mount / rel).resolve()
+        if target == mount or not target.is_relative_to(mount):
+            raise BadRequest("that path is not on this drive")
+        if not target.exists():
+            raise Conflict("that file is not on the drive now")
+        argv = ["open", "-R", str(target)]  # -R selects the file in its Finder window
+    else:
+        target = mount
+        argv = ["open", str(target)]
+    result = subprocess.run(argv, capture_output=True, text=True, timeout=10, check=False)
+    if result.returncode != 0:
+        raise Conflict(result.stderr.strip() or "Finder did not open")
+    return {"opened": str(target)}
 
 
 def _run(app: WebApp, body: Any) -> dict:
@@ -679,6 +894,12 @@ def _post_settings(conn, body: Any) -> dict:
                 offset_tz(value)
             except ValueError as exc:
                 raise BadRequest(str(exc)) from exc
+            values[key] = value.strip()
+        elif key == "mac_folder":
+            if not isinstance(value, str) or not value.strip():
+                raise BadRequest("mac_folder must be a folder path such as ~/Sandbox")
+            if not volumes.is_folder_volume(Path(value.strip()).expanduser()):
+                raise BadRequest("mac_folder must be an existing folder inside your home folder (not home itself)")
             values[key] = value.strip()
         else:  # match_window_s
             if isinstance(value, bool) or not isinstance(value, (int, str)):

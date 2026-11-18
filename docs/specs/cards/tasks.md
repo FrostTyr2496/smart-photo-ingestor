@@ -47,10 +47,11 @@ the worst tier among its files; no files gives `empty`.
   - Verify: `uv run pytest tests/test_cards.py -q`
   - Result (2026-11-17): `uv run pytest tests/test_cards.py -q` → 12 passed.
 
-- [ ] 3. Cards and cameras in the web UI
+- [x] 3. Cards and cameras in the web UI (visual check pending, user)
   - ID: card-3
   - `GET /api/cards` (cards with tier counts, worst colour, cameras; cameras aggregated over connected cards),
     `GET /api/cards/<volume_id>/files?tier=&camera=&limit=&offset=` (most urgent first), `POST /api/run`
     `card_check` (mount). A Cards view (header button) lists connected cards first, each with a stacked colour
     bar; a card opens its ranked file list; a Cameras table colours each camera worst first.
   - Verify: `uv run pytest tests/test_web_api.py -q`; the user does the visual check.
+  - Result (2026-11-17): `uv run pytest tests/test_web_api.py -q` → 50 passed (with ui-7..ui-9). Visual check open.

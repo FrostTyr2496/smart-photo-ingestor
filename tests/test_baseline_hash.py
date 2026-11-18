@@ -301,6 +301,19 @@ def test_heartbeat_names_the_file_being_read(env, capsys, monkeypatch) -> None:
     assert [b["current"] for b in beats] == list(range(8))
 
 
+def test_runs_keep_their_final_numbers_on_the_job(env, capsys) -> None:
+    assign_and_index(capsys, env["drive"])
+    code, lines = run(capsys, "hash", str(env["drive"]))
+    assert code == 0, lines
+    c = conn()
+    rows = c.execute("SELECT kind, params_json FROM jobs ORDER BY job_id").fetchall()
+    results = {r["kind"]: json.loads(r["params_json"])["result"] for r in rows}
+    assert results["index_volume"] == {"files": 8, "indexed": 8, "unchanged": 0, "missing": 0, "errors": 0}
+    assert results["baseline_hash"]["hashed"] == 8 and results["baseline_hash"]["unreadable"] == 0
+    assert "paused" not in results["baseline_hash"]
+    assert "mount" in json.loads(rows[0]["params_json"])  # the run's own parameters are kept too
+
+
 # --- ing-12: a group made by `index` gets the D-005 name at its first card ingest ----------------------------------
 
 

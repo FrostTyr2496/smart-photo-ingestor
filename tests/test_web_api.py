@@ -6,7 +6,9 @@ Everything runs on tmp_path roots and a tmp catalog through a real server thread
 from __future__ import annotations
 
 import json
+import re
 import select
+import subprocess
 import sys
 import threading
 import time
@@ -195,7 +197,9 @@ def test_drives_lists_mounted_then_remembered(srv: Client) -> None:
     assert old["mounted"] is False and old["mount"] is None and old["role"] == "LEGACY"
     assert old["last_seen_at"]
     assert set(work) == {"mount", "role", "label", "fs", "size", "free", "volume_id", "mounted",
-                         "looks_like_card", "last_seen_at", "local"}
+                         "looks_like_card", "last_seen_at", "meta_scanned", "steps", "local", "key", "ignored"}
+    assert work["meta_scanned"] is False  # the seeded photo has no group_meta row yet
+    assert set(work["steps"]) == {"index", "hash", "scan", "sidecars"}  # last-run time per workflow step
     # mounted first
     assert [d["mounted"] for d in drives] == sorted([d["mounted"] for d in drives], reverse=True)
 
@@ -204,6 +208,25 @@ def test_drives_shows_unregistered_card(srv: Client) -> None:
     drives = {d["mount"]: d for d in srv.call("GET", "/api/drives")[1]["drives"] if d["mount"]}
     card = drives[str(srv.root / "CARD1")]
     assert card["role"] == "CARD (new)" and card["looks_like_card"] is True and card["volume_id"] is None
+
+
+def test_ignore_drive_round_trip(srv: Client) -> None:
+    drives = srv.call("GET", "/api/drives")[1]["drives"]
+    keys = {d["label"] or d["mount"]: d["key"] for d in drives}
+    assert keys["WORK"] == "vol-work" and keys[str(srv.root / "CARD1")] == "mount:CARD1"
+    assert not any(d["ignored"] for d in drives)
+
+    for key in ("mount:CARD1", "vol-leg"):
+        status, body = srv.call("POST", "/api/drives/ignore", {"key": key, "ignored": True})
+        assert status == 200
+    assert body["ignored"] == ["mount:CARD1", "vol-leg"]
+    ignored = {d["key"] for d in srv.call("GET", "/api/drives")[1]["drives"] if d["ignored"]}
+    assert ignored == {"mount:CARD1", "vol-leg"}  # still listed: the sidebar folds them away
+
+    assert srv.call("POST", "/api/drives/ignore", {"key": "vol-leg", "ignored": False})[1]["ignored"] == ["mount:CARD1"]
+    assert srv.call("POST", "/api/drives/ignore", {"key": "", "ignored": True})[0] == 400
+    assert srv.call("POST", "/api/drives/ignore", {"key": "x", "ignored": "yes"})[0] == 400
+    assert srv.call("GET", "/api/drives/ignore")[0] == 405
 
 
 def open_events(client: Client, host: str | None = None):
@@ -340,8 +363,10 @@ def test_run_rejects_unknown_and_bad_arguments(srv: Client) -> None:
     ("index", {"mount": "/w"}, ["index", "/w"]),
     ("hash", {"mount": "/w"}, ["hash", "/w"]),
     ("meta_scan", {"mount": "/w"}, ["meta", "scan", "--volume", "/w"]),
+    ("meta_scan", {"mount": "/w", "rescan": True}, ["meta", "scan", "--volume", "/w", "--rescan"]),
     ("meta_refs", {"folder": "/f", "label": "phone"}, ["meta", "refs", "--folder", "/f", "--label", "phone"]),
     ("meta_sidecars", {"mount": "/w", "dry_run": True}, ["meta", "sidecars", "--volume", "/w", "--dry-run"]),
+    ("card_check", {"mount": "/c"}, ["cards", "check", "/c"]),
 ])
 def test_build_argv_maps_each_command_to_parsable_cli(cmd, args, expected) -> None:
     argv = web.build_argv(cmd, args)
@@ -454,7 +479,8 @@ def test_suggestions_and_unknown_group(srv: Client) -> None:
 
 def test_settings_defaults_and_updates(srv: Client) -> None:
     status, body = srv.call("GET", "/api/settings")
-    assert body["settings"] == {"creator": "", "copyright": "", "default_offset": "+00:00", "match_window_s": 1800}
+    assert body["settings"] == {"creator": "", "copyright": "", "default_offset": "+00:00", "match_window_s": 1800,
+                                "mac_folder": "~/Sandbox"}
     status, body = srv.call("POST", "/api/settings", {"creator": " Mush ", "match_window_s": 600,
                                                       "default_offset": "+01:00"})
     assert status == 200
@@ -502,3 +528,222 @@ def test_thumb_404_when_no_preview(srv: Client, monkeypatch: pytest.MonkeyPatch)
     photo.write_bytes(b"x")
     monkeypatch.setattr(preview, "extract_preview", lambda path: None)
     assert srv.call("GET", f"/api/groups/{srv.ids['a']}/thumb")[0] == 404
+
+
+# --------------------------------------------------------------------------- drive summary and Finder (ui-7)
+
+
+def test_volume_summary_and_file_list(srv: Client) -> None:
+    status, body = srv.call("GET", "/api/volumes/vol-work")
+    assert status == 200
+    assert body["drive"]["label"] == "WORK" and body["drive"]["mounted"] is True
+    assert body["states"]["indexed"] == {"files": 1, "bytes": 10, "hashed": 1}
+    assert body["states"]["verified"] == {"files": 0, "bytes": 0, "hashed": 0}
+    assert body["files"] == 1 and body["bytes"] == 10
+    assert body["kinds"] == [{"kind": "photo", "files": 1, "bytes": 10}]
+    assert body["runs"] == []
+
+    status, body = srv.call("GET", "/api/volumes/vol-work/files?state=indexed")
+    assert status == 200
+    assert [f["rel_path"] for f in body["files"]] == ["Photos/DSC_0001.JPG"]
+    assert body["files"][0]["hashed"] is True and "verified_sha256" not in body["files"][0]
+    assert srv.call("GET", "/api/volumes/vol-work/files?state=verified")[1]["files"] == []
+    assert srv.call("GET", "/api/volumes/vol-work/files?state=bogus")[0] == 400
+    assert srv.call("GET", "/api/volumes/nope")[0] == 404
+    assert srv.call("POST", "/api/volumes/vol-work")[0] == 405
+
+
+def test_volume_summary_lists_runs_with_their_results(srv: Client) -> None:
+    c = db.connect(srv.app.catalog_path)
+    with repo.transaction(c):
+        job = repo.create_job(c, kind="baseline_hash", source_volume_id="vol-work", target_volume_id=None,
+                              params={"mount": "/x"})
+        repo.set_job_state(c, job, "done")
+        repo.set_job_result(c, job, {"files": 1, "hashed": 1, "unreadable": 0})
+    c.close()
+    _, body = srv.call("GET", "/api/volumes/vol-work")
+    assert body["runs"] == [{"job_id": job, "kind": "baseline_hash", "label": "Hash", "state": "done",
+                             "started_at": body["runs"][0]["started_at"],
+                             "finished_at": body["runs"][0]["finished_at"],
+                             "result": {"files": 1, "hashed": 1, "unreadable": 0}}]
+
+
+def test_reveal_opens_drive_or_file_in_finder(srv: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(web.sys, "platform", "darwin")
+    monkeypatch.setattr(web.subprocess, "run", fake_run)
+    mount = (srv.root / "WORK").resolve()
+    photo = srv.root / "WORK" / "Photos" / "DSC_0001.JPG"
+    photo.parent.mkdir(parents=True)
+    photo.write_bytes(b"x")
+
+    assert srv.call("POST", "/api/volumes/vol-work/reveal", {}) == (200, {"opened": str(mount)})
+    assert calls[-1] == ["open", str(mount)]
+    status, body = srv.call("POST", "/api/volumes/vol-work/reveal", {"rel_path": "Photos/DSC_0001.JPG"})
+    assert status == 200 and calls[-1] == ["open", "-R", str(photo.resolve())]
+    assert srv.call("POST", "/api/volumes/vol-work/reveal", {"rel_path": "../../etc"})[0] == 400
+    assert srv.call("POST", "/api/volumes/vol-work/reveal", {"rel_path": "Photos/gone.JPG"})[0] == 409
+    assert srv.call("POST", "/api/volumes/vol-leg/reveal", {})[0] == 409  # not plugged in
+    assert srv.call("POST", "/api/volumes/nope/reveal", {})[0] == 404
+    assert srv.call("GET", "/api/volumes/vol-work/reveal")[0] == 405
+
+    monkeypatch.setattr(web.sys, "platform", "linux")
+    assert srv.call("POST", "/api/volumes/vol-work/reveal", {})[0] == 400
+    assert len(calls) == 2  # nothing ran for the refused requests
+
+
+def test_meta_scanned_flag_follows_group_meta(srv: Client) -> None:
+    c = db.connect(srv.app.catalog_path)
+    with repo.transaction(c):
+        repo.ensure_group_meta(c, srv.ids["a"])  # the metadata scan wrote a row for the one photo on WORK
+    c.close()
+    by_label = {d["label"]: d for d in srv.call("GET", "/api/drives")[1]["drives"]}
+    assert by_label["WORK"]["meta_scanned"] is True
+    assert by_label["OLD"]["meta_scanned"] is False  # its photo is not scanned yet
+
+
+# --------------------------------------------------------------------------- copies across drives (ui-8)
+
+
+def seed_copies(srv: Client) -> dict[str, int]:
+    """WORK holds X (twice), Y and Z, all verified. OLD also holds X; a CARD holds Y; Z is only on WORK."""
+    c = db.connect(srv.app.catalog_path)
+    with repo.transaction(c):
+        repo.upsert_volume(c, volume_id="vol-card", role="CARD", label="CARD", fs_type="exfat",
+                           da_volume_uuid="UUID-CARD", marker_id=None, capacity_bytes=10**9, mount_path=None)
+        assets = {k: repo.insert_asset(c, sha256=k * 64, size=size, partial_sha256=k * 2, kind="photo",
+                                       group_id=None, group_role=None)
+                  for k, size in (("x", 100), ("y", 200), ("z", 300))}
+        for vid, rel, key in (("vol-work", "A/X.NEF", "x"), ("vol-work", "B/X copy.NEF", "x"),
+                              ("vol-work", "A/Y.NEF", "y"), ("vol-work", "A/Z.NEF", "z"),
+                              ("vol-leg", "Old/X.NEF", "x"), ("vol-card", "DCIM/Y.NEF", "y")):
+            repo.upsert_instance(c, volume_id=vid, rel_path=rel, size={"x": 100, "y": 200, "z": 300}[key],
+                                 mtime_ns=1, kind="photo", state="verified", asset_id=assets[key])
+    c.close()
+    return assets
+
+
+def test_volume_summary_counts_copies_elsewhere(srv: Client) -> None:
+    seed_copies(srv)
+    _, body = srv.call("GET", "/api/volumes/vol-work")
+    copies = body["copies"]
+    assert copies["hashed"] == 4  # the seeded `indexed` photo is not a verified copy
+    assert copies["elsewhere"] == {"files": 2, "bytes": 200}  # both copies of X; Y's only other copy is a card
+    assert copies["only_here"] == {"files": 2, "bytes": 500}
+    assert copies["dup_here"] == {"assets": 1, "files": 2, "extra_bytes": 100}
+    assert copies["by_volume"] == [{"volume_id": "vol-leg", "label": "OLD", "role": "LEGACY", "files": 2,
+                                    "bytes": 200, "mounted": False}]
+
+    _, old = srv.call("GET", "/api/volumes/vol-leg")
+    assert old["copies"]["elsewhere"] == {"files": 1, "bytes": 100}
+    assert old["copies"]["by_volume"][0]["label"] == "WORK" and old["copies"]["by_volume"][0]["files"] == 1
+
+
+def test_file_list_marks_and_filters_copies(srv: Client) -> None:
+    seed_copies(srv)
+
+    def paths(qs: str) -> list[str]:
+        status, body = srv.call("GET", f"/api/volumes/vol-work/files?{qs}")
+        assert status == 200, body
+        return [f["rel_path"] for f in body["files"]]
+
+    _, body = srv.call("GET", "/api/volumes/vol-work/files")
+    by_path = {f["rel_path"]: f for f in body["files"]}
+    assert (by_path["A/X.NEF"]["copies"], by_path["A/X.NEF"]["dup_here"]) == (1, 1)
+    assert (by_path["A/Y.NEF"]["copies"], by_path["A/Y.NEF"]["dup_here"]) == (0, 0)  # a card copy does not count
+    assert by_path["A/X.NEF"]["asset_id"]
+    assert paths("copies=elsewhere") == ["A/X.NEF", "B/X copy.NEF"]
+    assert paths("copies=only_here") == ["A/Y.NEF", "A/Z.NEF"]
+    assert paths("copies=dup_here") == ["A/X.NEF", "B/X copy.NEF"]
+    assert paths("other=vol-leg") == ["A/X.NEF", "B/X copy.NEF"]
+    assert paths("copies=only_here&state=verified") == ["A/Y.NEF", "A/Z.NEF"]
+    assert srv.call("GET", "/api/volumes/vol-work/files?copies=bogus")[0] == 400
+    assert srv.call("GET", "/api/volumes/vol-work/files?other=vol-work")[0] == 400
+    assert srv.call("GET", "/api/volumes/vol-work/files?other=nope")[0] == 400
+
+
+def test_asset_copies_lists_every_drive(srv: Client) -> None:
+    assets = seed_copies(srv)
+    status, body = srv.call("GET", f"/api/assets/{assets['x']}/copies")
+    assert status == 200 and body["size"] == 100
+    assert [(c["label"], c["rel_path"], c["mounted"]) for c in body["copies"]] == [
+        ("OLD", "Old/X.NEF", False), ("WORK", "A/X.NEF", True), ("WORK", "B/X copy.NEF", True)]
+    _, y = srv.call("GET", f"/api/assets/{assets['y']}/copies")
+    assert [c["role"] for c in y["copies"]] == ["WORKING", "CARD"]  # cards listed last, labelled by role
+    assert srv.call("GET", "/api/assets/999999/copies")[0] == 404
+    assert srv.call("POST", f"/api/assets/{assets['x']}/copies", {})[0] == 405
+
+
+# --------------------------------------------------------------------------- cards (card-1, card-3)
+
+
+def seed_card(srv: Client) -> None:
+    """CARD1 (plugged in) holds P (also on WORK) and N (only on the card); both checked."""
+    folder = srv.root / "CARD1" / "DCIM" / "100NZ6_2"
+    folder.mkdir(parents=True)
+    c = db.connect(srv.app.catalog_path)
+    with repo.transaction(c):
+        repo.upsert_volume(c, volume_id="vol-card", role="CARD", label="card:CARD1", fs_type="exfat",
+                           da_volume_uuid="UUID-CARD1", marker_id=None, capacity_bytes=10**9,
+                           mount_path=srv.root / "CARD1")
+        for name, data, on_work in (("P.NEF", b"p" * 50, True), ("N.NEF", b"n" * 70, False)):
+            f = folder / name
+            f.write_bytes(data)
+            st = f.stat()
+            asset = repo.insert_asset(c, sha256=name[0] * 64, size=st.st_size, partial_sha256=name[0] * 2,
+                                      kind="raw", group_id=None, group_role=None)
+            repo.upsert_instance(c, volume_id="vol-card", rel_path=f"DCIM/100NZ6_2/{name}", size=st.st_size,
+                                 mtime_ns=st.st_mtime_ns, kind="raw", state="verified", asset_id=asset)
+            if on_work:
+                repo.upsert_instance(c, volume_id="vol-work", rel_path=f"Photos/{name}", size=st.st_size,
+                                     mtime_ns=1, kind="raw", state="verified", asset_id=asset)
+    c.close()
+
+
+def test_cards_list_and_ranked_files(srv: Client) -> None:
+    seed_card(srv)
+    status, body = srv.call("GET", "/api/cards")
+    assert status == 200
+    [card] = body["cards"]
+    assert card["volume_id"] == "vol-card" and card["mounted"] is True and card["tier"] == "only_on_card"
+    assert card["counts"]["needs_backup"]["files"] == 1 and card["counts"]["only_on_card"]["files"] == 1
+    assert [c["tier"] for c in body["cameras"]] == ["only_on_card"]
+
+    status, body = srv.call("GET", "/api/cards/vol-card/files")
+    assert status == 200 and body["total"] == 2
+    assert [(f["rel_path"].rsplit("/", 1)[1], f["tier"]) for f in body["files"]] == [
+        ("N.NEF", "only_on_card"), ("P.NEF", "needs_backup")]  # most urgent first
+    assert body["files"][1]["copies"] == [{"role": "WORKING", "label": "WORK"}]
+    assert body["card"]["tier"] == "only_on_card"
+    _, only = srv.call("GET", "/api/cards/vol-card/files?tier=needs_backup")
+    assert [f["tier"] for f in only["files"]] == ["needs_backup"]
+    assert srv.call("GET", "/api/cards/vol-card/files?tier=bogus")[0] == 400
+    assert srv.call("GET", "/api/cards/vol-work/files")[0] == 404  # not a card
+    assert srv.call("POST", "/api/cards", {})[0] == 405
+
+
+def test_mac_folder_setting_and_drive(srv: Client) -> None:
+    assert srv.call("POST", "/api/settings", {"mac_folder": "~/Nope"})[0] == 400  # must exist
+    assert srv.call("POST", "/api/settings", {"mac_folder": "~"})[0] == 400  # not home itself
+    assert srv.call("POST", "/api/settings", {"mac_folder": str(srv.root)})[0] == 400  # outside home
+    sandbox = Path.home() / "Sandbox"
+    sandbox.mkdir()
+    status, body = srv.call("POST", "/api/settings", {"mac_folder": "~/Sandbox"})
+    assert status == 200 and body["settings"]["mac_folder"] == "~/Sandbox"
+    mac = [d for d in srv.call("GET", "/api/drives")[1]["drives"] if d["local"]]
+    assert [(d["label"], d["mount"], d["mounted"]) for d in mac] == [("This Mac", str(sandbox), True)]
+
+
+def test_every_built_command_is_allowed_by_run(srv: Client) -> None:
+    """`/api/run` has its own allow-list; a command `build_argv` knows must pass it (the card_check bug)."""
+    status, body = srv.call("POST", "/api/run", {"cmd": "card_check", "args": {"mount": "/c"}})
+    assert status == 200 and isinstance(body["task_id"], int), body
+    import inspect
+    built = set(re.findall(r'cmd == "(\w+)"|"(\w+)": "', inspect.getsource(web.build_argv)))
+    names = {a or b for a, b in built} - {"card-status", "index", "hash"}
+    assert names | {"card_status", "index", "hash"} <= set(web.ALLOWED_CMDS)

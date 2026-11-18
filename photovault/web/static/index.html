@@ -22,7 +22,12 @@
       <div class="global-track"><div id="global-fill" class="global-fill"></div></div>
       <span id="global-text" class="muted small"></span>
     </div>
-    <button id="btn-settings" type="button">Settings</button>
+    <div class="top-actions">
+      <button id="btn-cards" type="button" aria-pressed="false">
+        <span id="cards-dot" class="tier-dot" hidden></span>Cards
+      </button>
+      <button id="btn-settings" type="button">Settings</button>
+    </div>
   </header>
 
   <div id="toasts" class="toasts" aria-live="polite"></div>
@@ -41,7 +46,7 @@
     </aside>
 
     <main id="main" class="main" tabindex="-1">
-      <section class="panel">
+      <section id="photo-panel" class="panel">
         <div class="section-head">
           <h2>Photos</h2>
           <span id="counts" class="muted small"></span>
@@ -75,6 +80,8 @@
         </div>
         <div id="grid" class="grid" aria-label="Photos"></div>
       </section>
+      <section id="drive-view" class="panel drive-view" aria-label="Drive summary" hidden></section>
+      <section id="cards-view" class="panel cards-view" aria-label="Cards" hidden></section>
     </main>
 
     <aside id="editor" class="editor panel" aria-label="Edit selection" hidden>
@@ -158,6 +165,11 @@
           <span>Match GPS points within (seconds)</span>
           <input name="match_window_s" type="number" min="0" max="86400">
         </label>
+        <label class="field-stack">
+          <span>Photo folder on this Mac (used as a working drive)</span>
+          <input name="mac_folder" type="text" placeholder="~/Sandbox">
+        </label>
+        <p class="muted small">Only this folder is searched for photos on the Mac. It must be inside your home folder.</p>
       </div>
       <div class="dlg-foot">
         <button type="button" data-close>Cancel</button>
@@ -176,7 +188,7 @@
           <select name="role">
             <option value="WORKING">Working drive (copy target)</option>
             <option value="MASTER">Master backup</option>
-            <option value="LEGACY">Legacy drive (existing photos)</option>
+            <option value="LEGACY" data-not-local>Legacy drive (existing photos)</option>
           </select>
         </label>
         <label class="field-stack">
@@ -185,6 +197,7 @@
         </label>
       </div>
       <div class="dlg-foot">
+        <button type="button" id="btn-assign-ignore" class="foot-left" title="Hide this drive under Ignored drives">Ignore drive</button>
         <button type="button" data-close>Cancel</button>
         <button type="submit" class="primary">Set up drive</button>
       </div>

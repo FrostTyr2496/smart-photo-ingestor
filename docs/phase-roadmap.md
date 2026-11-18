@@ -99,7 +99,10 @@ Note: seq-1 to seq-3 are pure and fixture-driven, so they make good parallel Hai
 | P5a.5 | ui-5 front end | ui-4 | **[user]** visual check |
 | P5a.6 | card-1 Mac folder as a WORKING drive (D-047) (**done 2026-11-17**) | — | — |
 | P5a.7 | card-2 card check and removability tiers (D-046, D-048) (**done 2026-11-17**) | ing-12 | — |
-| P5a.8 | card-3 Cards and Cameras views | card-2 | **[user]** visual check |
+| P5a.8 | card-3 Cards and Cameras views (**done 2026-11-17**) | card-2 | **[user]** visual check |
+| P5a.9 | ui-7 drive summary (**done 2026-11-17**) | ui-6 | **[user]** visual check |
+| P5a.10 | ui-8 copies across drives (**done 2026-11-17**) | ui-7 | **[user]** visual check |
+| P5a.11 | ui-9 ignore drives (**done 2026-11-17**) | ui-6 | **[user]** visual check |
 
 ## Phase 5: app (spec `app`)
 

@@ -119,11 +119,11 @@ def index_volume(
     emit.emit("progress", phase="index", current=0, total=len(todo),
               message=f"{len(entries)} files, {len(entries) - len(todo)} unchanged")
 
-    done = errors = 0
+    done = errors = recorded = 0
     batch: list[FileEntry] = []
 
     def flush() -> None:
-        nonlocal next_seq, errors
+        nonlocal next_seq, errors, recorded
         if not batch:
             return
         media = [e for e in batch if e.kind in META_KINDS]
@@ -143,12 +143,15 @@ def index_volume(
                 repo.upsert_instance(conn, volume_id=vid, rel_path=e.rel_path, size=e.size, mtime_ns=e.mtime_ns,
                                      kind=e.kind, state="indexed", partial_sha256=partial)
             next_seq = _record_groups(conn, cfg, [e for e, _ in rows], meta, job_id, next_seq)
+        recorded += len(rows)
         batch.clear()
 
     for d in sorted(by_dir):
         if should_stop():
             with repo.transaction(conn):
                 repo.set_job_state(conn, job_id, "paused")
+                repo.set_job_result(conn, job_id, {"files": len(entries), "indexed": recorded, "errors": errors,
+                                                   "paused": True})
             emit.emit("warning", code="paused", message="stopped; run the same index command again to resume")
             return job_id
         batch.extend(by_dir[d])
@@ -162,6 +165,9 @@ def index_volume(
         gone = [r["instance_id"] for k, r in existing.items() if k not in seen and r["state"] != "missing"]
         missing = repo.mark_missing(conn, gone) if gone else 0
         repo.set_job_state(conn, job_id, "done")
+        repo.set_job_result(conn, job_id, {"files": len(entries), "indexed": len(todo) - errors,
+                                           "unchanged": len(entries) - len(todo), "missing": missing,
+                                           "errors": errors})
     emit.emit("result", job_id=job_id, volume=vol["label"], files=len(entries), indexed=len(todo) - errors,
               unchanged=len(entries) - len(todo), missing=missing, errors=errors,
               elapsed_s=round(time.monotonic() - start, 1))
@@ -258,9 +264,14 @@ def baseline_hash(
     consecutive = 0
     beat_t, beat_bytes = start, 0
 
+    def run_stats(**extra: bool) -> dict:
+        return {"files": len(todo), "hashed": hashed, "skipped": stale, "unreadable": unreadable,
+                "deferred": deferred, "excluded": excluded, "bytes": bytes_done, **extra}
+
     def pause(code: str, message: str) -> int:
         with repo.transaction(conn):
             repo.set_job_state(conn, job_id, "paused")
+            repo.set_job_result(conn, job_id, run_stats(paused=True))
         emit.emit("warning", code=code, message=message)
         return job_id
 
@@ -333,6 +344,7 @@ def baseline_hash(
 
     with repo.transaction(conn):
         repo.set_job_state(conn, job_id, "done")
+        repo.set_job_result(conn, job_id, run_stats())
     elapsed = time.monotonic() - start
     if deferred:
         emit.emit("warning", code="bad_sector_dir",
