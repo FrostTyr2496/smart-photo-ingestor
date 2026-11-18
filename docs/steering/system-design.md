@@ -269,6 +269,20 @@ CREATE INDEX assets_group ON assets (group_id, group_role);
 An index only, no new column. Without it, finding each capture group's primary file scanned every asset per group,
 so the Photos list (`repo.list_groups`) never finished on a catalog of 60k groups.
 
+## 5e. Catalog schema v5 (migration 5)
+
+Approved by the user on 2026-11-18 (sp-2, D-066). The SQL is the `V5` string in `photovault/catalog/migrations.py`:
+
+```sql
+ALTER TABLE geo_points ADD COLUMN place_name TEXT;  -- and city, state, country TEXT; accuracy_m REAL
+ALTER TABLE group_meta ADD COLUMN city TEXT;        -- and state, country TEXT
+```
+
+Phone photos imported from the Photos library (`source = 'iphone'`, `source_ref` = the asset's UUID) carry the
+place names Photos already stored, so a suggestion can offer a name, not only coordinates. A frame's `city`,
+`state` and `country` go to its XMP as `photoshop:City`, `photoshop:State` and `photoshop:Country`; `place_name`
+stays `Iptc4xmpCore:Location`.
+
 ## 6. Naming (D-004, D-005)
 
 - **File stem:** the template `M{num:04d}_{date}-{time}-{subsec}_{body}_{ident}`, with derivative suffixes kept.

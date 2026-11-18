@@ -98,4 +98,15 @@ V4 = """
 CREATE INDEX assets_group ON assets (group_id, group_role);   -- a group's files, for the Photos view (rv-7, D-064)
 """
 
-MIGRATIONS: list[str] = [V1, V2, V3, V4]
+V5 = """
+ALTER TABLE geo_points ADD COLUMN place_name TEXT;   -- phone fixes carry Photos' place names (sp-2, D-066)
+ALTER TABLE geo_points ADD COLUMN city TEXT;
+ALTER TABLE geo_points ADD COLUMN state TEXT;
+ALTER TABLE geo_points ADD COLUMN country TEXT;
+ALTER TABLE geo_points ADD COLUMN accuracy_m REAL;
+ALTER TABLE group_meta ADD COLUMN city TEXT;         -- written to XMP as photoshop:City / State / Country
+ALTER TABLE group_meta ADD COLUMN state TEXT;
+ALTER TABLE group_meta ADD COLUMN country TEXT;
+"""
+
+MIGRATIONS: list[str] = [V1, V2, V3, V4, V5]
