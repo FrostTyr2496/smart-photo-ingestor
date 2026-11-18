@@ -10,7 +10,7 @@ import uuid
 import webbrowser
 from pathlib import Path
 
-from photovault import cards, meta, metrics, report, volumes
+from photovault import cards, meta, metrics, phone, report, volumes
 from photovault.activity import ActivityEmitter
 from photovault.drives import CLI_DRIVE_KEYS, VOLUMES_ROOT, scan_mounts
 from photovault.web import server as web_server
@@ -261,6 +261,21 @@ def cmd_meta_refs(args, cfg, emit) -> int:
     return EXIT_OK
 
 
+def cmd_meta_phone(args, cfg, emit) -> int:
+    path = Path(args.json)
+    if not path.is_file():
+        emit.emit("error", code="usage", message=f"{path}: no such file")
+        return EXIT_USAGE
+    conn = _open(cfg)
+    try:
+        counts = phone.import_phone(conn, path, emit)
+    except phone.NotOsxphotosJson as exc:
+        emit.emit("error", code="bad_input", message=str(exc))
+        return EXIT_USAGE
+    emit.emit("result", **counts)
+    return EXIT_OK
+
+
 def cmd_meta_sidecars(args, cfg, emit) -> int:
     conn = _open(cfg)
     row = registered_volume(conn, Path(args.volume))
@@ -283,7 +298,8 @@ def cmd_meta_set(args, cfg, emit) -> int:
         return EXIT_USAGE
     if args.lat is not None:
         fields.update(lat=args.lat, lon=args.lon, alt=None, gps_source="map")
-    for key, value in (("place_name", args.place), ("creator", args.creator), ("copyright", args.copyright),
+    for key, value in (("place_name", args.place), ("city", args.city), ("state", args.state),
+                       ("country", args.country), ("creator", args.creator), ("copyright", args.copyright),
                        ("title", args.title), ("time_shift_s", args.time_shift)):
         if value is not None:
             fields[key] = value
@@ -440,6 +456,9 @@ def build_parser() -> argparse.ArgumentParser:
     m_refs.add_argument("--folder", required=True)
     m_refs.add_argument("--label", required=True, help="source name for these fixes, e.g. phone or drone")
     m_refs.set_defaults(func=cmd_meta_refs)
+    m_phone = ms.add_parser("phone", help="import iPhone/iPad/glasses locations from an osxphotos JSON export")
+    m_phone.add_argument("json", metavar="JSON", help="file written by `osxphotos query --json` (array or JSON lines)")
+    m_phone.set_defaults(func=cmd_meta_phone)
     m_side = ms.add_parser("sidecars", help="write XMP sidecars for changed frames on a WORKING drive")
     m_side.add_argument("--volume", required=True, metavar="MOUNT")
     m_side.add_argument("--dry-run", action="store_true", help="count what would be written, write nothing")
@@ -452,6 +471,9 @@ def build_parser() -> argparse.ArgumentParser:
     m_set.add_argument("--lat", type=float, help="manual geotag latitude (needs --lon; source 'map')")
     m_set.add_argument("--lon", type=float)
     m_set.add_argument("--place", help="place name")
+    m_set.add_argument("--city")
+    m_set.add_argument("--state")
+    m_set.add_argument("--country")
     m_set.add_argument("--creator")
     m_set.add_argument("--copyright")
     m_set.add_argument("--title")

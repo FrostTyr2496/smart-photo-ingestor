@@ -453,7 +453,8 @@ def test_groups_meta_round_trip(srv: Client) -> None:
     assert row["rel_path"] == "Photos/DSC_0001.JPG" and row["volume_id"] == "vol-work"
 
     fields = {"creator": "Mush", "keywords_add": ["beach", "sun"], "lat": 51.5, "lon": -0.12,
-              "gps_source": "map", "place_name": "Brighton"}
+              "gps_source": "map", "place_name": "Brighton", "city": "Brighton", "state": "Sussex",
+              "country": "Freedonia"}
     status, body = srv.call("POST", "/api/groups/meta", {"group_ids": [a], "fields": fields})
     assert status == 200 and body == {"updated": 1}
 
@@ -466,6 +467,7 @@ def test_groups_meta_round_trip(srv: Client) -> None:
     row = next(g for g in srv.call("GET", "/api/groups")[1]["groups"] if g["group_id"] == a)
     assert row["keywords"] == ["beach", "sun"] and row["creator"] == "Mush" and row["dirty"] is True
     assert row["lat"] == 51.5 and row["gps_source"] == "map"
+    assert (row["city"], row["state"], row["country"]) == ("Brighton", "Sussex", "Freedonia")
 
     # keyword removal (case-insensitive) through the same endpoint
     srv.call("POST", "/api/groups/meta", {"group_ids": [a], "fields": {"keywords_remove": ["BEACH"]}})
@@ -478,6 +480,7 @@ def test_groups_meta_validation(srv: Client) -> None:
     post = lambda body: srv.call("POST", "/api/groups/meta", body)[0]  # noqa: E731
     assert post({"group_ids": [a], "fields": {"bogus": 1}}) == 400      # unknown field (ValueError)
     assert post({"group_ids": [999], "fields": {"creator": "x"}}) == 400  # unknown group
+    assert post({"group_ids": [a], "fields": {"city": 5}}) == 400         # place fields are strings or null
     assert post({"group_ids": [], "fields": {"creator": "x"}}) == 400
     assert post({"group_ids": [a], "fields": {}}) == 400
     assert post({"group_ids": [a], "fields": {"gps_source": "guess"}}) == 400

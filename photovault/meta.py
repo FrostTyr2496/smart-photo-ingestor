@@ -149,6 +149,7 @@ def scan_refs(conn: sqlite3.Connection, cfg: Config, folder: Path, label: str, e
 def _sidecar_meta(row: sqlite3.Row, default_offset: str) -> dict:
     """The fields `xmp.render_xmp` takes, from a dirty group's ``group_meta`` row."""
     meta: dict = {"lat": row["lat"], "lon": row["lon"], "alt": row["alt"], "place_name": row["place_name"],
+                  "city": row["city"], "state": row["state"], "country": row["country"],
                   "creator": row["creator"], "copyright": row["copyright"], "title": row["title"],
                   "keywords": json.loads(row["keywords_json"] or "[]")}
     if int(row["time_shift_s"] or 0):

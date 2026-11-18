@@ -82,7 +82,7 @@ reference folder read into `geo_points`) and `geo.suggest` (time-matched suggest
     **osxphotos runs as an external tool** (`uv tool run`), never as an engine dependency (D-070: it pulls in about
     80 packages). It writes a JSON file; `photovault` reads that file with the stdlib.
 
-- [ ] 2. **[stronger]** Import iPhone locations from an osxphotos JSON export into `geo_points`
+- [x] 2. **[stronger]** Import iPhone locations from an osxphotos JSON export into `geo_points`
   - ID: sp-2 (after sp-1, and after the V6 `geo_points` columns; see below). _Design:_ D-066, D-070, `system-design.md` §5e.
   - Step 1, **[user]**, in iTerm with Photos quit (the output stays in the PhotoVault home, outside the repo). Paste as is:
     ```sh
@@ -119,6 +119,10 @@ reference folder read into `geo_points`) and `geo.suggest` (time-matched suggest
     `country`.
   - Verify: `uv run pytest tests/test_phone.py tests/test_geo.py tests/test_xmp.py -q`. The fixture is a synthetic
     osxphotos JSON with invented coordinates. **[user]** then runs it on a short date range.
+  - Result (2026-11-18): `uv run pytest tests/test_phone.py tests/test_geo.py tests/test_xmp.py tests/test_web_api.py tests/test_catalog_db.py tests/test_meta_repo.py -q` → 129 passed; `uv run pytest -q` → 541 passed, 9 skipped.
+    Real export into a temporary catalog (deleted): 19,845 rows seen, 18,995 kept (iphone 18,822, ipad 53, glasses 120),
+    850 skipped as `other_device`, 0 for every other reason; 2.5 s, 1.44 GB peak. `not_iphone` is not reported (it is
+    `other_device`). Schema V6 (`local_offset`, `kind`) is `system-design.md` §5f; cu-0 is now V7.
 
 - [ ] 3. Place names from the phone in the inspector
   - ID: sp-3 (after sp-2). _Design:_ D-066.

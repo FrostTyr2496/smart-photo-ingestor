@@ -109,4 +109,9 @@ ALTER TABLE group_meta ADD COLUMN state TEXT;
 ALTER TABLE group_meta ADD COLUMN country TEXT;
 """
 
-MIGRATIONS: list[str] = [V1, V2, V3, V4, V5]
+V6 = """
+ALTER TABLE geo_points ADD COLUMN local_offset TEXT;   -- the fix's own UTC offset, +HH:MM (sp-2, D-070)
+ALTER TABLE geo_points ADD COLUMN kind TEXT;           -- 'photo' | 'video'
+"""
+
+MIGRATIONS: list[str] = [V1, V2, V3, V4, V5, V6]

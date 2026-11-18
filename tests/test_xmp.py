@@ -23,6 +23,16 @@ def description(root: ET.Element) -> ET.Element:
     return root.find(f"{RDF}RDF/{RDF}Description")
 
 
+def test_city_state_country_go_to_photoshop_attributes():
+    ps = "{http://ns.adobe.com/photoshop/1.0/}"
+    desc = description(parse_packet(render_xmp({"place_name": "Quay", "city": "Harbourton", "state": "Westshire",
+                                                "country": "Freedonia"})))
+    assert (desc.get(ps + "City"), desc.get(ps + "State"), desc.get(ps + "Country")) == (
+        "Harbourton", "Westshire", "Freedonia")
+    bare = description(parse_packet(render_xmp({"city": None, "state": ""})))
+    assert bare.get(ps + "City") is None and bare.get(ps + "State") is None
+
+
 def test_gps_examples():
     assert gps_to_xmp(-33.8568, True) == "33,51.408000S"
     assert gps_to_xmp(151.2153, False) == "151,12.918000E"

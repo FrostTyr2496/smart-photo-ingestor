@@ -69,6 +69,9 @@ def render_xmp(meta: dict) -> str:
         attrs.append(_attr("exif:GPSAltitude", rational))
     if meta.get("place_name"):
         attrs.append(_attr("Iptc4xmpCore:Location", str(meta["place_name"])))
+    for tag, key in (("photoshop:City", "city"), ("photoshop:State", "state"), ("photoshop:Country", "country")):
+        if meta.get(key):
+            attrs.append(_attr(tag, str(meta[key])))
     date_original = meta.get("date_original")
     if date_original:
         attrs.append(_attr("exif:DateTimeOriginal", str(date_original)))

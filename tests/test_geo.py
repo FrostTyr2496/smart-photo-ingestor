@@ -70,6 +70,18 @@ def point(conn, offset_s: float, source: str, ref: str, lat: float = 1.0, lon: f
                           source=source, source_ref=ref)
 
 
+def test_suggest_returns_place_fields(conn) -> None:
+    gid = make_group(conn)
+    repo.upsert_geo_point(conn, utc_time=utc_text(T0), lat=12.5, lon=-40.25, alt=None, source="iphone",
+                          source_ref="u1", place_name="Harbourton Quay", city="Harbourton", state="Westshire",
+                          country="Freedonia", local_offset="+01:00", kind="photo")
+    repo.upsert_geo_point(conn, utc_time=utc_text(T0), lat=1.0, lon=2.0, alt=None, source="gpx", source_ref="p1")
+    found = {s["source"]: s for s in suggest(conn, gid)}
+    assert (found["iphone"]["place_name"], found["iphone"]["city"], found["iphone"]["state"],
+            found["iphone"]["country"]) == ("Harbourton Quay", "Harbourton", "Westshire", "Freedonia")
+    assert found["gpx"]["place_name"] is None and found["gpx"]["city"] is None
+
+
 def test_suggest_orders_by_nearness_and_fills_fields(conn) -> None:
     gid = make_group(conn)
     point(conn, -60, "drone", "d1", lat=10.0, lon=20.0, alt=50.0)
@@ -81,7 +93,8 @@ def test_suggest_orders_by_nearness_and_fills_fields(conn) -> None:
     assert out[0]["source"] == "interpolated"
     assert [s["source_ref"] for s in out[1:]] == ["d1", "p1", "p0"]
     assert out[1] == {"lat": 10.0, "lon": 20.0, "alt": 50.0, "source": "drone", "source_ref": "d1",
-                      "delta_s": -60, "confidence": "high"}
+                      "delta_s": -60, "confidence": "high", "place_name": None, "city": None, "state": None,
+                      "country": None}
     assert out[2]["delta_s"] == 400 and out[2]["confidence"] == "medium"
     assert len(suggest(conn, gid)) == 3  # default limit
 

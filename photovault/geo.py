@@ -68,7 +68,8 @@ def suggest(conn: sqlite3.Connection, group_id: int, *, window_s: int = 1800, li
     Points within ``±window_s`` of the group's UTC, except the group's own camera point
     (``source_ref == "group:<id>"``). When one point lies before the frame and one after (both inside the
     window), the first suggestion is their linear interpolation (source ``interpolated``, delta 0, confidence from
-    the wider of the two gaps). Each dict: lat, lon, alt, source, source_ref, delta_s, confidence.
+    the wider of the two gaps). Each dict: lat, lon, alt, source, source_ref, delta_s, confidence, and the point's
+    place_name, city, state, country (None for an interpolated one).
     """
     row = conn.execute(
         """
@@ -93,7 +94,8 @@ def suggest(conn: sqlite3.Connection, group_id: int, *, window_s: int = 1800, li
         gap = (datetime.fromisoformat(p["utc_time"]) - target).total_seconds()
         points.append({"lat": p["lat"], "lon": p["lon"], "alt": p["alt"], "source": p["source"],
                        "source_ref": p["source_ref"], "delta_s": round(gap), "confidence": _confidence(abs(gap)),
-                       "_gap": gap})
+                       "place_name": p["place_name"], "city": p["city"], "state": p["state"],
+                       "country": p["country"], "_gap": gap})
 
     before = [p for p in points if p["_gap"] < 0]
     after = [p for p in points if p["_gap"] > 0]
@@ -109,7 +111,8 @@ def suggest(conn: sqlite3.Connection, group_id: int, *, window_s: int = 1800, li
         interpolated.append({"lat": lo["lat"] + frac * (hi["lat"] - lo["lat"]),
                              "lon": lo["lon"] + frac * (hi["lon"] - lo["lon"]), "alt": alt,
                              "source": "interpolated", "source_ref": f"{lo['source_ref']}|{hi['source_ref']}",
-                             "delta_s": 0, "confidence": _confidence(wider)})
+                             "delta_s": 0, "confidence": _confidence(wider),
+                             "place_name": None, "city": None, "state": None, "country": None})
 
     points.sort(key=lambda p: abs(p["_gap"]))
     for p in points:

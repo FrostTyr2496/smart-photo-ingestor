@@ -658,13 +658,14 @@ def latest_job(conn: sqlite3.Connection, *, kind: str, source_volume_id: str, st
 # --- group metadata, geo points and settings (ui-1, migration 2) -----------------------------------------------
 
 _SCALAR_META_KEYS = frozenset(
-    {"lat", "lon", "alt", "gps_source", "place_name", "time_shift_s", "creator", "copyright", "title"}
+    {"lat", "lon", "alt", "gps_source", "place_name", "city", "state", "country", "time_shift_s", "creator",
+     "copyright", "title"}
 )
 _KEYWORD_OPS = frozenset({"keywords_add", "keywords_remove", "keywords_set"})
 _MISSING_KINDS = frozenset({"gps", "creator", "keywords", "any"})
 _GROUP_META_COLUMNS = (
-    "cam_lat, cam_lon, cam_alt, lat, lon, alt, gps_source, place_name, time_shift_s, creator, copyright, "
-    "title, keywords_json, dirty, updated_at"
+    "m.cam_lat, m.cam_lon, m.cam_alt, m.lat, m.lon, m.alt, m.gps_source, m.place_name, m.city, m.state, m.country, "
+    "m.time_shift_s, m.creator, m.copyright, m.title, m.keywords_json, m.dirty, m.updated_at"
 )
 
 
@@ -759,17 +760,33 @@ def upsert_geo_point(
     alt: float | None,
     source: str,
     source_ref: str,
-) -> None:
-    """Insert a GPS fix, or update the one with the same ``(source, source_ref)``."""
-    conn.execute(
-        """
-        INSERT INTO geo_points (utc_time, lat, lon, alt, source, source_ref)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT (source, source_ref) DO UPDATE SET
-            utc_time = excluded.utc_time, lat = excluded.lat, lon = excluded.lon, alt = excluded.alt
-        """,
-        (utc_time, lat, lon, alt, source, source_ref),
-    )
+    place_name: str | None = None,
+    city: str | None = None,
+    state: str | None = None,
+    country: str | None = None,
+    accuracy_m: float | None = None,
+    local_offset: str | None = None,
+    kind: str | None = None,
+) -> str:
+    """Insert a GPS fix, or update the one with the same ``(source, source_ref)``.
+
+    Returns ``'inserted'``, ``'updated'`` (a stored value changed) or ``'unchanged'``.
+    """
+    values = (utc_time, lat, lon, alt, place_name, city, state, country, accuracy_m, local_offset, kind)
+    cols = ["utc_time", "lat", "lon", "alt", "place_name", "city", "state", "country", "accuracy_m",
+            "local_offset", "kind"]
+    row = conn.execute(f"SELECT {', '.join(cols)} FROM geo_points WHERE source = ? AND source_ref = ?",
+                       (source, source_ref)).fetchone()
+    if row is None:
+        conn.execute(
+            f"INSERT INTO geo_points ({', '.join(cols)}, source, source_ref) VALUES ({', '.join('?' * 13)})",
+            (*values, source, source_ref))
+        return "inserted"
+    if tuple(row) == values:
+        return "unchanged"
+    sets = ", ".join(f"{c} = ?" for c in cols)
+    conn.execute(f"UPDATE geo_points SET {sets} WHERE source = ? AND source_ref = ?", (*values, source, source_ref))
+    return "updated"
 
 
 def geo_points_between(conn: sqlite3.Connection, start_utc: str, end_utc: str) -> list[Row]:

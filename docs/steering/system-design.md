@@ -283,6 +283,19 @@ place names Photos already stored, so a suggestion can offer a name, not only co
 `state` and `country` go to its XMP as `photoshop:City`, `photoshop:State` and `photoshop:Country`; `place_name`
 stays `Iptc4xmpCore:Location`.
 
+## 5f. Catalog schema v6 (migration 6)
+
+Approved by the user on 2026-11-18 (sp-2, D-070). The SQL is the `V6` string in `photovault/catalog/migrations.py`:
+
+```sql
+ALTER TABLE geo_points ADD COLUMN local_offset TEXT;  -- the fix's own UTC offset, '+HH:MM'
+ALTER TABLE geo_points ADD COLUMN kind TEXT;          -- 'photo' | 'video'
+```
+
+Phone fixes imported by `photovault meta phone` carry the offset the photo was taken in (for time-zone suggestions,
+sp-7) and whether it is a photo or a movie. `source` is `iphone`, `ipad` or `glasses` (D-071). Other sources leave
+both columns NULL. The cu-0 proposal becomes V7.
+
 ## 6. Naming (D-004, D-005)
 
 - **File stem:** the template `M{num:04d}_{date}-{time}-{subsec}_{body}_{ident}`, with derivative suffixes kept.

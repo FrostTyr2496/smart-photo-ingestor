@@ -609,7 +609,7 @@ def _check_meta_fields(fields: Any) -> dict:
         elif key == "gps_source":
             if value is not None and value not in GPS_SOURCES:
                 raise BadRequest(f"gps_source must be one of {', '.join(GPS_SOURCES)} or null")
-        elif key in ("place_name", "creator", "copyright", "title"):
+        elif key in ("place_name", "city", "state", "country", "creator", "copyright", "title"):
             if value is not None and not isinstance(value, str):
                 raise BadRequest(f"{key} must be a string or null")
         elif key in ("keywords_add", "keywords_remove", "keywords_set"):
