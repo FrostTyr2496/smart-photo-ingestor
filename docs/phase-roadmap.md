@@ -148,7 +148,8 @@ rep-1 is replaced by bk-5; rep-0 still covers legacy content on the 12 TB.
 | P5d.4 | rv-7 Photos timeline and editor, rebuilt and made to work (**done 2026-11-18**) | rv-6 | **[user]** visual check |
 | P5d.5 | rv-8 clean up what the classic UI left behind (**done 2026-11-18**) | rv-6 | none |
 | P5d.6 | rv-9 Photos: apply edits to related photos (**done 2026-11-18**) | rv-7 | **[user]** visual check |
-| P5d.7 | sp-1 spike: phone locations from the Photos library (spec `phone-gps`), then sp-2..sp-4 | rv-7 | **[user]** decision, Full Disk Access |
+| P5d.7 | sp-1 spike: phone locations (spec `phone-gps`); its answers (D-066) and sp-2..sp-4 shelved in `git stash` (D-067) | rv-7 | **[user]** resume |
+| P5d.8 | rv-12..rv-15 file system tag, clickable tiles, drive rename, fast drive list (**done 2026-11-18**) | rv-6 | none |
 
 ## Phase 5: app (spec `app`)
 

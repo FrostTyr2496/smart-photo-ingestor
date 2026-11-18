@@ -375,6 +375,12 @@ def get_volume(conn: sqlite3.Connection, volume_id: str) -> Row | None:
     return conn.execute("SELECT * FROM volumes WHERE volume_id = ?", (volume_id,)).fetchone()
 
 
+def set_volume_label(conn: sqlite3.Connection, volume_id: str, label: str) -> bool:
+    """Rename a volume in the catalog only (its nickname). Nothing on the drive changes. False if it is unknown."""
+    cur = conn.execute("UPDATE volumes SET label = ? WHERE volume_id = ?", (label, volume_id))
+    return cur.rowcount > 0
+
+
 def meta_scan_status(conn: sqlite3.Connection) -> dict[str, tuple[int, int]]:
     """Per volume: ``(groups, scanned)``, counting the same groups ``meta scan`` reads (their primary file is indexed
     or verified there). A group is scanned once it has a ``group_meta`` row."""

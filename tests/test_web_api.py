@@ -899,3 +899,23 @@ def test_runner_awake_defaults() -> None:
     assert web.TaskRunner([sys.executable]).awake_argv is None  # custom engine (tests): off
     assert web.TaskRunner(awake_argv=None).awake_argv is None
     assert web.TaskRunner().awake_argv == web.default_awake_argv()
+
+
+def test_label_renames_a_drive_in_the_catalog_only(srv: Client) -> None:
+    before = sorted(p.name for p in (srv.root / "WORK").iterdir()) if (srv.root / "WORK").exists() else []
+    assert srv.call("POST", "/api/volumes/vol-work/label", {"label": "  Field   SSD "}) == (
+        200, {"volume_id": "vol-work", "label": "Field SSD"})
+    _, body = srv.call("GET", "/api/drives")
+    assert [d["label"] for d in body["drives"] if d["volume_id"] == "vol-work"] == ["Field SSD"]
+    # The drive itself is untouched: same folder, same contents.
+    after = sorted(p.name for p in (srv.root / "WORK").iterdir()) if (srv.root / "WORK").exists() else []
+    assert after == before
+
+    assert srv.call("POST", "/api/volumes/vol-work/label", {"label": "   "})[0] == 400
+    assert srv.call("POST", "/api/volumes/vol-work/label", {"label": "x" * 65})[0] == 400
+    assert srv.call("POST", "/api/volumes/vol-work/label", {"label": 3})[0] == 400
+    assert srv.call("POST", "/api/volumes/vol-work/label", {"label": "a\x07b"})[0] == 400
+    assert srv.call("POST", "/api/volumes/nope/label", {"label": "X"})[0] == 404
+    assert srv.call("GET", "/api/volumes/vol-work/label")[0] == 405
+    _, body = srv.call("GET", "/api/volumes/vol-work")
+    assert body["drive"]["label"] == "Field SSD"

@@ -1,6 +1,6 @@
 import { animate, AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { fmtInt } from '../lib/format';
+import { fmtInt, fsLabel } from '../lib/format';
 import { roleKey, roleLabel, type RoleKey } from '../lib/labels';
 import { springs } from '../lib/motion';
 
@@ -46,6 +46,88 @@ export const ROLE_DOT: Record<RoleKey | 'new', string> = {
   unset: 'bg-skip',
   new: 'bg-skip',
 };
+
+/** The drive's file system (APFS, exFAT, FAT32, NTFS…) as a small monospace tag; nothing when unknown. */
+export function FsPill({ fs, className = '' }: { fs: string | null | undefined; className?: string }) {
+  const text = fsLabel(fs);
+  if (!text) return null;
+  return (
+    <span
+      title={`File system: ${text}`}
+      className={`inline-flex shrink-0 items-center rounded border border-line-strong px-1 font-mono text-[10px] leading-4 text-muted ${className}`}
+    >
+      {text}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------- selectable tiles
+
+/**
+ * A tile or row that filters a list. Hovering lifts it and strengthens its border; the selected one carries an
+ * accent ring that glides between tiles of the same `group` (a shared layoutId). Clicking the selected one clears it.
+ */
+export function SelectTile({
+  group,
+  active,
+  onClick,
+  children,
+  className = '',
+  row = false,
+  title,
+}: {
+  group: string;
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+  className?: string;
+  row?: boolean;
+  title?: string;
+}) {
+  const reduce = useReducedMotion();
+  return (
+    <motion.button
+      type="button"
+      aria-pressed={active}
+      title={title ?? (active ? 'Showing these below · click to show all files' : 'Click to show these files below')}
+      onClick={onClick}
+      whileHover={reduce ? undefined : { y: row ? -1 : -2 }}
+      whileTap={reduce ? undefined : { scale: 0.985 }}
+      transition={springs.snappy}
+      className={`group/tile relative w-full cursor-pointer rounded-xl border text-left transition-[background-color,border-color,box-shadow] duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 ${
+        active
+          ? 'border-transparent bg-accent/[0.06]'
+          : 'border-line bg-raised/40 hover:border-line-strong hover:bg-raised/80 hover:shadow-[0_6px_18px_-10px_rgb(0_0_0/0.45)]'
+      } ${row ? 'px-3 py-2.5' : 'p-4'} ${className}`}
+    >
+      {active && (
+        <motion.span
+          layoutId={`select-ring-${group}`}
+          transition={reduce ? { duration: 0 } : springs.snappy}
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 rounded-xl border-2 border-accent/70 shadow-[0_0_0_4px_rgb(var(--c-accent)/0.10)]"
+        />
+      )}
+      {!row && (
+        <span
+          aria-hidden="true"
+          className={`pointer-events-none absolute right-3 top-3 inline-flex items-center gap-1 rounded-full px-1.5 text-2xs transition-opacity duration-200 ${
+            active ? 'bg-accent/15 text-accent opacity-100' : 'text-faint opacity-0 group-hover/tile:opacity-100'
+          }`}
+        >
+          {active ? (
+            <>
+              Shown <Icon name="x" size={9} />
+            </>
+          ) : (
+            'Show'
+          )}
+        </span>
+      )}
+      {children}
+    </motion.button>
+  );
+}
 
 export function RolePill({ role, isNew = false, text }: { role: string | null; isNew?: boolean; text?: string }) {
   const key = isNew ? 'new' : roleKey(role);

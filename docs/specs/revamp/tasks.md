@@ -132,3 +132,39 @@ Rules for every task:
     one photo selected → "774 related photos (taken within 1 h of each other)", 299 loaded tiles outlined, "Save to
     1 + 774 related" saved a keyword to all 775 (checked through the API). Note: at 1 h a busy day chains into one
     session; the user picks 15 min for tighter groups. Selected photos missing from the fetch still anchor the session.
+
+- [x] 12. Sidebar: file system tag on every drive
+  - ID: rv-12 (user ask, 2026-11-18)
+  - Each sidebar drive row and the drive page header show the file system as a small monospace tag
+    (`fsLabel`: apfs → APFS, exfat → exFAT, msdos → FAT32, ntfs → NTFS, hfs → HFS+; unknown upper-cased, none hidden).
+  - Verify: `cd web && npm test` (format.test.ts).
+  - Result (2026-11-18): `cd web && npm test` → 33 passed; typecheck clean.
+
+- [x] 13. Clickable tiles look clickable, and the selection glides
+  - ID: rv-13 (user ask, 2026-11-18)
+  - One `SelectTile` (bits.tsx) for every tile that filters a list: the drive page's state tiles, its copies tiles
+    ("On other drives", "Only on this drive", "Duplicated on this drive") and per-drive copy rows, and the Cards
+    tier tiles. Hover lifts the tile, strengthens its border and shows "Show"; the selected one carries an accent
+    ring that slides between siblings (Framer Motion `layoutId`, instant under reduced motion) and a "Shown ×"
+    tag; clicking it again clears the filter.
+  - Verify: `cd web && npm run typecheck`; **[user]** visual check.
+  - Result (2026-11-18): `npm run typecheck` → clean; the user looked at it on seeded data ("looks good").
+
+- [x] 14. Rename a drive in PhotoVault
+  - ID: rv-14 (user ask, 2026-11-18). Covers the display half of vn-1; vn-2 (renaming the volume on disk) stays open.
+  - `POST /api/volumes/<id>/label {label}` sets `volumes.label` only (trimmed, 1–64 characters, no control
+    characters); nothing on the drive changes, so Lightroom paths are safe. The drive page title has Rename
+    (or double-click): Enter saves, Esc cancels. When the nickname differs from the mount's name, the header shows
+    "Volume name on disk: <name>".
+  - Verify: `uv run pytest tests/test_web_api.py -q -k label`
+  - Result (2026-11-18): `uv run pytest -q` → 530 passed, 4 skipped. Out of scope: renaming the volume on disk (vn-2).
+
+- [x] 15. The drive list loads fast
+  - ID: rv-15 (user ask, 2026-11-18; D-068)
+  - `/api/drives` took about 2 s with six mounts, and `/api/cards` and each drive page paid it again: every mount
+    ran `diskutil info` one after another. `scan_mounts` now probes in parallel, and `volumes._diskutil_info`
+    caches the default runner's successful answers for 10 min per (mount path, device id). Markers and DCIM are
+    read fresh on every probe; an injected runner (tests) and failures are never cached.
+  - Verify: `uv run pytest tests/test_volumes.py -q`
+  - Result (2026-11-18): `uv run pytest -q` → 532 passed, 4 skipped. On a copy of the real catalog with no mounts,
+    the drive list's catalog queries take about 0.3 s (`volume_last_steps`, `meta_scan_status`); left as is.

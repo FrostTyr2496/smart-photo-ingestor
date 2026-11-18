@@ -1,12 +1,13 @@
 import { motion, useReducedMotion } from 'framer-motion';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { CountUp, Disclosure, Icon, RolePill } from '../components/bits';
+import { CountUp, Disclosure, FsPill, Icon, RolePill, SelectTile } from '../components/bits';
 import { cameraOptions, CopiesCell, copyOptions, FileTable, FilterBar, Pager, type Column } from '../components/FileList';
 import { ProgressBar } from '../components/ProgressBar';
 import { extVM, taskVM } from '../components/TaskCard';
 import { api } from '../lib/api';
 import { fmtBytes, fmtInt, plural } from '../lib/format';
 import {
+  baseName,
   driveName,
   liveStep,
   pace,
@@ -25,10 +26,10 @@ import { useStore } from '../lib/store';
 import type { Drive, DriveSummary, DriveUsage } from '../lib/types';
 
 const TILES = [
-  { key: 'indexed', label: 'Not hashed yet', tone: 'text-accent', ring: 'hover:border-accent/30' },
-  { key: 'verified', label: 'Hashed', tone: 'text-go', ring: 'hover:border-go/30' },
-  { key: 'mismatch', label: 'Unreadable', tone: 'text-err', ring: 'hover:border-err/30' },
-  { key: 'missing', label: 'Missing', tone: 'text-maybe', ring: 'hover:border-maybe/30' },
+  { key: 'indexed', label: 'Not hashed yet', tone: 'text-accent' },
+  { key: 'verified', label: 'Hashed', tone: 'text-go' },
+  { key: 'mismatch', label: 'Unreadable', tone: 'text-err' },
+  { key: 'missing', label: 'Missing', tone: 'text-maybe' },
 ] as const;
 
 const FILE_PAGE = 200;
@@ -268,50 +269,129 @@ function UsageList({ title, dot, total, parts }: { title: string; dot: string; t
   );
 }
 
+/** A count tile that filters the file list below; `group` lets the selection ring glide between its siblings. */
 function Tile({
   label,
-  files,
-  bytes,
+  value,
+  sub,
   tone,
-  className = '',
+  group,
   onClick,
-  active = false,
+  active,
 }: {
   label: string;
-  files: number;
-  bytes: number;
+  value: number;
+  sub: string;
   tone: string;
-  className?: string;
-  onClick?: () => void;
-  active?: boolean;
+  group: string;
+  onClick: () => void;
+  active: boolean;
 }) {
-  const body = (
-    <>
+  return (
+    <SelectTile group={group} active={active} onClick={onClick}>
       <p className={`text-sm ${tone}`}>{label}</p>
       <p className="mt-1 text-2xl font-semibold tracking-tight">
-        <CountUp value={files} />
+        <CountUp value={value} />
       </p>
-      <p className="mt-0.5 font-mono text-2xs text-muted">{fmtBytes(bytes)}</p>
-    </>
+      <p className="mt-0.5 font-mono text-2xs text-muted">{sub}</p>
+    </SelectTile>
   );
-  if (onClick) {
-    return (
-      <motion.button
-        type="button"
-        whileHover={{ y: -2 }}
-        transition={springs.snappy}
-        aria-pressed={active}
-        onClick={onClick}
-        className={`rounded-xl border p-4 text-left ${active ? 'border-accent/50 bg-accent/[0.07]' : `border-line bg-raised/40 ${className}`}`}
-      >
-        {body}
-      </motion.button>
-    );
-  }
+}
+
+/**
+ * The drive's name, editable in place. Renaming changes only the nickname in the catalog, so it is safe at any time:
+ * the volume on disk, its files and any Lightroom paths stay as they are. The volume's own name shows underneath
+ * when the two differ (vn-1).
+ */
+function DriveTitle({ drive }: { drive: Drive }) {
+  const { renameDrive } = useStore();
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState('');
+  const [saving, setSaving] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const name = driveName(drive);
+  const volName = drive.local ? '' : baseName(drive.mount);
+  const canRename = Boolean(drive.volume_id);
+
+  useEffect(() => {
+    if (editing) inputRef.current?.select();
+  }, [editing]);
+  useEffect(() => setEditing(false), [drive.volume_id]);
+
+  const start = () => {
+    if (!canRename) return;
+    setText(name);
+    setEditing(true);
+  };
+  const save = async () => {
+    const next = text.trim();
+    if (!next || next === name) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    const ok = await renameDrive(drive, next);
+    setSaving(false);
+    if (ok) setEditing(false);
+  };
+
   return (
-    <motion.div whileHover={{ y: -2 }} transition={springs.snappy} className={`rounded-xl border border-line bg-raised/40 p-4 ${className}`}>
-      {body}
-    </motion.div>
+    <div>
+      <div className="flex items-center gap-2.5">
+        {editing ? (
+          <form
+            className="flex min-w-0 flex-1 items-center gap-1.5"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void save();
+            }}
+          >
+            <input
+              ref={inputRef}
+              value={text}
+              maxLength={64}
+              disabled={saving}
+              aria-label="Drive name"
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setEditing(false);
+              }}
+              className="h-9 min-w-0 max-w-md flex-1 text-lg font-semibold"
+            />
+            <button type="submit" className="btn-primary h-8" disabled={saving || !text.trim()}>
+              <Icon name="check" size={12} /> {saving ? 'Saving…' : 'Save'}
+            </button>
+            <button type="button" className="btn-ghost h-8" disabled={saving} onClick={() => setEditing(false)}>
+              Cancel
+            </button>
+          </form>
+        ) : (
+          <>
+            <h1 className="truncate text-2xl font-semibold tracking-tight" onDoubleClick={start} title={canRename ? 'Double-click to rename' : undefined}>
+              {name}
+            </h1>
+            {canRename && (
+              <button type="button" className="btn-ghost h-7 shrink-0 px-2 text-xs" onClick={start} title="Rename this drive in PhotoVault">
+                <Icon name="edit" size={12} /> Rename
+              </button>
+            )}
+          </>
+        )}
+        <RolePill role={drive.role} />
+      </div>
+      {editing ? (
+        <p className="mt-1 text-xs text-faint">
+          Changes the name PhotoVault shows. The drive itself, its files and Lightroom's paths are not touched. Enter saves, Esc cancels.
+        </p>
+      ) : (
+        volName &&
+        volName !== name && (
+          <p className="mt-0.5 text-xs text-faint" title="The name macOS shows in Finder">
+            Volume name on disk: <span className="font-mono text-muted">{volName}</span>
+          </p>
+        )
+      )}
+    </div>
   );
 }
 
@@ -355,6 +435,14 @@ export function DriveView({ id }: { id: string }) {
     patchFilter({ state: filter.state === key ? '' : key });
     filesRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
+  // Clicking a copies tile or drive row sets the Copies filter (clicking again clears it) and scrolls to the list.
+  const pickCopies = (v: string) => {
+    const cur = filter.other ? `on:${filter.other}` : filter.copies;
+    const next = cur === v ? '' : v;
+    patchFilter(next.startsWith('on:') ? { copies: '', other: next.slice(3) } : { copies: next, other: '' });
+    filesRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  const curCopies = filter.other ? `on:${filter.other}` : filter.copies;
   const loadFiles = useCallback(async () => {
     const p = new URLSearchParams({ limit: String(FILE_PAGE), offset: String(filter.offset) });
     if (filter.state) p.set('state', filter.state);
@@ -458,16 +546,14 @@ export function DriveView({ id }: { id: string }) {
       <section className="card p-5">
         <div className="flex flex-wrap items-start gap-3">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2.5">
-              <h1 className="truncate text-2xl font-semibold tracking-tight">{driveName(drive)}</h1>
-              <RolePill role={drive.role} />
-            </div>
+            <DriveTitle drive={drive} />
             <p className="mt-1 flex items-center gap-2 text-sm text-muted">
               <span className={`h-2 w-2 rounded-full ${drive.mounted ? 'bg-go' : 'bg-skip'}`} />
               {drive.mounted ? 'Connected' : 'Not connected'}
               <span className="text-faint">·</span>
+              <FsPill fs={drive.fs} />
               <span className="font-mono text-xs">
-                {[drive.fs, drive.size && `${drive.size} total`, drive.free && `${drive.free} free`].filter(Boolean).join(' · ')}
+                {[drive.size && `${drive.size} total`, drive.free && `${drive.free} free`].filter(Boolean).join(' · ')}
               </span>
             </p>
           </div>
@@ -557,11 +643,11 @@ export function DriveView({ id }: { id: string }) {
             return (
               <Tile
                 key={t.key}
+                group="state"
                 label={t.label}
-                files={x.files}
-                bytes={x.bytes}
+                value={x.files}
+                sub={fmtBytes(x.bytes)}
                 tone={t.tone}
-                className={t.ring}
                 active={filter.state === t.key}
                 onClick={() => pickState(t.key)}
               />
@@ -575,27 +661,39 @@ export function DriveView({ id }: { id: string }) {
         <section className="card p-5">
           <h2 className="text-lg font-semibold">Copies on other drives</h2>
           <div className="mt-3 grid gap-3 md:grid-cols-3">
-            <Tile label="On other drives" files={copies.elsewhere.files} bytes={copies.elsewhere.bytes} tone="text-go" />
-            <Tile label="Only on this drive" files={copies.only_here.files} bytes={copies.only_here.bytes} tone="text-maybe" />
-            <motion.div whileHover={{ y: -2 }} transition={springs.snappy} className="rounded-xl border border-line bg-raised/40 p-4">
-              <p className="text-sm text-accent">Duplicated on this drive</p>
-              <p className="mt-1 text-2xl font-semibold tracking-tight">
-                <CountUp value={copies.dup_here.assets} />
-              </p>
-              <p className="mt-0.5 font-mono text-2xs text-muted">{fmtBytes(copies.dup_here.extra_bytes)} in extra copies</p>
-            </motion.div>
+            <Tile group="copies" label="On other drives" value={copies.elsewhere.files} sub={fmtBytes(copies.elsewhere.bytes)} tone="text-go" onClick={() => pickCopies('elsewhere')} active={curCopies === 'elsewhere'} />
+            <Tile group="copies" label="Only on this drive" value={copies.only_here.files} sub={fmtBytes(copies.only_here.bytes)} tone="text-maybe" onClick={() => pickCopies('only_here')} active={curCopies === 'only_here'} />
+            <Tile
+              group="copies"
+              label="Duplicated on this drive"
+              value={copies.dup_here.assets}
+              sub={`${fmtBytes(copies.dup_here.extra_bytes)} in extra copies`}
+              tone="text-accent"
+              onClick={() => pickCopies('dup_here')}
+              active={curCopies === 'dup_here'}
+            />
           </div>
           {copies.by_volume.length > 0 && (
             <ul className="mt-3 flex flex-col gap-1.5">
               {copies.by_volume.map((v, i) => (
-                <motion.li key={v.volume_id} {...rise(i)} className="flex items-center gap-3 rounded-xl border border-line bg-raised/30 px-3 py-2.5">
-                  <RolePill role={v.role} />
-                  <span className="w-28 shrink-0 truncate text-sm font-medium">{v.label}</span>
-                  <span className={`shrink-0 text-xs ${v.mounted ? 'text-go' : 'text-faint'}`}>{v.mounted ? 'Connected' : 'Not connected'}</span>
-                  <ProgressBar value={v.files / maxOther} size="xs" tone="muted" className="flex-1" label={`Share on ${v.label}`} />
-                  <span className="shrink-0 font-mono text-2xs text-muted">
-                    {plural(v.files, 'file')} · {fmtBytes(v.bytes)}
-                  </span>
+                <motion.li key={v.volume_id} {...rise(i)}>
+                  <SelectTile
+                    group="copies"
+                    row
+                    active={curCopies === `on:${v.volume_id}`}
+                    onClick={() => pickCopies(`on:${v.volume_id}`)}
+                    title={curCopies === `on:${v.volume_id}` ? 'Showing these below · click to show all files' : `Show the files that also have a copy on ${v.label}`}
+                    className="flex items-center gap-3"
+                  >
+                    <RolePill role={v.role} />
+                    <span className="w-28 shrink-0 truncate text-sm font-medium">{v.label}</span>
+                    <span className={`shrink-0 text-xs ${v.mounted ? 'text-go' : 'text-faint'}`}>{v.mounted ? 'Connected' : 'Not connected'}</span>
+                    <ProgressBar value={v.files / maxOther} size="xs" tone="muted" className="flex-1" label={`Share on ${v.label}`} />
+                    <span className="shrink-0 font-mono text-2xs text-muted">
+                      {plural(v.files, 'file')} · {fmtBytes(v.bytes)}
+                    </span>
+                    <Icon name="chevron" size={11} className="shrink-0 text-faint transition-transform duration-200 group-hover/tile:translate-x-0.5" />
+                  </SelectTile>
                 </motion.li>
               ))}
             </ul>

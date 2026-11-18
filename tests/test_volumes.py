@@ -182,3 +182,44 @@ def test_probe_is_frozen(tmp_path: Path) -> None:
     p = _probe(_mount(tmp_path, "x"))
     with pytest.raises(dataclasses.FrozenInstanceError):
         p.name = "y"  # type: ignore[misc]
+
+
+def test_diskutil_info_is_cached_per_mount_and_device(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import subprocess as sp
+
+    calls: list[list[str]] = []
+
+    def counting_run(argv, **kwargs):
+        calls.append(argv)
+        return sp.CompletedProcess(argv, 0, b"", b"")
+
+    monkeypatch.setattr(sp, "run", counting_run)
+    volumes.clear_probe_cache()
+    a, b = tmp_path / "A", tmp_path / "B"
+    a.mkdir()
+    b.mkdir()
+    volumes._diskutil_info(a, sp.run)
+    volumes._diskutil_info(a, sp.run)
+    assert len(calls) == 1  # second call served from the cache
+    volumes._diskutil_info(b, sp.run)
+    assert len(calls) == 2  # another mount path is probed
+    real_stat = volumes.os.stat
+    monkeypatch.setattr(volumes.os, "stat", lambda p, *a_, **k: type("S", (), {"st_dev": real_stat(p).st_dev + 1})())
+    volumes._diskutil_info(a, sp.run)
+    assert len(calls) == 3  # a different device at the same path is probed again
+    volumes.clear_probe_cache()
+
+
+def test_diskutil_info_never_caches_an_injected_runner_or_a_failure(tmp_path: Path) -> None:
+    import subprocess as sp
+
+    calls: list[int] = []
+
+    def fail(argv, **kwargs):
+        calls.append(1)
+        return sp.CompletedProcess(argv, 1, b"", b"nope")
+
+    volumes.clear_probe_cache()
+    volumes._diskutil_info(tmp_path, fail)
+    volumes._diskutil_info(tmp_path, fail)
+    assert len(calls) == 2

@@ -57,6 +57,8 @@ interface Store {
   dismissToast: (id: number) => void;
   ask: (q: Omit<ConfirmAsk, 'resolve'>) => Promise<boolean>;
   setIgnored: (d: Drive, ignored: boolean) => Promise<void>;
+  /** Give a set-up drive a new nickname (catalog only; the volume on disk keeps its name). True when saved. */
+  renameDrive: (d: Drive, label: string) => Promise<boolean>;
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -443,6 +445,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [toast],
   );
 
+  const renameDrive = useCallback(
+    async (d: Drive, label: string) => {
+      if (!d.volume_id) return false;
+      try {
+        const r = await api<{ label: string }>('POST', `/api/volumes/${encodeURIComponent(d.volume_id)}/label`, { label });
+        setDrives((list) => list.map((x) => (x.volume_id === d.volume_id ? { ...x, label: r.label } : x)));
+        toast(`Renamed to ${r.label}. Only the name in PhotoVault changed; the drive itself is untouched.`);
+        return true;
+      } catch (err) {
+        toast((err as Error).message, 'err');
+        return false;
+      }
+    },
+    [toast],
+  );
+
   const value: Store = {
     loaded,
     drives,
@@ -466,6 +484,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     dismissToast,
     ask,
     setIgnored,
+    renameDrive,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

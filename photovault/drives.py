@@ -8,6 +8,7 @@ more the web API needs. Only mounted volumes appear here; the web layer adds rem
 from __future__ import annotations
 
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -34,13 +35,14 @@ def scan_mounts(conn: Any, root: Path, emit: Any, *, include_mac: bool = True) -
     """Probe each mounted drive under `root`, then the Mac folder (D-047) when it exists. Probe failures become
     `warning` events and are skipped."""
     rows: list[dict] = []
-    for mount in sorted(Path(root).iterdir()):
-        if mount.is_symlink() or not mount.is_dir() or mount.name in SKIP_MOUNTS:
-            continue
-        try:
-            p = volumes.probe(mount)
-        except (RuntimeError, OSError, ValueError) as exc:
-            emit.emit("warning", code="probe", message=f"{mount}: {exc}")
+    mounts = [m for m in sorted(Path(root).iterdir())
+              if not m.is_symlink() and m.is_dir() and m.name not in SKIP_MOUNTS]
+    # Probes are independent subprocess calls, so they run side by side; results keep the sorted order.
+    with ThreadPoolExecutor(max_workers=max(1, min(8, len(mounts)))) as pool:
+        probed = list(pool.map(_try_probe, mounts))
+    for mount, p in zip(mounts, probed):
+        if isinstance(p, Exception):
+            emit.emit("warning", code="probe", message=f"{mount}: {p}")
             continue
         row = repo.find_volume(conn, marker_id=p.marker_id, da_volume_uuid=p.da_volume_uuid)
         try:
@@ -59,6 +61,13 @@ def scan_mounts(conn: Any, root: Path, emit: Any, *, include_mac: bool = True) -
     if folder is not None:
         rows.append(_mac_row(conn, folder, emit))
     return rows
+
+
+def _try_probe(mount: Path) -> volumes.VolumeProbe | Exception:
+    try:
+        return volumes.probe(mount)
+    except (RuntimeError, OSError, ValueError) as exc:
+        return exc
 
 
 def _mac_row(conn: Any, folder: Path, emit: Any) -> dict:

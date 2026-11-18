@@ -24,10 +24,10 @@ Reference docs:
 - `docs/legacy/handoff-v0.md`: v0 findings, including the ExifTool benchmarks.
 - `docs/UTILITY_ASSESSMENT.md`: does the app have real utility yet, the live-run findings, candidate tasks.
 
-## Now (2026-11-17)
+## Now (2026-11-18)
 - **Card milestone built:** the CLI imports a card onto WORKING with verified copies and answers `card-status`
   (`drives`, `volumes assign`, `ingest [--dry-run]`, `resume`, `card-status`, `jobs`). Guides:
-  `docs/user/CARD_WORKFLOW.md`, `docs/user/INDEX_WORKFLOW.md`. `uv run pytest -q` → 442 passed, 4 skipped (`live`).
+  `docs/user/CARD_WORKFLOW.md`, `docs/user/INDEX_WORKFLOW.md`. `uv run pytest -q` → 532 passed, 4 skipped (`live`).
 - Index done: idx-1..4, idx-11 (D-044), idx-13 (D-063: `index` counts non-photo files per drive, schema V3; the drive
   page shows photography / not / unaccounted / free). Flats 1 is indexed and hashed; its duplicate report found 113.5 GB
   reclaimable (`docs/private/IDX5_FLATS1_RESULTS.md`). `lrcat mark` not run on a real catalog yet (idx-3 unverified).
@@ -68,8 +68,8 @@ task's commit:
 ```
 
 ## Next
-0. **[user] visual check of the new UI (rv-1..rv-7)**: restart `serve` (it migrates the catalog to V4 in well under a
-   second). In Photos, connect a drive, check that thumbnails load, then save a location and keywords on a few photos. Also the older
+0. **[user] visual check of the new UI (rv-1..rv-7, rv-12..15)**: restart `serve` (it picks up drive rename and the
+   faster drive list). In Photos, connect a drive, check that thumbnails load, then save a location and keywords on a few photos. Also the older
    **[user] visual check (ui-5..15, card-3):** restart `uv run photovault serve` (it picks up ui-11..15), try the
    Tasks home page, the sidebar groups, drives, cards, a step's Run button (e.g. Hash) and the editor (Photos).
 1. **[user] re-index Big Boy Old** (`uv run photovault index "/Volumes/Big Boy Old"`), then open its drive page.
@@ -84,9 +84,8 @@ task's commit:
    met-2 (web view); met-4 after bk-1.
 
 ## Waiting on user
-- **sp-1 (phone locations), 6 questions in `docs/specs/phone-gps/tasks.md`:** which terminal gets Full Disk Access;
-  one-off or ongoing sync; osxphotos as an external fallback; store place names (schema change); quit Photos while
-  copying its database; exclude shared albums and screenshots.
+- **Phone locations shelved (D-067):** sp-2..sp-4 specs, osxphotos and the handoff are in `git stash` ("shelved:
+  sp-2/sp-3/rv-10/sp-4 …"); only schema V5 is committed (the live catalog is V5). Say when to resume (`git stash apply`).
 - **Push the archive branch?** Run `git push -u origin archive/v0-cli-2026-11-11` if you want it on GitHub.
   (`main` is pushed.)
 - **Corpus gaps (fnd-7):** the wish list still lacks a Z6II pair, a night run, a GoPro set and an iPhone
@@ -103,11 +102,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-068 (agent, rv-12..15): rename = catalog label only; `diskutil` probes run in parallel and are cached per mount.
+- D-067 (user): sp-2..sp-4 work shelved in `git stash`; schema V5 committed alone (the live catalog was already V5).
+- D-066 (user, sp-1): one iPhone import via osxphotos; place names in catalog + XMP (V5); shoots from camera + phone.
 - D-065 (user, rv-9/sp-1): related photos = the selection's capture session; phone GPS spec `phone-gps`, spike recommends reading the Photos DB copy.
 - D-064 (user, rv-7): Photos rebuilt as a day timeline + inspector; V4 `assets(group_id)` index; Leaflet, OSM tiles, search on Enter.
-- D-063 (user, idx-13): non-photo files counted per drive in `volume_usage` (V3); videos split by camera signals.
-- D-062 (user, rv-6): the new UI is the only UI; Photos is its own task rv-7; slices go to Haiku/Sonnet agents.
-- D-061 (agent, rv-2): a hash shows the drive's progress (files hashed before the run count); pace stays the run's.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

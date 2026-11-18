@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { useState } from 'react';
-import { Disclosure, Icon, RolePill, ROLE_DOT } from '../components/bits';
+import { Disclosure, FsPill, Icon, RolePill, ROLE_DOT } from '../components/bits';
 import { RefsDialog } from './RefsDialog';
 import { ProgressBar } from '../components/ProgressBar';
 import { extVM, FinishedRow, RunningCard, taskVM } from '../components/TaskCard';
@@ -69,6 +69,7 @@ function DriveRow({ d, active }: { d: Drive; active: boolean }) {
         >
           {d.ignored ? 'Unignore' : 'Ignore'}
         </button>
+        <FsPill fs={d.fs} />
         <RolePill role={d.role} isNew={isNew} />
       </div>
       <p className={`mt-1 truncate pl-4 text-xs ${status.tone === 'running' ? 'text-accent' : status.tone === 'warn' ? 'text-maybe' : 'text-muted'}`}>

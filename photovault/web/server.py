@@ -670,7 +670,7 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
             raise NotFound(str(exc)) from exc
         return 200, {"suggestions": found}
 
-    m = re.fullmatch(r"/api/volumes/([^/]+)(?:/(files|reveal))?", path)
+    m = re.fullmatch(r"/api/volumes/([^/]+)(?:/(files|reveal|label))?", path)
     if m:
         return _volume_route(app, conn, method, m.group(1), m.group(2), query, body)
 
@@ -724,6 +724,10 @@ def _volume_route(app: WebApp, conn, method: str, volume_id: str, sub: str | Non
         if method != "POST":
             return 405, {"error": "method not allowed"}
         return 200, _reveal(app, conn, volume_id, _body_dict(body))
+    if sub == "label":
+        if method != "POST":
+            return 405, {"error": "method not allowed"}
+        return 200, _set_label(conn, volume_id, _body_dict(body))
     if method != "GET":
         return 405, {"error": "method not allowed"}
     if repo.get_volume(conn, volume_id) is None:
@@ -747,6 +751,27 @@ def _volume_route(app: WebApp, conn, method: str, volume_id: str, sub: str | Non
         return 200, {"files": [_file_row(r, names) for r in rows], "limit": limit, "offset": offset,
                      "total": repo.volume_files_count(conn, volume_id, **filters)}
     return 200, _volume_summary(app, conn, volume_id)
+
+
+VOLUME_LABEL_MAX = 64
+
+
+def _set_label(conn, volume_id: str, body: dict) -> dict:
+    """Give a drive a new nickname in the catalog. The volume on disk keeps its name (renaming that is vn-2)."""
+    label = body.get("label")
+    if not isinstance(label, str):
+        raise BadRequest("label must be a string")
+    label = " ".join(label.split())  # trim and collapse whitespace; also drops tabs and newlines
+    if not label:
+        raise BadRequest("label may not be empty")
+    if len(label) > VOLUME_LABEL_MAX:
+        raise BadRequest(f"label may be at most {VOLUME_LABEL_MAX} characters")
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in label):
+        raise BadRequest("label contains a control character")
+    with repo.transaction(conn):
+        if not repo.set_volume_label(conn, volume_id, label):
+            raise NotFound("unknown drive")
+    return {"volume_id": volume_id, "label": label}
 
 
 def _card_files(app: WebApp, conn, volume_id: str, query: dict) -> dict:

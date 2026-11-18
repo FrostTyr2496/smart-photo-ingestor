@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion';
 import { useCallback, useEffect, useState } from 'react';
-import { CountUp, Disclosure, Icon } from '../components/bits';
+import { CountUp, Disclosure, Icon, SelectTile } from '../components/bits';
 import { cameraOptions, copyOptions, CopiesCell, FileTable, FilterBar, Pager, TierBar, tierCounts, TierPill, type Column } from '../components/FileList';
 import { api } from '../lib/api';
 import { fmtBytes, fmtInt, plural, relTime } from '../lib/format';
@@ -285,21 +285,13 @@ function CardDetail({ id, onImport }: { id: string; onImport: (c: Card) => void 
           {TIER_ORDER.map((t) => {
             const on = filter.tier === t;
             return (
-              <motion.button
-                key={t}
-                type="button"
-                whileHover={{ y: -2 }}
-                transition={springs.snappy}
-                aria-pressed={on}
-                onClick={() => set({ tier: on ? '' : t })}
-                className={`rounded-xl border p-4 text-left ${on ? 'border-accent/50 bg-accent/[0.07]' : 'border-line bg-raised/40 hover:border-line-strong'}`}
-              >
+              <SelectTile key={t} group="tier" active={on} onClick={() => set({ tier: on ? '' : t })}>
                 <p className={`text-sm ${TIER_TONE[t].text}`}>{TIER[t].label}</p>
                 <p className="mt-1 text-2xl font-semibold tracking-tight">
                   <CountUp value={c.counts[t].files} />
                 </p>
                 <p className="mt-0.5 font-mono text-2xs text-muted">{fmtBytes(c.counts[t].bytes)}</p>
-              </motion.button>
+              </SelectTile>
             );
           })}
         </div>

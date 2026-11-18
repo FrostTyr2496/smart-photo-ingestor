@@ -78,3 +78,23 @@ export function fmtLeft(sec: number): string {
   if (t < 3600) return `${Math.round(t / 60)} min left`;
   return `${Math.floor(t / 3600)}h ${Math.round((t % 3600) / 60)}m left`;
 }
+
+const FS_NAMES: Record<string, string> = {
+  apfs: 'APFS',
+  exfat: 'exFAT',
+  msdos: 'FAT32',
+  fat32: 'FAT32',
+  vfat: 'FAT32',
+  ntfs: 'NTFS',
+  hfs: 'HFS+',
+  'hfs+': 'HFS+',
+  smbfs: 'SMB',
+  afpfs: 'AFP',
+  nfs: 'NFS',
+};
+/** A drive's file system as people know it ("apfs" → "APFS", "msdos" → "FAT32"); '' when unknown. */
+export function fsLabel(fs: string | null | undefined): string {
+  const key = (fs || '').trim().toLowerCase();
+  if (!key) return '';
+  return FS_NAMES[key] ?? key.toUpperCase();
+}

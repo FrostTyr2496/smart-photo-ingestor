@@ -12,6 +12,8 @@ import plistlib
 import shutil
 import sqlite3
 import subprocess
+import threading
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -41,6 +43,39 @@ class VolumeProbe:
     internal: bool
     marker_id: str | None
     looks_like_card: bool
+
+
+# ``diskutil info`` takes 0.15-0.4 s per volume and its answer (file system, UUID, size) does not change while a
+# volume stays mounted, so the default runner's answers are kept for a while, keyed by mount path and device id
+# (a remount or a different disk at the same path gets a new device id). Markers and DCIM are always read fresh.
+DISKUTIL_TTL_S = 600.0
+_DISKUTIL_CACHE: dict[tuple[str, int], tuple[float, subprocess.CompletedProcess]] = {}
+_DISKUTIL_LOCK = threading.Lock()
+
+
+def _diskutil_info(path: Path, run) -> subprocess.CompletedProcess:
+    argv = ["diskutil", "info", "-plist", str(path)]
+    if run is not subprocess.run:  # an injected runner (tests) is never cached
+        return run(argv, capture_output=True, check=False)
+    try:
+        key = (str(path), os.stat(path).st_dev)
+    except OSError:
+        return run(argv, capture_output=True, check=False)
+    now = time.monotonic()
+    with _DISKUTIL_LOCK:
+        hit = _DISKUTIL_CACHE.get(key)
+    if hit is not None and now - hit[0] < DISKUTIL_TTL_S:
+        return hit[1]
+    result = run(argv, capture_output=True, check=False)
+    if result.returncode == 0:
+        with _DISKUTIL_LOCK:
+            _DISKUTIL_CACHE[key] = (now, result)
+    return result
+
+
+def clear_probe_cache() -> None:
+    with _DISKUTIL_LOCK:
+        _DISKUTIL_CACHE.clear()
 
 
 def looks_like_card(mount: Path) -> bool:
@@ -122,7 +157,7 @@ def probe_folder(folder: Path, *, run=subprocess.run) -> VolumeProbe:
     other folder on it), so it is found again only by its marker; it is never a card."""
     folder = Path(folder).expanduser()
     fs_type = ""
-    result = run(["diskutil", "info", "-plist", str(_containing_mount(folder))], capture_output=True, check=False)
+    result = _diskutil_info(_containing_mount(folder), run)
     if result.returncode == 0:
         try:
             fs_type = str(plistlib.loads(result.stdout).get("FilesystemType") or "").lower()
@@ -146,7 +181,7 @@ def probe(mount: Path, *, run=subprocess.run) -> VolumeProbe:
     mount = Path(mount)
     if is_folder_volume(mount):
         return probe_folder(mount, run=run)
-    result = run(["diskutil", "info", "-plist", str(mount)], capture_output=True, check=False)
+    result = _diskutil_info(mount, run)
     if result.returncode != 0:
         stderr = result.stderr.decode(errors="replace") if isinstance(result.stderr, bytes) else result.stderr
         raise RuntimeError(f"diskutil info failed for {mount}: {(stderr or '').strip() or result.returncode}")
