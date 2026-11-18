@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import argparse
-import shutil
 import signal
 import sqlite3
 import sys
 import uuid
+import webbrowser
 from pathlib import Path
 
 from photovault import meta, report, volumes
+from photovault.drives import CLI_DRIVE_KEYS, VOLUMES_ROOT, scan_mounts
+from photovault.web import server as web_server
 from photovault.catalog import db, repo
 from photovault.config import ConfigError, load_config
 from photovault.index import baseline_hash, index_volume, registered_volume
@@ -19,8 +21,6 @@ from photovault.lrcat import CatalogInUse, LrcatSchemaError, keys_on_volume, mar
 from photovault.protocol import EXIT_ERROR, EXIT_OK, EXIT_PAUSED, EXIT_RED, EXIT_USAGE, Emitter, human_bytes
 from photovault.status import card_status
 
-VOLUMES_ROOT = Path("/Volumes")
-SKIP_MOUNTS = {"Recovery", "Macintosh HD"}
 
 
 def _open(cfg) -> sqlite3.Connection:
@@ -43,25 +43,8 @@ def cmd_catalog_init(args, cfg, emit) -> int:
 
 def cmd_drives(args, cfg, emit) -> int:
     conn = _open(cfg)
-    rows = []
-    root = Path(args.root) if args.root else VOLUMES_ROOT
-    for mount in sorted(root.iterdir()):
-        if mount.is_symlink() or not mount.is_dir() or mount.name in SKIP_MOUNTS:
-            continue
-        try:
-            p = volumes.probe(mount)
-        except (RuntimeError, OSError, ValueError) as exc:
-            emit.emit("warning", code="probe", message=f"{mount}: {exc}")
-            continue
-        row = repo.find_volume(conn, marker_id=p.marker_id, da_volume_uuid=p.da_volume_uuid)
-        try:
-            free = human_bytes(shutil.disk_usage(mount).free)
-        except OSError:
-            free = "?"
-        role = row["role"] if row else ("CARD (new)" if p.looks_like_card else "unassigned")
-        rows.append({"mount": str(mount), "role": role, "label": row["label"] if row else "", "fs": p.fs_type,
-                     "size": human_bytes(p.capacity_bytes or 0), "free": free})
-    emit.emit("result", drives=rows)
+    rows = scan_mounts(conn, Path(args.root) if args.root else VOLUMES_ROOT, emit)
+    emit.emit("result", drives=[{k: r[k] for k in CLI_DRIVE_KEYS} for r in rows])
     return EXIT_OK
 
 
@@ -291,6 +274,25 @@ def cmd_meta_set(args, cfg, emit) -> int:
     return EXIT_OK
 
 
+def cmd_serve(args, cfg, emit) -> int:
+    """Run the local web UI on 127.0.0.1 until Ctrl-C. Engine commands it starts are subprocesses of this CLI."""
+    _open(cfg)  # create and migrate the catalog once before the first request
+    app = web_server.WebApp(catalog_path=cfg.catalog_path, home=cfg.home, volumes_root=VOLUMES_ROOT,
+                            runner=web_server.TaskRunner())
+    httpd = web_server.make_server(app, port=args.port)
+    url = f"http://127.0.0.1:{httpd.server_address[1]}/"
+    emit.emit("progress", phase="serve", message=f"PhotoVault at {url} (Ctrl-C stops it)")
+    if not args.no_open:
+        webbrowser.open(url)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        httpd.server_close()
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="photovault", description="Verified card imports and a multi-drive catalog.")
     p.add_argument("--json", action="store_true", help="emit JSON lines (protocol v1)")
@@ -383,6 +385,11 @@ def build_parser() -> argparse.ArgumentParser:
     m_set.add_argument("--keyword-add", action="append", metavar="WORD", help="repeatable")
     m_set.add_argument("--time-shift", type=int, metavar="SECONDS", help="correct a body's clock by this many seconds")
     m_set.set_defaults(func=cmd_meta_set)
+
+    sv = sub.add_parser("serve", help="local web UI on 127.0.0.1 (Ctrl-C stops it)")
+    sv.add_argument("--port", type=int, default=8765)
+    sv.add_argument("--no-open", action="store_true", help="do not open the browser")
+    sv.set_defaults(func=cmd_serve)
 
     j = sub.add_parser("jobs", help="recent jobs")
     j.add_argument("--limit", type=int, default=20)

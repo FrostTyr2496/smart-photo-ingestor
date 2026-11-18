@@ -1,0 +1,48 @@
+"""Mounted-drive listing shared by `drives` (cli) and the web API (ui-4).
+
+`scan_mounts` is the loop `cmd_drives` always ran: every directory under `root` (default: the mounts folder)
+that is not a symlink or a system mount, probed read-only. Each row carries the keys `drives` prints plus a few
+more the web API needs. Only mounted volumes appear here; the web layer adds remembered-but-unplugged ones.
+"""
+
+from __future__ import annotations
+
+import shutil
+from pathlib import Path
+from typing import Any
+
+from photovault import volumes
+from photovault.catalog import repo
+from photovault.protocol import human_bytes
+
+VOLUMES_ROOT = Path("/" + "Volumes")
+SKIP_MOUNTS = {"Recovery", "Macintosh HD"}
+# The keys `photovault drives` prints (its output is unchanged).
+CLI_DRIVE_KEYS = ("mount", "role", "label", "fs", "size", "free")
+
+
+def scan_mounts(conn: Any, root: Path, emit: Any) -> list[dict]:
+    """Probe each mounted drive under `root`. Probe failures become `warning` events and are skipped."""
+    rows: list[dict] = []
+    for mount in sorted(Path(root).iterdir()):
+        if mount.is_symlink() or not mount.is_dir() or mount.name in SKIP_MOUNTS:
+            continue
+        try:
+            p = volumes.probe(mount)
+        except (RuntimeError, OSError, ValueError) as exc:
+            emit.emit("warning", code="probe", message=f"{mount}: {exc}")
+            continue
+        row = repo.find_volume(conn, marker_id=p.marker_id, da_volume_uuid=p.da_volume_uuid)
+        try:
+            free = human_bytes(shutil.disk_usage(mount).free)
+        except OSError:
+            free = "?"
+        role = row["role"] if row else ("CARD (new)" if p.looks_like_card else "unassigned")
+        rows.append({
+            "mount": str(mount), "role": role, "label": row["label"] if row else "", "fs": p.fs_type,
+            "size": human_bytes(p.capacity_bytes or 0), "free": free,
+            "volume_id": row["volume_id"] if row else None, "mounted": True,
+            "looks_like_card": p.looks_like_card,
+            "last_seen_at": row["last_seen_at"] if row else None,
+        })
+    return rows

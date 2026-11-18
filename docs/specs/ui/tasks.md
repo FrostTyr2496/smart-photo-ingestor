@@ -148,7 +148,7 @@ still naive, apply the `settings` value `default_offset` (default "+00:00"). The
   - Verify: `uv run pytest tests/test_geo.py tests/test_meta_cli.py -q`, then `uv run pytest -q`.
   - Known gap: a later `time_shift_s` does not move that group's own `catalog` geo point until `meta scan --rescan`.
 
-- [ ] 4. Local web server and JSON API
+- [x] 4. Local web server and JSON API
   - ID: ui-4 (after ui-3)
   - Files: `photovault/web/__init__.py`, `photovault/web/server.py`, `photovault/cli.py` (add `serve`),
     `tests/test_web_api.py`. Static files are ui-5's; create `photovault/web/static/index.html` as a
