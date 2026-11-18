@@ -168,6 +168,26 @@ const PATHS: Record<string, ReactNode> = {
       <path d="M11 9.5V13H3V5h3.5" />
     </>
   ),
+  pin: (
+    <>
+      <path d="M8 14s4.5-4.2 4.5-7.5a4.5 4.5 0 0 0-9 0C3.5 9.8 8 14 8 14z" />
+      <circle cx="8" cy="6.5" r="1.6" />
+    </>
+  ),
+  image: (
+    <>
+      <rect x="2" y="3" width="12" height="10" rx="1.5" />
+      <circle cx="5.5" cy="6.5" r="1" />
+      <path d="M14 10.5l-3.5-3.5L4 13" />
+    </>
+  ),
+  search: (
+    <>
+      <circle cx="7" cy="7" r="4" />
+      <path d="M10 10l3.5 3.5" />
+    </>
+  ),
+  edit: <path d="M10.5 3l2.5 2.5L6 12.5H3.5V10z" />,
 };
 
 export function Icon({ name, size = 14, className = '' }: { name: keyof typeof PATHS | string; size?: number; className?: string }) {

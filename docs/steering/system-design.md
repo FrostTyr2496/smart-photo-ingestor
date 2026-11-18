@@ -258,6 +258,17 @@ camera signal), `video_other`, `audio`, `image_other`, `documents`, `archives`, 
 `disk_used` (files = 0) holds the drive's used bytes from `statvfs` at the index; a Mac folder has none. The drive
 summary reports used − counted as "unaccounted" (system and hidden folders, unreadable files).
 
+## 5d. Catalog schema v4 (migration 4)
+
+Approved by the user on 2026-11-18 (rv-7, D-064). The SQL is the `V4` string in `photovault/catalog/migrations.py`:
+
+```sql
+CREATE INDEX assets_group ON assets (group_id, group_role);
+```
+
+An index only, no new column. Without it, finding each capture group's primary file scanned every asset per group,
+so the Photos list (`repo.list_groups`) never finished on a catalog of 60k groups.
+
 ## 6. Naming (D-004, D-005)
 
 - **File stem:** the template `M{num:04d}_{date}-{time}-{subsec}_{body}_{ident}`, with derivative suffixes kept.

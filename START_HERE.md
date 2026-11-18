@@ -47,7 +47,9 @@ Reference docs:
   The Mac folder (`mac_folder`, default `~/Sandbox`) is a drive (D-047).
 - **Web UI (D-059, D-062, spec `docs/specs/revamp`):** `uv run photovault serve` → `127.0.0.1:8765` is the React UI
   (rv-1..rv-6): tasks, drives with file lists, cards, new-drive setup, settings, dev palette picker. Build committed
-  under `photovault/web/static/next/`; the classic UI is deleted. Photos is rv-7, its own task (it did not work).
+  under `photovault/web/static/next/`; the classic UI is deleted (rv-8 cleaned up leftovers). **Photos (rv-7, D-064):** a
+  timeline by day with an inspector (map, GPS suggestions, place search, credit, keywords, clock shift); schema V4
+  adds the `assets(group_id)` index that the old grid lacked. Leaflet added to `web/`.
 - Hooks: `guard_volumes.py` blocks agent writes and engine runs on `/Volumes`; live tests read mounts only under
   `-m live` (D-028, D-031). Old v0 code: local branch `archive/v0-cli-2026-11-11`. The repo is public: real-drive
   facts and photos stay in `docs/private/` and `testdata/` (gitignored).
@@ -65,7 +67,8 @@ task's commit:
 ```
 
 ## Next
-0. **[user] visual check of the new UI (rv-1..rv-6)**: restart `serve` (`/` now serves it). Then **rv-7 Photos [stronger]**. Also the older
+0. **[user] visual check of the new UI (rv-1..rv-7)**: restart `serve` (it migrates the catalog to V4 in well under a
+   second). In Photos, connect a drive, check that thumbnails load, then save a location and keywords on a few photos. Also the older
    **[user] visual check (ui-5..15, card-3):** restart `uv run photovault serve` (it picks up ui-11..15), try the
    Tasks home page, the sidebar groups, drives, cards, a step's Run button (e.g. Hash) and the editor (Photos).
 1. **[user] re-index Big Boy Old** (`uv run photovault index "/Volumes/Big Boy Old"`), then open its drive page.
@@ -96,11 +99,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-064 (user, rv-7): Photos rebuilt as a day timeline + inspector; V4 `assets(group_id)` index; Leaflet, OSM tiles, search on Enter.
 - D-063 (user, idx-13): non-photo files counted per drive in `volume_usage` (V3); videos split by camera signals.
 - D-062 (user, rv-6): the new UI is the only UI; Photos is its own task rv-7; slices go to Haiku/Sonnet agents.
 - D-061 (agent, rv-2): a hash shows the drive's progress (files hashed before the run count); pace stays the run's.
 - D-060 (agent, rv-1): `/next` beside classic; dev palette picker on by default with contrast grades; calmer task cards.
-- D-059 (user, rv-1): UI rebuilt in Vite + React + TS + Tailwind + framer-motion at `/next`; build committed; palette engine vendored.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

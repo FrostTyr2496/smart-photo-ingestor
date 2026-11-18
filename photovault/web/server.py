@@ -523,8 +523,9 @@ def _group_row(row) -> dict:
 
 
 def _thumb_source(conn, group_id: int) -> Path | None:
-    """The primary file of a group on a drive that is mounted right now, or None."""
-    rows = conn.execute(
+    """The primary file of a group on a drive that is mounted right now, or None. Files not hashed yet have no
+    asset link, so their index job's record is used instead (``repo.indexed_primary_files``)."""
+    rows = [dict(r) for r in conn.execute(
         """
         SELECT i.rel_path, v.marker_id, v.da_volume_uuid, v.last_mount_path
         FROM assets a
@@ -534,7 +535,13 @@ def _thumb_source(conn, group_id: int) -> Path | None:
         ORDER BY (v.role = 'WORKING') DESC, i.instance_id
         """,
         (group_id,),
-    ).fetchall()
+    ).fetchall()]
+    if not rows:
+        for f in repo.indexed_primary_files(conn, [group_id]).get(group_id, []):
+            vol = conn.execute("SELECT marker_id, da_volume_uuid, last_mount_path FROM volumes WHERE volume_id = ?",
+                               (f["volume_id"],)).fetchone()
+            if vol is not None:
+                rows.append({"rel_path": f["rel_path"], **dict(vol)})
     for row in rows:
         if not row["last_mount_path"]:
             continue
@@ -694,6 +701,7 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
         ("GET", "/api/activity"): lambda: activity.snapshot(conn, app.home, server_pid=os.getpid()),
         ("GET", "/api/shoots"): lambda: {"shoots": [dict(r) for r in repo.list_shoots(conn)]},
         ("GET", "/api/groups"): lambda: _groups(conn, query),
+        ("GET", "/api/photo-days"): lambda: _photo_days(conn, query),
         ("POST", "/api/groups/meta"): lambda: _groups_meta(conn, body),
         ("GET", "/api/settings"): lambda: {"settings": _settings(conn)},
         ("POST", "/api/settings"): lambda: _post_settings(conn, body),
@@ -925,15 +933,38 @@ def _groups(conn, query: dict) -> dict:
     except ValueError as exc:
         raise BadRequest("shoot_id must be an integer") from exc
     missing = _opt_param(query, "missing")
+    day = _opt_param(query, "day")
     limit = _int_param(query, "limit", 200, 1, 1000)
     offset = _int_param(query, "offset", 0, 0, 2**62)
     try:
-        rows = repo.list_groups(conn, volume_id=volume_id, shoot_id=shoot_id, missing=missing, limit=limit,
+        rows = repo.list_groups(conn, volume_id=volume_id, shoot_id=shoot_id, missing=missing, day=day, limit=limit,
                                 offset=offset)
         counts = repo.missing_counts(conn, volume_id=volume_id)
     except ValueError as exc:
         raise BadRequest(str(exc)) from exc
-    return {"groups": [_group_row(r) for r in rows], "missing_counts": counts}
+    groups = [_group_row(r) for r in rows]
+    unhashed = [g["group_id"] for g in groups if g["rel_path"] is None]
+    if unhashed:  # files indexed but not hashed yet: located through their index job (rv-7)
+        found = repo.indexed_primary_files(conn, unhashed)
+        for g in groups:
+            loc = (found.get(g["group_id"]) or [None])[0]
+            if loc and g["rel_path"] is None:
+                if volume_id is not None:
+                    loc = next((f for f in found[g["group_id"]] if f["volume_id"] == volume_id), loc)
+                g["rel_path"], g["volume_id"] = loc["rel_path"], loc["volume_id"]
+    return {"groups": groups, "missing_counts": counts}
+
+
+def _photo_days(conn, query: dict) -> dict:
+    """The Photos timeline (rv-7): days with photos, newest first, and the counts of what is missing."""
+    volume_id = _opt_param(query, "volume_id")
+    missing = _opt_param(query, "missing")
+    try:
+        days = repo.list_photo_days(conn, volume_id=volume_id, missing=missing)
+        counts = repo.missing_counts(conn, volume_id=volume_id)
+    except ValueError as exc:
+        raise BadRequest(str(exc)) from exc
+    return {"days": days, "missing_counts": counts}
 
 
 def _groups_meta(conn, body: Any) -> dict:

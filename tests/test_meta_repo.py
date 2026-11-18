@@ -48,10 +48,10 @@ def _ids(rows):
 def test_migrate_gives_latest_version(tmp_path: Path) -> None:
     c = db.connect(tmp_path / "m.sqlite")
     try:
-        assert db.migrate(c) == 3 == len(migrations.MIGRATIONS)
+        assert db.migrate(c) == 4 == len(migrations.MIGRATIONS)
         tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"group_meta", "geo_points", "settings"} <= tables
-        assert db.migrate(c) == 3
+        assert db.migrate(c) == 4
     finally:
         c.close()
 
@@ -208,6 +208,55 @@ def test_list_groups_volume_filter_and_paging(conn, seeded) -> None:
     assert on_master[0]["volume_id"] == "m" and on_master[0]["rel_path"] == "DCIM/DSC_1.NEF"
     assert _ids(repo.list_groups(conn, limit=2)) == [seeded["g1"], seeded["g2"]]
     assert _ids(repo.list_groups(conn, limit=2, offset=2)) == [seeded["g3"], seeded["g4"]]
+
+
+def test_group_index_used_for_primary_lookup(conn) -> None:
+    plan = " ".join(r[3] for r in conn.execute(
+        "EXPLAIN QUERY PLAN SELECT asset_id FROM assets WHERE group_id = 1 AND group_role = 'primary'"))
+    assert "assets_group" in plan
+
+
+def test_list_groups_day_filter(conn, seeded) -> None:
+    assert _ids(repo.list_groups(conn, day="2026-06-01")) == [seeded["g3"], seeded["g4"]]
+    assert _ids(repo.list_groups(conn, day="2026-06-01", missing="gps", limit=1)) == [seeded["g3"]]
+    assert repo.list_groups(conn, day="2020-01-01") == []
+    undated = _group(conn, "DSC_9", None)
+    assert _ids(repo.list_groups(conn, day=repo.UNDATED)) == [undated]
+    with pytest.raises(ValueError):
+        repo.list_groups(conn, day="June 1")
+
+
+def _unhashed(conn, volume_id, rel_path, group_id, role="primary"):
+    """A file the volume's index saw and grouped, not hashed yet: an instance with no asset, and a job item."""
+    repo.upsert_instance(conn, volume_id=volume_id, rel_path=rel_path, size=10, mtime_ns=1, kind="raw", state="indexed")
+    job = repo.create_job(conn, kind="index_volume", source_volume_id=volume_id, target_volume_id=None, params={})
+    repo.add_job_items(conn, job, [{"seq": 1, "src_rel": rel_path, "dst_rel": None, "group_id": group_id, "role": role}])
+
+
+def test_unhashed_groups_are_found_through_their_index_job(conn, seeded) -> None:
+    _vol(conn, "leg", "LEGACY")
+    g5 = _group(conn, "DSC_5", "2026-07-01T08:00:00")
+    _unhashed(conn, "leg", "Old/DSC_5.NEF", g5)
+    _unhashed(conn, "leg", "Old/DSC_5.JPG", g5, role="jpeg")
+    assert repo.indexed_primary_files(conn, [g5, seeded["g1"]]) == {g5: [{"volume_id": "leg", "rel_path": "Old/DSC_5.NEF"}]}
+    assert _ids(repo.list_groups(conn, volume_id="leg")) == [g5]
+    assert repo.list_photo_days(conn, volume_id="leg") == [{"day": "2026-07-01", "groups": 1, "bodies": []}]
+    conn.execute("UPDATE instances SET state = 'missing' WHERE rel_path = 'Old/DSC_5.NEF'")
+    assert repo.indexed_primary_files(conn, [g5]) == {}
+
+
+def test_list_photo_days(conn, seeded) -> None:
+    _group(conn, "DSC_9", None)
+    assert repo.list_photo_days(conn) == [
+        {"day": "2026-06-01", "groups": 2, "bodies": []},
+        {"day": "2026-05-01", "groups": 2, "bodies": ["Z6"]},
+        {"day": repo.UNDATED, "groups": 1, "bodies": []},
+    ]
+    assert repo.list_photo_days(conn, volume_id="m") == [
+        {"day": "2026-06-01", "groups": 1, "bodies": []},
+        {"day": "2026-05-01", "groups": 1, "bodies": ["Z6"]},
+    ]
+    assert [d["day"] for d in repo.list_photo_days(conn, missing="creator")] == ["2026-06-01", repo.UNDATED]
 
 
 def test_missing_counts(conn, seeded) -> None:

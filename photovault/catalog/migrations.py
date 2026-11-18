@@ -94,4 +94,8 @@ CREATE TABLE volume_usage (                          -- files the catalog does n
 );
 """
 
-MIGRATIONS: list[str] = [V1, V2, V3]
+V4 = """
+CREATE INDEX assets_group ON assets (group_id, group_role);   -- a group's files, for the Photos view (rv-7, D-064)
+"""
+
+MIGRATIONS: list[str] = [V1, V2, V3, V4]

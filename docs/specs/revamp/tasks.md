@@ -81,20 +81,29 @@ Rules for every task:
   - Result (2026-11-18): `uv run pytest -q` 490 passed, 4 skipped (`/` serves the build, `/static/app.js` is 404);
     `npm test` 16 passed; the built page loaded with no console errors on every route.
 
-- [ ] 7. Photos: the grid and the metadata editor, rebuilt and made to work [stronger]
-  - ID: rv-7 (after rv-6; its own task, worked on separately)
-  - Why separate: the classic Photos view (grid, selection, editor with Leaflet map, place search, GPS
-    suggestions, creator/copyright/title, keywords, time shift, Save) does not work today (user, 2026-11-18), so
-    porting it as is would carry the breakage over. First find out why it fails, then rebuild it.
-  - Start by: running the classic UI from git (`git show <rv-6 commit>^:photovault/web/static/app.js`) against a
-    copy of the catalog and recording what breaks (API errors, empty grid, map, save). Write the findings and a
-    task plan into this entry before coding.
-  - Pieces it uses: `GET /api/shoots`, `GET /api/groups` (filters drive, shoot, missing; paging),
-    `GET /api/groups/<id>/thumb`, `GET /api/groups/<id>/suggestions`, `POST /api/groups/meta`, `GET /api/settings`
-    (creator, copyright, default_offset, match_window_s); the map tiles and place search (Nominatim) are external
-    calls, so keep the user's private data out of them (vault rule 10).
-  - Leaflet would be a new front-end dependency in `web/`: ask the user first.
-  - Verify: to be set by the plan above; at least a browser check that a selection's location and keywords save.
+- [x] 7. Photos: the grid and the metadata editor, rebuilt and made to work [stronger] (visual check pending, user)
+  - ID: rv-7 (after rv-6). Design chosen by the user on 2026-11-18: a timeline by day, a right-side inspector, Leaflet
+    with OpenStreetMap tiles and place search only on Enter; the `assets(group_id)` index approved (D-064).
+  - Why the classic Photos failed (found on a copy of the real catalog, 62,121 groups): `GET /api/groups` never
+    returned. `assets.group_id` had no index, so finding each group's primary file scanned every asset, once per
+    group, before paging. With the index a 200-photo page takes 0.36 s. Shoots, suggestions and saving worked. Also:
+    0 shoots exist (grouping into shoots has not run), and 19,357 groups (files indexed but not hashed) had no asset
+    link at all, so they showed no file and no thumbnail.
+  - Built: migration V4 (`assets_group` index, system-design §5d); `GET /api/photo-days` (days, newest first, with
+    cameras and counts; filters drive and missing) and `day=` on `GET /api/groups`; groups not hashed yet are
+    located through their index job (`repo.indexed_primary_files`), for the list, the drive filter and thumbnails.
+    `#/photos`: days with sticky headers, a year/month rail, a day's photos loaded when it scrolls near (300 at a
+    time), click / ⌘-click / ⇧-click / Select day / Esc; tiles show a pin (has a location) and a pencil (edited,
+    sidecar not written). Inspector: preview and path (one photo), map (click or drag the pin; the selection's
+    locations as dots), time-matched GPS suggestions plus the nearest located photo, place search (Nominatim, on
+    Enter, at most 1/s, no referrer), place name, creator / copyright with "Use default", title, keywords with
+    per-photo counts, clock shift with a before → after preview; Save applies only touched fields to every selected
+    photo. Below 1280 px the inspector is a drawer on the right. Leaflet loads only when the inspector opens.
+  - Result (2026-11-18): `uv run pytest -q` 528 passed, 4 skipped; `npm test` 26 passed; build clean. Headless
+    Chrome on a copy of the catalog (drives' mount paths cleared, so no drive was read): 165 days, shift-click
+    selected 4, a keyword, a creator and a map location saved to all 4, counts updated; no console errors at 1500
+    and 900 px. On the copy, a page of a day takes ≤ 0.15 s and the drive filter ≤ 0.14 s. Real thumbnails not seen
+    (they read the mounted drive): part of the user's visual check.
 
 - [x] 8. Clean up what the classic UI left behind
   - ID: rv-8 (after rv-6; asked for by the user on 2026-11-18 so old references cause no bugs in the new UI)

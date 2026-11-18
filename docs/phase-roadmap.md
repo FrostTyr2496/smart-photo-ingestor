@@ -145,7 +145,7 @@ rep-1 is replaced by bk-5; rep-0 still covers legacy content on the 12 TB.
 | P5d.1 | rv-1 scaffold, shell, tasks and drive view at `/next` (**done 2026-11-18**) | ui-15 | **[user]** visual check |
 | P5d.2 | rv-2..rv-5 cards, file lists, setup and ignore, settings (**done 2026-11-18**) | rv-1 | **[user]** visual check |
 | P5d.3 | rv-6 the new UI becomes the default at `/`; classic UI removed (**done 2026-11-18**) | rv-2..rv-5 | **[user]** visual check |
-| P5d.4 | rv-7 Photos grid and editor, rebuilt and made to work (separate, [stronger]) | rv-6 | **[user]** visual check |
+| P5d.4 | rv-7 Photos timeline and editor, rebuilt and made to work (**done 2026-11-18**) | rv-6 | **[user]** visual check |
 | P5d.5 | rv-8 clean up what the classic UI left behind (**done 2026-11-18**) | rv-6 | none |
 
 ## Phase 5: app (spec `app`)

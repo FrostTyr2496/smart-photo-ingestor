@@ -435,6 +435,13 @@ def test_parse_line_keeps_non_json_as_text() -> None:
 
 # --------------------------------------------------------------------------- groups and meta
 
+def test_photo_days_and_day_filter(srv: Client) -> None:
+    status, body = srv.call("GET", "/api/photo-days")
+    assert status == 200 and body["days"] and body["missing_counts"]["groups"] == sum(d["groups"] for d in body["days"])
+    day = body["days"][0]
+    groups = srv.call("GET", f"/api/groups?day={day['day']}")[1]["groups"]
+    assert len(groups) == day["groups"]
+
 def test_groups_meta_round_trip(srv: Client) -> None:
     a, b = srv.ids["a"], srv.ids["b"]
     status, body = srv.call("GET", "/api/groups")
@@ -476,6 +483,8 @@ def test_groups_meta_validation(srv: Client) -> None:
     assert post({"group_ids": [a], "fields": {"gps_source": "guess"}}) == 400
     assert post({"group_ids": [a], "fields": {"lat": "51"}}) == 400
     assert srv.call("GET", "/api/groups?missing=bogus")[0] == 400
+    assert srv.call("GET", "/api/groups?day=bogus")[0] == 400
+    assert srv.call("GET", "/api/photo-days?missing=bogus")[0] == 400
     assert srv.call("GET", "/api/groups?limit=abc")[0] == 400
 
 
@@ -533,6 +542,28 @@ def test_thumb_404_when_unmounted_or_no_file(srv: Client, monkeypatch: pytest.Mo
     monkeypatch.setattr(preview, "extract_preview", lambda path: pytest.fail("must not extract"))
     assert srv.call("GET", f"/api/groups/{srv.ids['c']}/thumb")[0] == 404   # LEGACY drive is not mounted
     assert srv.call("GET", f"/api/groups/{srv.ids['b']}/thumb")[0] == 404   # no instance at all
+
+
+def test_thumb_and_location_of_an_unhashed_file(srv: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A file indexed but not hashed has no asset link; its index job's record still finds it (rv-7)."""
+    photo = srv.root / "WORK" / "Old" / "DSC_0009.NEF"
+    photo.parent.mkdir(parents=True)
+    photo.write_bytes(b"x")
+    conn = db.connect(srv.app.catalog_path)
+    with repo.transaction(conn):
+        gid = repo.insert_group(conn, body_id=None, shutter_count=None, capture_time="2026-07-01T08:00:00",
+                                capture_offset="+00:00", time_source="exif", canonical_stem="DSC_0009",
+                                original_stem="DSC_0009", original_num=None, shoot_id=None)
+        repo.upsert_instance(conn, volume_id="vol-work", rel_path="Old/DSC_0009.NEF", size=1, mtime_ns=1, kind="raw",
+                             state="indexed")
+        job = repo.create_job(conn, kind="index_volume", source_volume_id="vol-work", target_volume_id=None, params={})
+        repo.add_job_items(conn, job, [{"seq": 1, "src_rel": "Old/DSC_0009.NEF", "dst_rel": None, "group_id": gid,
+                                        "role": "primary"}])
+    conn.close()
+    monkeypatch.setattr(preview, "extract_preview", lambda path: b"\xff\xd8\xff\xd9" if Path(path) == photo.resolve() else None)
+    assert srv.call("GET", f"/api/groups/{gid}/thumb") == (200, b"\xff\xd8\xff\xd9")
+    row = srv.call("GET", "/api/groups?day=2026-07-01&volume_id=vol-work")[1]["groups"][0]
+    assert (row["group_id"], row["volume_id"], row["rel_path"]) == (gid, "vol-work", "Old/DSC_0009.NEF")
 
 
 def test_thumb_404_when_no_preview(srv: Client, monkeypatch: pytest.MonkeyPatch) -> None:

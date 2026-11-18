@@ -8,6 +8,7 @@ a transaction and every write would commit on its own.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import unicodedata
 from collections.abc import Iterable, Iterator
@@ -785,18 +786,35 @@ def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
     )
 
 
+UNDATED = "undated"  # the ``day`` of groups with no capture time
+
+
 def _group_filter_sql(
-    *, volume_id: str | None, shoot_id: int | None, missing: str | None
+    *, volume_id: str | None, shoot_id: int | None, missing: str | None, day: str | None = None
 ) -> tuple[str, list]:
-    """WHERE clause (without the keyword) for group listings and counts. ``g`` is capture_groups, ``m`` group_meta."""
+    """WHERE clause (without the keyword) for group listings and counts. ``g`` is capture_groups, ``m`` group_meta.
+
+    ``day`` is ``YYYY-MM-DD`` of the camera's capture time (before any time shift), or ``UNDATED``.
+    """
     clauses: list[str] = []
     params: list = []
+    if day is not None:
+        if day == UNDATED:
+            clauses.append("g.capture_time IS NULL")
+        elif re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+            clauses.append("substr(g.capture_time, 1, 10) = ?")
+            params.append(day)
+        else:
+            raise ValueError(f"day must be YYYY-MM-DD or {UNDATED!r}, not {day!r}")
     if volume_id is not None:
+        # A group is on the volume when a hashed file of it is, or when the volume's index recorded one (files
+        # not hashed yet have no asset link). Uncorrelated IN lists, so each is built once per query.
         clauses.append(
-            "EXISTS (SELECT 1 FROM assets a JOIN instances i ON i.asset_id = a.asset_id "
-            "WHERE a.group_id = g.group_id AND i.volume_id = ?)"
+            "(g.group_id IN (SELECT a.group_id FROM assets a JOIN instances i ON i.asset_id = a.asset_id "
+            "WHERE i.volume_id = ?) OR g.group_id IN (SELECT ji.group_id FROM job_items ji "
+            "JOIN jobs j ON j.job_id = ji.job_id WHERE j.kind = 'index_volume' AND j.source_volume_id = ?))"
         )
-        params.append(volume_id)
+        params += [volume_id, volume_id]
     if shoot_id is not None:
         clauses.append("g.shoot_id = ?")
         params.append(shoot_id)
@@ -823,6 +841,7 @@ def list_groups(
     volume_id: str | None = None,
     shoot_id: int | None = None,
     missing: str | None = None,
+    day: str | None = None,
     limit: int = 200,
     offset: int = 0,
 ) -> list[Row]:
@@ -832,7 +851,7 @@ def list_groups(
     when given, else on a WORKING volume, else any; NULL when the primary has no indexed instance yet. ``missing``
     is one of ``gps``, ``creator``, ``keywords``, ``any`` (see ``_group_filter_sql``).
     """
-    where, params = _group_filter_sql(volume_id=volume_id, shoot_id=shoot_id, missing=missing)
+    where, params = _group_filter_sql(volume_id=volume_id, shoot_id=shoot_id, missing=missing, day=day)
     if volume_id is not None:
         preference, pref_params = "(i.volume_id = ?) DESC, (v.role = 'WORKING') DESC, i.instance_id", [volume_id]
     else:
@@ -878,6 +897,63 @@ def missing_counts(conn: sqlite3.Connection, *, volume_id: str | None = None) ->
         params,
     ).fetchone()
     return {k: int(row[k] or 0) for k in ("groups", "gps", "creator", "keywords")}
+
+
+def indexed_primary_files(conn: sqlite3.Connection, group_ids: Iterable[int]) -> dict[int, list[dict]]:
+    """Where each group's primary file was indexed, for groups whose files are not hashed yet (no asset link).
+
+    ``index`` records each member of a group as a job item (``src_rel``, ``group_id``, ``role``) of its
+    ``index_volume`` job; the hash links the asset later. Returns ``{group_id: [{"volume_id", "rel_path"}, ...]}``
+    for instances still present (not ``missing``), WORKING volumes first. One pass over ``job_items`` for all ids.
+    """
+    ids = sorted({int(g) for g in group_ids})
+    if not ids:
+        return {}
+    marks = ",".join("?" * len(ids))
+    rows = conn.execute(
+        f"""
+        SELECT ji.group_id, j.source_volume_id AS volume_id, ji.src_rel AS rel_path, v.role
+        FROM job_items ji
+        JOIN jobs j ON j.job_id = ji.job_id AND j.kind = 'index_volume'
+        JOIN volumes v ON v.volume_id = j.source_volume_id
+        WHERE ji.group_id IN ({marks}) AND ji.role = 'primary'
+        ORDER BY (v.role = 'WORKING') DESC, ji.job_id DESC
+        """,
+        ids,
+    ).fetchall()
+    out: dict[int, list[dict]] = {}
+    seen: set[tuple[str, str]] = set()
+    for r in rows:
+        key = (r["volume_id"], path_key(r["rel_path"]))
+        if key in seen:
+            continue
+        seen.add(key)
+        inst = conn.execute("SELECT state FROM instances WHERE volume_id = ? AND rel_path_key = ?", key).fetchone()
+        if inst is None or inst["state"] == "missing":
+            continue
+        out.setdefault(int(r["group_id"]), []).append({"volume_id": r["volume_id"], "rel_path": r["rel_path"]})
+    return out
+
+
+def list_photo_days(conn: sqlite3.Connection, *, volume_id: str | None = None, missing: str | None = None) -> list[dict]:
+    """Days with photos, newest first: ``{"day", "groups", "bodies"}``. ``day`` is ``YYYY-MM-DD`` of the camera's
+    capture time, or ``UNDATED`` (listed last); ``bodies`` the camera nicknames that shot that day, sorted."""
+    where, params = _group_filter_sql(volume_id=volume_id, shoot_id=None, missing=missing)
+    rows = conn.execute(
+        f"""
+        SELECT substr(g.capture_time, 1, 10) AS day, COUNT(*) AS groups,
+               group_concat(DISTINCT b.nickname) AS bodies
+        FROM capture_groups g
+        LEFT JOIN group_meta m ON m.group_id = g.group_id
+        LEFT JOIN bodies b ON b.body_id = g.body_id
+        WHERE {where}
+        GROUP BY day
+        ORDER BY day IS NULL, day DESC
+        """,
+        params,
+    ).fetchall()
+    return [{"day": r["day"] or UNDATED, "groups": r["groups"],
+             "bodies": sorted(b for b in (r["bodies"] or "").split(",") if b)} for r in rows]
 
 
 def list_shoots(conn: sqlite3.Connection) -> list[Row]:
