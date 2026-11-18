@@ -9,9 +9,11 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from photovault import metrics
 from photovault.hashing import CHUNK, partial_sha256
 
 F_NOCACHE = getattr(fcntl, "F_NOCACHE", 48)
@@ -41,19 +43,21 @@ def _sync(fd: int) -> str:
 
 def _hash_uncached(path: Path) -> str:
     digest = hashlib.sha256()
-    fd = os.open(path, os.O_RDONLY)
-    try:
+    with metrics.measure("read_verify", path) as m:
+        fd = os.open(path, os.O_RDONLY)
         try:
-            fcntl.fcntl(fd, F_NOCACHE, 1)
-        except OSError:
-            pass
-        while True:
-            block = os.read(fd, CHUNK)
-            if not block:
-                break
-            digest.update(block)
-    finally:
-        os.close(fd)
+            try:
+                fcntl.fcntl(fd, F_NOCACHE, 1)
+            except OSError:
+                pass
+            while True:
+                block = os.read(fd, CHUNK)
+                if not block:
+                    break
+                m.add(len(block))
+                digest.update(block)
+        finally:
+            os.close(fd)
     return digest.hexdigest()
 
 
@@ -93,26 +97,59 @@ def copy_verified(src: Path, dst: Path, *, mtime_ns: int | None = None) -> CopyR
     digest = hashlib.sha256()
     size = 0
     try:
-        out = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-        try:
-            with open(src, "rb") as fh:
-                while True:
-                    block = fh.read(CHUNK)
-                    if not block:
-                        break
-                    digest.update(block)
-                    view = memoryview(block)
-                    while view:
-                        written = os.write(out, view)
-                        view = view[written:]
-                    size += len(block)
-            sync_method = _sync(out)
-        finally:
-            os.close(out)
+        # Reads count against the source drive and writes (with the sync) against the target; each side is
+        # timed on its own calls and claims only its own errors (met-1).
+        with metrics.measure("read_full", src, claim_errors=False) as rm, \
+                metrics.measure("write", tmp, claim_errors=False) as wm:
+            try:
+                out = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            except OSError as exc:
+                wm.fail(exc)
+                raise
+            try:
+                try:
+                    fh = open(src, "rb")
+                except OSError as exc:
+                    rm.fail(exc)
+                    raise
+                with fh:
+                    while True:
+                        t0 = time.monotonic()
+                        try:
+                            block = fh.read(CHUNK)
+                        except OSError as exc:
+                            rm.fail(exc)
+                            raise
+                        rm.add(len(block), busy=time.monotonic() - t0)
+                        if not block:
+                            break
+                        digest.update(block)
+                        view = memoryview(block)
+                        t0 = time.monotonic()
+                        try:
+                            while view:
+                                written = os.write(out, view)
+                                view = view[written:]
+                        except OSError as exc:
+                            wm.fail(exc)
+                            raise
+                        wm.add(len(block), busy=time.monotonic() - t0)
+                        size += len(block)
+                t0 = time.monotonic()
+                try:
+                    sync_method = _sync(out)
+                except OSError as exc:
+                    wm.fail(exc)
+                    raise
+                wm.add(0, busy=time.monotonic() - t0)
+            finally:
+                os.close(out)
 
         expected = digest.hexdigest()
         actual = _hash_uncached(tmp)
         if actual != expected:
+            metrics.incident("read_verify", tmp, "verify_mismatch",
+                             f"verify mismatch for {src} -> {dst}: wrote {expected}, read back {actual}")
             raise CopyError(f"verify mismatch for {src} -> {dst}: wrote {expected}, read back {actual}")
         os.utime(tmp, ns=(src_stat.st_atime_ns, mtime_ns if mtime_ns is not None else src_stat.st_mtime_ns))
         if dst.exists():

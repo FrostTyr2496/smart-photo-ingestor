@@ -35,6 +35,8 @@ Reference docs:
 - A live dry run planned both real cards (D-031); no real import has run yet (ing-11 is the user's).
 - Drives: cards exFAT; X9 Pro (1 TB exFAT) WORKING; Flats 1 (1 TB APFS, 98 % full) LEGACY, hashed; PP 1 (4 TB
   APFS HDD, LEGACY) indexed, its hash paused on I/O errors (resume with idx-11); the 12 TB is offline.
+- **Metrics (met-1, D-054):** every CLI command except `serve` records bytes, MB/s and read errors per drive to
+  `<home>/metrics.sqlite`; `photovault metrics [--days N]` reports, `metrics backfill` estimates past work.
 - Policy: one verified copy on WORKING = safe to format (D-003). The Cards view's colours are a separate, stricter
   answer (D-046): green only when a MASTER holds the file.
 - **Web UI (D-045, specs `docs/specs/ui`, `docs/specs/cards`):** `uv run photovault serve` → 127.0.0.1:8765.
@@ -44,8 +46,8 @@ Reference docs:
   terminal, plus jobs left `running` with no process (ui-11, D-053). ui-7..11 and card-3 not seen in a browser yet.
   The Mac folder (`mac_folder`, default `~/Sandbox`) is a drive (D-047).
 - Hooks: `guard_volumes.py` blocks agent writes and engine runs on `/Volumes`; live tests read mounts only under
-  `-m live` (D-028, D-031). Old v0 code: local branch `archive/v0-cli-2026-11-11`.
-- The repo is public. Real-drive facts and photos stay in `docs/private/` and `testdata/` (gitignored).
+  `-m live` (D-028, D-031). Old v0 code: local branch `archive/v0-cli-2026-11-11`. The repo is public: real-drive
+  facts and photos stay in `docs/private/` and `testdata/` (gitignored).
 
 ## In progress
 - Task: untracked work, not ui-11 (ui-11 is committed); found uncommitted on 2026-11-18, no task ID
@@ -53,11 +55,6 @@ Reference docs:
   app.css, index.html (new-drive setup view, read-only NTFS roles)
 - Last verified: `uv run pytest -q` → 467 passed, 4 skipped (with this work in the tree)
 - Notes: from another session; it needs a task ID and its own commit. ui-11's hunks in those files are committed.
-- Task: met-1 (started 2026-11-18, claude-opus-5-5), in parallel with the work above (no shared files)
-- Files touched: docs/specs/metrics/tasks.md, photovault/metrics.py, photovault/hashing.py,
-  photovault/copy_engine.py, photovault/cli.py, tests/test_metrics.py
-- Last verified: not run
-- Notes: metrics go to `<home>/metrics.sqlite`, not the catalog (D-054).
 
 When you start a task, replace `none` with this block before your first edit, and set it back to `none` in the
 task's commit:
@@ -78,7 +75,8 @@ task's commit:
    ("If a drive shows I/O errors" in `docs/user/INDEX_WORKFLOW.md`). idx-5 is done except `lrcat mark`.
 4. **seq-2 [stronger]** waits for the user's answers on eval-1 (`docs/reviews/2026-11-11-eval-1-sequencing.md`).
 5. **Card backup (spec `docs/specs/backup`, D-050..D-052):** bk-1 drive health, bk-3 backup job (after ing-13),
-   vn-1 volume name on hover, then bk-2, bk-4, vn-2, vn-3. bk-5 [user]: plug in and assign the 12 TB.
+   vn-1 volume name on hover, then bk-2, bk-4, vn-2, vn-3. bk-5 [user]: plug in and assign the 12 TB. Metrics:
+   met-2 (web view) once the uncommitted UI work is committed; met-4 after bk-1.
 
 ## Waiting on user
 - **Push the archive branch?** Run `git push -u origin archive/v0-cli-2026-11-11` if you want it on GitHub.
@@ -97,12 +95,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-054 (user ask, met-1): lifetime I/O metrics per drive in `<home>/metrics.sqlite`, not the catalog.
 - D-057 (user ask, ui-14): the home page is tasks by drive; photos behind a Photos button; sidebar grouped by connection.
 - D-056 (agent, ui-13): a finished hash with indexed files still waiting shows as incomplete, never done.
 - D-055 (user ask, ui-12): each timeline step has Run; UI tasks keep the Mac awake (`caffeinate -ims -w <pid>`).
 - D-053 (agent): the UI shows runs started outside it (`ps` + `<home>/activity/<pid>.json`; catalog counts for older runs).
-- D-052 (user): show a drive's volume name on hover; rename to match on any role, with a Lightroom warning
-  (rule 1 exception); relink method is a spike (vn-3).
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

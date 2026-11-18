@@ -9,6 +9,8 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+from photovault.metrics import measure
+
 CHUNK = 8 * 1024 * 1024
 """Read size for streaming hashes (8 MiB)."""
 
@@ -21,11 +23,12 @@ _PARTIAL_TAG = b"pv1"
 def sha256_file(path: Path) -> str:
     """Return the hex SHA-256 of the whole file, read in CHUNK-sized reads."""
     digest = hashlib.sha256()
-    with open(path, "rb") as fh:
+    with measure("read_full", path) as m, open(path, "rb") as fh:
         while True:
             block = fh.read(CHUNK)
             if not block:
                 break
+            m.add(len(block))
             digest.update(block)
     return digest.hexdigest()
 
@@ -37,24 +40,28 @@ def partial_sha256(path: Path) -> str:
     starting at ``size // 2 - 32 KiB`` (clamped to 0) + the last 64 KiB. Files of 192 KiB or less hash their whole
     content after the same prefix.
     """
-    size = path.stat().st_size
-    digest = hashlib.sha256()
-    digest.update(_PARTIAL_TAG)
-    digest.update(size.to_bytes(8, "big"))
-    with open(path, "rb") as fh:
-        if size <= _SMALL_FILE_LIMIT:
-            while True:
-                block = fh.read(CHUNK)
-                if not block:
-                    break
-                digest.update(block)
-        else:
-            windows = (
-                (0, _WINDOW),
-                (max(0, size // 2 - _HALF_WINDOW), _WINDOW),
-                (size - _WINDOW, _WINDOW),
-            )
-            for offset, length in windows:
-                fh.seek(offset)
-                digest.update(fh.read(length))
+    with measure("read_partial", path) as m:
+        size = path.stat().st_size
+        digest = hashlib.sha256()
+        digest.update(_PARTIAL_TAG)
+        digest.update(size.to_bytes(8, "big"))
+        with open(path, "rb") as fh:
+            if size <= _SMALL_FILE_LIMIT:
+                while True:
+                    block = fh.read(CHUNK)
+                    if not block:
+                        break
+                    m.add(len(block))
+                    digest.update(block)
+            else:
+                windows = (
+                    (0, _WINDOW),
+                    (max(0, size // 2 - _HALF_WINDOW), _WINDOW),
+                    (size - _WINDOW, _WINDOW),
+                )
+                for offset, length in windows:
+                    fh.seek(offset)
+                    block = fh.read(length)
+                    m.add(len(block))
+                    digest.update(block)
     return digest.hexdigest()

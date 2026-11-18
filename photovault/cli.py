@@ -10,7 +10,7 @@ import uuid
 import webbrowser
 from pathlib import Path
 
-from photovault import cards, meta, report, volumes
+from photovault import cards, meta, metrics, report, volumes
 from photovault.activity import ActivityEmitter
 from photovault.drives import CLI_DRIVE_KEYS, VOLUMES_ROOT, scan_mounts
 from photovault.web import server as web_server
@@ -318,6 +318,45 @@ def cmd_serve(args, cfg, emit) -> int:
     return EXIT_OK
 
 
+def _metrics_human(rep: dict) -> dict:
+    """Readable sizes and rates for the human report; JSON keeps the raw numbers."""
+    def size(n: int) -> str:
+        return human_bytes(n or 0)
+
+    def rate(v: float | None) -> str:
+        return f"{v:.1f} MB/s" if v is not None else "-"
+
+    out: dict = {"store": rep["store"], "live_since": rep["live_since"] or "never (no I/O recorded yet)",
+                 "totals": {"read": f"{size(rep['totals']['bytes_read'])} ({rep['totals']['files_read']} file reads)",
+                            "written": f"{size(rep['totals']['bytes_written'])} ({rep['totals']['files_written']} files)",
+                            "errors": rep["totals"]["errors"]},
+                 "drives": [{"drive": d["label"], "read": size(d["bytes_read"]), "read_rate": rate(d["read_mbps"]),
+                             "written": size(d["bytes_written"]), "write_rate": rate(d["write_mbps"]),
+                             "errors": d["errors"], "last_day": d["last_day"]} for d in rep["drives"]],
+                 "incidents": [{"ts": i["ts"], "drive": i["label"], "op": i["op"], "kind": i["kind"], "path": i["path"]}
+                               for i in rep["incidents"]]}
+    if "days" in rep:
+        out["days"] = [{"day": d["day"], "drive": d["label"], "read": size(d["bytes_read"]),
+                        "written": size(d["bytes_written"]), "errors": d["errors"]} for d in rep["days"]]
+    return out
+
+
+def cmd_metrics(args, cfg, emit) -> int:
+    """Lifetime I/O per drive from <home>/metrics.sqlite (met-1, D-054). Read-only on the catalog."""
+    rep = metrics.report(cfg.home, days=args.days)
+    emit.emit("result", **(rep if emit.json_mode else _metrics_human(rep)))
+    return EXIT_OK
+
+
+def cmd_metrics_backfill(args, cfg, emit) -> int:
+    """Rebuild the backfill rows from the catalog (work done before live counting began)."""
+    if not cfg.catalog_path.exists():
+        emit.emit("error", code="no_catalog", message=f"no catalog at {cfg.catalog_path}")
+        return EXIT_ERROR
+    emit.emit("result", **metrics.backfill(cfg.home, cfg.catalog_path))
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="photovault", description="Verified card imports and a multi-drive catalog.")
     p.add_argument("--json", action="store_true", help="emit JSON lines (protocol v1)")
@@ -425,6 +464,13 @@ def build_parser() -> argparse.ArgumentParser:
     sv.add_argument("--no-open", action="store_true", help="do not open the browser")
     sv.set_defaults(func=cmd_serve)
 
+    mx = sub.add_parser("metrics", help="lifetime bytes read and written per drive, speeds and read errors")
+    mx.add_argument("--days", type=int, default=0, metavar="N", help="also show a per-day table for the last N days")
+    mx.set_defaults(func=cmd_metrics)
+    mxs = mx.add_subparsers(dest="sub")
+    mxs.add_parser("backfill", help="estimate past work from the catalog (before live counting began)").set_defaults(
+        func=cmd_metrics_backfill)
+
     j = sub.add_parser("jobs", help="recent jobs")
     j.add_argument("--limit", type=int, default=20)
     j.set_defaults(func=cmd_jobs)
@@ -439,15 +485,28 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_USAGE if exc.code else EXIT_OK
     # ActivityEmitter also keeps <home>/activity/<pid>.json current, so the web UI can show this run (ui-11).
     emit = ActivityEmitter(sys.stdout, json_mode=args.json)
+    recorder: metrics.Recorder | None = None
+    code: int | None = None
     try:
         cfg = load_config()
-        emit.track(cfg.home, list(sys.argv[1:] if argv is None else argv))
-        return args.func(args, cfg, emit)
+        argv_list = list(sys.argv[1:] if argv is None else argv)
+        emit.track(cfg.home, argv_list)
+        if args.cmd not in ("serve", "metrics"):
+            # Lifetime I/O metrics (met-1, D-054): a no-op for commands that read and write nothing.
+            recorder = metrics.Recorder(cfg.home, cfg.catalog_path, command=" ".join(argv_list),
+                                        volumes_root=VOLUMES_ROOT)
+            metrics.install(recorder)
+        code = args.func(args, cfg, emit)
+        return code
     except (ValueError, ConfigError, FileExistsError, RuntimeError, OSError, volumes.CardWriteRefused,
             volumes.UnknownVolume, CatalogInUse, LrcatSchemaError) as exc:
         emit.emit("error", code=type(exc).__name__, message=str(exc))
-        return EXIT_ERROR
+        code = EXIT_ERROR
+        return code
     finally:
+        if recorder is not None:
+            metrics.install(None)
+            recorder.close(code)
         emit.close()
 
 

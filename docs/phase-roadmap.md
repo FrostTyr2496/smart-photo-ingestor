@@ -127,6 +127,15 @@ Note: seq-1 to seq-3 are pure and fixture-driven, so they make good parallel Hai
 Notes: bk-3 and `ingest.py` share the job and resume code, so bk-3 waits for ing-13. vn-* is independent of bk-*.
 rep-1 is replaced by bk-5; rep-0 still covers legacy content on the 12 TB.
 
+## Phase 5c: lifetime metrics (spec `metrics`, D-054)
+
+| Item | Task | Blocks on | Gate |
+|---|---|---|---|
+| P5c.1 | met-1 metrics store, recording, `metrics` CLI **[stronger]** (**done 2026-11-18**) | — | — |
+| P5c.2 | met-2 metrics in the web UI | met-1, the uncommitted UI work committed | **[user]** visual check |
+| P5c.3 | met-3 off-Mac copy (`metrics export`) | met-1 | **[user]** decision |
+| P5c.4 | met-4 metrics feed drive health | met-1, bk-1 | — |
+
 ## Phase 5: app (spec `app`)
 
 | Item | Task | Blocks on | Gate |
