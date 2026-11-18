@@ -33,9 +33,9 @@ the worst tier among its files; no files gives `empty`.
   - Setting `mac_folder` (catalog `settings`, default `~/Sandbox`, editable in the web Settings dialog).
     `drives.scan_mounts` lists it as a drive (`local: true`) when the folder exists.
   - Verify: `uv run pytest tests/test_cards.py tests/test_web_api.py -q`
-  - Result (2026-11-17): `uv run pytest tests/test_cards.py -q` → 4 passed (the Mac folder tests).
+  - Result (2026-11-17): `uv run pytest tests/test_cards.py -q` → 12 passed (Mac folder tests included).
 
-- [ ] 2. Card check and removability
+- [x] 2. Card check and removability
   - ID: card-2 (D-046, D-048)
   - `photovault/cards.py`: `check_card(conn, cfg, mount, emit, should_stop)` registers the card (CARD), then runs
     `index_volume` and `baseline_hash` (read-only). `card_files`, `card_summary` and `cameras` classify files by
@@ -45,6 +45,7 @@ the worst tier among its files; no files gives `empty`.
   - CLI: `cards check <mount>` and `cards list`. Relies on ing-12: a group made by the card check is renamed to
     the D-005 stem when the card is imported.
   - Verify: `uv run pytest tests/test_cards.py -q`
+  - Result (2026-11-17): `uv run pytest tests/test_cards.py -q` → 12 passed.
 
 - [ ] 3. Cards and cameras in the web UI
   - ID: card-3

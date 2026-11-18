@@ -10,7 +10,7 @@ import uuid
 import webbrowser
 from pathlib import Path
 
-from photovault import meta, report, volumes
+from photovault import cards, meta, report, volumes
 from photovault.drives import CLI_DRIVE_KEYS, VOLUMES_ROOT, scan_mounts
 from photovault.web import server as web_server
 from photovault.catalog import db, repo
@@ -133,6 +133,30 @@ def cmd_card_status(args, cfg, emit) -> int:
               changed=len(s.changed), short=len(s.short),
               examples=(s.unknown + s.changed + [r for r, _ in s.short])[: args.show])
     return EXIT_OK if s.state == "green" else EXIT_RED
+
+
+def cmd_cards_check(args, cfg, emit) -> int:
+    """Index and hash a card (read-only) and rank its files by removability (D-046, D-048)."""
+    conn = _open(cfg)
+    stop = _Stop()
+    stop.install(emit)
+    try:
+        out = cards.check_card(conn, cfg, Path(args.mount), emit=emit, should_stop=stop)
+    except (ValueError, volumes.UnknownVolume) as exc:
+        emit.emit("error", code="card", message=str(exc))
+        return EXIT_USAGE
+    emit.emit("result", **out)
+    return EXIT_PAUSED if out["paused"] else EXIT_OK
+
+
+def cmd_cards_list(args, cfg, emit) -> int:
+    conn = _open(cfg)
+    listing = cards.list_cards(conn, scan_mounts(conn, Path(args.root) if args.root else VOLUMES_ROOT, emit))
+    emit.emit("result", cards=[{k: c[k] for k in ("label", "mounted", "tier", "files", "counts", "checked_at")}
+                               | {"cameras": [{k: m[k] for k in ("name", "tier", "files")} for m in c["cameras"]]}
+                               for c in listing["cards"]],
+              cameras=[{k: m[k] for k in ("name", "tier", "files", "counts")} for m in listing["cameras"]])
+    return EXIT_OK
 
 
 def cmd_index(args, cfg, emit) -> int:
@@ -331,6 +355,15 @@ def build_parser() -> argparse.ArgumentParser:
     cs.add_argument("mount")
     cs.add_argument("--show", type=int, default=10, help="how many problem files to list")
     cs.set_defaults(func=cmd_card_status)
+
+    crd = sub.add_parser("cards", help="camera cards: which files are safe to remove").add_subparsers(
+        dest="sub", required=True)
+    cc = crd.add_parser("check", help="index and hash a card (read-only; Ctrl-C pauses, re-run resumes)")
+    cc.add_argument("mount")
+    cc.set_defaults(func=cmd_cards_check)
+    cl = crd.add_parser("list", help="every card, ranked green/yellow/red, and the cameras on them")
+    cl.add_argument("--root", help=argparse.SUPPRESS)
+    cl.set_defaults(func=cmd_cards_list)
 
     ix = sub.add_parser("index", help="record what is on a registered drive (read-only; Ctrl-C pauses, re-run resumes)")
     ix.add_argument("mount")
