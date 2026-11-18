@@ -45,13 +45,13 @@ def _ids(rows):
 # --- migration ----------------------------------------------------------------------------------------------
 
 
-def test_migrate_gives_version_2(tmp_path: Path) -> None:
+def test_migrate_gives_latest_version(tmp_path: Path) -> None:
     c = db.connect(tmp_path / "m.sqlite")
     try:
-        assert db.migrate(c) == 2 == len(migrations.MIGRATIONS)
+        assert db.migrate(c) == 3 == len(migrations.MIGRATIONS)
         tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         assert {"group_meta", "geo_points", "settings"} <= tables
-        assert db.migrate(c) == 2
+        assert db.migrate(c) == 3
     finally:
         c.close()
 

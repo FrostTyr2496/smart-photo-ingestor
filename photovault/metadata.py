@@ -181,8 +181,9 @@ def normalize_exiftool_row(raw: dict[str, Any]) -> dict[str, Any]:
     metadata: dict[str, Any] = {}
 
     for out_key, keys in (
-        ("Make", ("EXIF:Make",)),
-        ("Model", ("EXIF:Model",)),
+        # Videos keep these in QuickTime (iPhone, GoPro) or Nikon MakerNotes (MOV); EXIF wins for photos (idx-13).
+        ("Make", ("EXIF:Make", "QuickTime:Make", "MakerNotes:Make")),
+        ("Model", ("EXIF:Model", "QuickTime:Model", "MakerNotes:Model")),
         ("LensMake", ("EXIF:LensMake",)),
         ("LensModel", ("EXIF:LensModel", "Composite:LensID")),
         # Nikon: EXIF:SerialNumber (also MakerNotes:SerialNumber). Needed for dedupe tier 2.

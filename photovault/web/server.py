@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from photovault import activity, cards, preview, volumes
+from photovault import activity, cards, preview, usage, volumes
 from photovault.catalog import db, repo
 from photovault.drives import DEFAULT_MAC_FOLDER, VOLUMES_ROOT, scan_mounts
 from photovault.geo import offset_tz, suggest
@@ -844,7 +844,16 @@ def _volume_summary(app: WebApp, conn, volume_id: str) -> dict:
         "steps": repo.volume_last_steps(conn, volume_id),
         "copies": _copy_summary(conn, volume_id, drives),
         "cameras": _volume_cameras(conn, volume_id),
+        "usage": _volume_usage(conn, volume_id, states),
     }
+
+
+def _volume_usage(conn, volume_id: str, states: dict) -> dict | None:
+    """Photography vs everything else on the drive (idx-13); None until an index has counted it."""
+    tracked = [v for k, v in states.items() if k != "missing"]
+    cap = conn.execute("SELECT capacity_bytes FROM volumes WHERE volume_id = ?", (volume_id,)).fetchone()
+    return usage.summarize(sum(v["bytes"] for v in tracked), sum(v["files"] for v in tracked),
+                           repo.volume_usage(conn, volume_id), cap["capacity_bytes"] if cap else None)
 
 
 def _volume_cameras(conn, volume_id: str) -> list[dict]:

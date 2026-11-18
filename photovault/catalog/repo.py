@@ -410,6 +410,21 @@ def volume_kind_counts(conn: sqlite3.Connection, volume_id: str) -> list[Row]:
     ).fetchall()
 
 
+def replace_volume_usage(conn: sqlite3.Connection, volume_id: str, rows: dict[str, tuple[int, int]]) -> None:
+    """Replace a volume's usage rows (idx-13) with `{category: (files, bytes)}` from one complete walk."""
+    conn.execute("DELETE FROM volume_usage WHERE volume_id = ?", (volume_id,))
+    now = utcnow()
+    conn.executemany(
+        "INSERT INTO volume_usage (volume_id, category, files, bytes, updated_at) VALUES (?, ?, ?, ?, ?)",
+        [(volume_id, cat, files, size, now) for cat, (files, size) in sorted(rows.items())],
+    )
+
+
+def volume_usage(conn: sqlite3.Connection, volume_id: str) -> dict[str, tuple[int, int]]:
+    rows = conn.execute("SELECT category, files, bytes FROM volume_usage WHERE volume_id = ?", (volume_id,))
+    return {r["category"]: (r["files"], r["bytes"]) for r in rows}
+
+
 def volume_runs(conn: sqlite3.Connection, volume_id: str, limit: int = 20) -> list[Row]:
     """Index and hash runs on a volume, newest first."""
     return conn.execute(

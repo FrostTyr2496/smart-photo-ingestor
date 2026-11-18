@@ -244,3 +244,28 @@ Rules:
     set during the block returns within the poll interval; the normal path is unchanged.
   - Verify: `uv run pytest tests/test_baseline_hash.py -q`
   - _Design:_ D-044, idx-11
+
+- [x] 13. **[stronger]** Drive usage: how much of a drive is photography and how much is not
+  - ID: idx-13
+  - Blocks on: idx-1. **User approved (2026-11-18):** migration V3 (`volume_usage`), and splitting videos by
+    camera signals (D-063).
+  - Why: the walk drops every `ignored` file, so a drive like Big Boy Old (6 TB used, 2.4 TB indexed) cannot say
+    what the rest is, and every `.mov`/`.mp4` counts as camera footage, movies included.
+  - `scan.walk_all(root) -> tuple[list[FileEntry], list[Path]]`: one walk that keeps `ignored` files and returns
+    the `*.lrdata` folders it did not descend.
+  - `photovault/usage.py`: `category(name)` sorts an ignored file into `lightroom`, `photo_extras`, `video_other`,
+    `audio`, `image_other`, `documents`, `archives`, `software`, `other`; `camera_video(...)` decides whether a
+    video instance is camera footage: photos in the same folder, a sibling `srt/lrv/thm/xmp/aae`, a camera-style
+    name, a `DCIM` path, else ExifTool Make or Model in any group. `volume_usage(...)` builds the rows.
+  - `index_volume`: after a complete walk, replaces the volume's `volume_usage` rows (non-instance categories,
+    `video_no_camera`, and `disk_used` from `statvfs` when the mount is a real mount point). A paused run
+    writes nothing.
+  - Server: the drive summary gains `usage` (photography, non-photo by category, unaccounted, free). Drive view: a
+    usage bar with a legend.
+  - Tests: `tests/test_usage.py`, `tests/test_scan.py` (`walk_all`), `tests/test_index.py` (rows written, paused
+    run writes none), `tests/test_web_api.py` (summary `usage`), `tests/test_catalog_db.py` (3 migrations).
+  - Verify: `uv run pytest tests/test_usage.py tests/test_scan.py tests/test_index.py tests/test_web_api.py tests/test_catalog_db.py -q`
+  - Result (2026-11-18): Verify → 115 passed; full suite 522 passed, 4 skipped; web typecheck, 16 tests, build ok.
+    Not done: no per-file rows for non-photo files (totals only); `cards check` and `status` still use `walk`; the
+    UI is not seen in a browser yet; the Big Boy Old re-index is the user's.
+  - _Design:_ system-design §5c, §8; D-063

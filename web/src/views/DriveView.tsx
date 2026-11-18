@@ -22,7 +22,7 @@ import {
 } from '../lib/labels';
 import { rise, springs } from '../lib/motion';
 import { useStore } from '../lib/store';
-import type { Drive, DriveSummary } from '../lib/types';
+import type { Drive, DriveSummary, DriveUsage } from '../lib/types';
 
 const TILES = [
   { key: 'indexed', label: 'Not hashed yet', tone: 'text-accent', ring: 'hover:border-accent/30' },
@@ -173,6 +173,98 @@ function Timeline({ d, steps, summary }: { d: Drive; steps: WorkflowStep[]; summ
         );
       })}
     </ol>
+  );
+}
+
+const USAGE_LABEL: Record<string, string> = {
+  tracked: 'Photos and camera video',
+  lightroom: 'Lightroom catalogs and previews',
+  photo_extras: 'Camera and editor extras',
+  video_no_camera: 'Video with no camera (movies, downloads)',
+  video_other: 'Other video formats',
+  audio: 'Audio',
+  image_other: 'Other images (PNG, GIF…)',
+  documents: 'Documents',
+  archives: 'Archives and disk images',
+  software: 'Apps and code',
+  other: 'Other files',
+};
+
+/** idx-13: one bar for the whole drive, then what each slice holds. */
+function UsageCard({ u }: { u: DriveUsage }) {
+  const reduce = useReducedMotion();
+  const total = u.capacity ?? u.used ?? u.photo.bytes + u.non_photo.bytes;
+  const slices = [
+    { key: 'photo', label: 'Photography', bytes: u.photo.bytes, bar: 'bg-accent', dot: 'bg-accent' },
+    { key: 'non', label: 'Not photography', bytes: u.non_photo.bytes, bar: 'bg-maybe', dot: 'bg-maybe' },
+    { key: 'unacc', label: 'Unaccounted', bytes: u.unaccounted ?? 0, bar: 'bg-ink/25', dot: 'bg-ink/25' },
+    { key: 'free', label: 'Free', bytes: u.free ?? 0, bar: 'bg-ink/[0.06]', dot: 'bg-ink/10' },
+  ].filter((x) => x.bytes > 0);
+  const pct = (b: number) => (total > 0 ? (100 * b) / total : 0);
+  const share = u.photo.bytes + u.non_photo.bytes > 0 ? u.photo.bytes / (u.photo.bytes + u.non_photo.bytes) : 0;
+  return (
+    <section className="card p-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-lg font-semibold">Space on this drive</h2>
+        <p className="text-sm text-muted">
+          {Math.round(share * 100)}% of what is counted is photography
+        </p>
+      </div>
+      <div className="mt-4 flex h-3 w-full overflow-hidden rounded-full bg-ink/[0.06]" role="img"
+        aria-label={slices.map((x) => `${x.label} ${fmtBytes(x.bytes)}`).join(', ')}>
+        {slices.map((x) => (
+          <motion.div
+            key={x.key}
+            className={`h-full ${x.bar}`}
+            initial={reduce ? false : { width: 0 }}
+            animate={{ width: `${pct(x.bytes)}%` }}
+            transition={springs.snappy}
+            title={`${x.label}: ${fmtBytes(x.bytes)}`}
+          />
+        ))}
+      </div>
+      <div className="mt-5 grid gap-5 md:grid-cols-2">
+        <UsageList title="Photography" dot="bg-accent" total={u.photo.bytes} parts={u.photo.parts} />
+        <UsageList title="Not photography" dot="bg-maybe" total={u.non_photo.bytes} parts={u.non_photo.parts} />
+      </div>
+      {(u.unaccounted != null || u.free != null) && (
+        <p className="mt-4 text-xs text-muted">
+          {u.unaccounted != null && (
+            <>
+              <span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-ink/25 align-middle" />
+              Unaccounted {fmtBytes(u.unaccounted)}: system and hidden folders, the recycle bin, and anything the index
+              could not read.{' '}
+            </>
+          )}
+          {u.free != null && <>Free {fmtBytes(u.free)}.</>}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function UsageList({ title, dot, total, parts }: { title: string; dot: string; total: number; parts: DriveUsage['photo']['parts'] }) {
+  return (
+    <div>
+      <p className="flex items-center gap-2 text-sm font-medium">
+        <span className={`h-2 w-2 rounded-full ${dot}`} />
+        {title}
+        <span className="ml-auto font-mono text-ink/80">{fmtBytes(total)}</span>
+      </p>
+      {parts.length === 0 ? (
+        <p className="mt-2 text-xs text-faint">Nothing found</p>
+      ) : (
+        <ul className="mt-2 flex flex-col gap-1">
+          {parts.filter((p) => p.bytes > 0).map((p) => (
+            <li key={p.category} className="flex items-baseline gap-2 text-xs text-muted">
+              <span className="min-w-0 flex-1 truncate">{USAGE_LABEL[p.category] ?? p.category}</span>
+              <span className="text-faint">{fmtInt(p.files)} files</span>
+              <span className="w-20 text-right font-mono text-ink/80">{fmtBytes(p.bytes)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -412,6 +504,13 @@ export function DriveView({ id }: { id: string }) {
           </div>
         )}
       </section>
+
+      {s.usage && <UsageCard u={s.usage} />}
+      {!s.usage && s.files > 0 && (
+        <p className="-mt-2 px-1 text-xs text-muted">
+          Index this drive again to see how much of it is photography and what the rest is.
+        </p>
+      )}
 
       {s.files === 0 && (
         <section className="card flex flex-col items-center gap-1 px-6 py-10 text-center">

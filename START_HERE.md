@@ -28,7 +28,8 @@ Reference docs:
 - **Card milestone built:** the CLI imports a card onto WORKING with verified copies and answers `card-status`
   (`drives`, `volumes assign`, `ingest [--dry-run]`, `resume`, `card-status`, `jobs`). Guides:
   `docs/user/CARD_WORKFLOW.md`, `docs/user/INDEX_WORKFLOW.md`. `uv run pytest -q` → 442 passed, 4 skipped (`live`).
-- Index done: idx-1..4, idx-11 (D-044). Flats 1 is indexed and hashed; its duplicate report found 113.5 GB
+- Index done: idx-1..4, idx-11 (D-044), idx-13 (D-063: `index` counts non-photo files per drive, schema V3; the drive
+  page shows photography / not / unaccounted / free). Flats 1 is indexed and hashed; its duplicate report found 113.5 GB
   reclaimable (`docs/private/IDX5_FLATS1_RESULTS.md`). `lrcat mark` not run on a real catalog yet (idx-3 unverified).
 - ing-12 done (legacy-seen frames get the D-005 name at import). eval-1 done; its recommendation awaits the user (`docs/reviews/2026-11-11-eval-1-sequencing.md`).
 - A live dry run planned both real cards (D-031); no real import has run yet (ing-11 is the user's).
@@ -67,7 +68,8 @@ task's commit:
 0. **[user] visual check of the new UI (rv-1..rv-6)**: restart `serve` (`/` now serves it). Then **rv-7 Photos [stronger]**. Also the older
    **[user] visual check (ui-5..15, card-3):** restart `uv run photovault serve` (it picks up ui-11..15), try the
    Tasks home page, the sidebar groups, drives, cards, a step's Run button (e.g. Hash) and the editor (Photos).
-1. **ing-13 [stronger]** (D-042): stops a double card read at import (ing-12 is done). Then:
+1. **[user] re-index Big Boy Old** (`uv run photovault index "/Volumes/Big Boy Old"`), then open its drive page.
+   **ing-13 [stronger]** (D-042): stops a double card read at import (ing-12 is done). Then:
 2. **[user] ing-11:** the first real import (commands in `docs/user/CARD_WORKFLOW.md`), after ing-12, then paste back the
    timings, `sync_method` and counts.
 3. **[user] idx-6:** resume the PP 1 hash with `--skip-prefix` on the damaged folder, then run `report duplicates`
@@ -94,11 +96,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-063 (user, idx-13): non-photo files counted per drive in `volume_usage` (V3); videos split by camera signals.
 - D-062 (user, rv-6): the new UI is the only UI; Photos is its own task rv-7; slices go to Haiku/Sonnet agents.
 - D-061 (agent, rv-2): a hash shows the drive's progress (files hashed before the run count); pace stays the run's.
 - D-060 (agent, rv-1): `/next` beside classic; dev palette picker on by default with contrast grades; calmer task cards.
 - D-059 (user, rv-1): UI rebuilt in Vite + React + TS + Tailwind + framer-motion at `/next`; build committed; palette engine vendored.
-- D-058 (agent, ui-15): NTFS drives walk via `lstat` and can only be LEGACY (read-only on macOS); Windows/Synology system folders skipped.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

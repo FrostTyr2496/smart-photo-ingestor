@@ -86,4 +86,12 @@ CREATE INDEX geo_points_time ON geo_points (utc_time);
 CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
 
-MIGRATIONS: list[str] = [V1, V2]
+V3 = """
+CREATE TABLE volume_usage (                          -- files the catalog does not track one by one (idx-13, D-063)
+  volume_id TEXT NOT NULL REFERENCES volumes, category TEXT NOT NULL,
+  files INTEGER NOT NULL, bytes INTEGER NOT NULL, updated_at TEXT NOT NULL,
+  PRIMARY KEY (volume_id, category)
+);
+"""
+
+MIGRATIONS: list[str] = [V1, V2, V3]

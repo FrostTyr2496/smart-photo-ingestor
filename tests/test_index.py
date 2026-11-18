@@ -131,3 +131,41 @@ def test_stop_pauses_then_rerun_resumes_same_job(env, capsys, monkeypatch) -> No
 def test_unregistered_volume_is_refused(env, capsys) -> None:
     code, lines = run(capsys, "index", str(env["drive"]))
     assert code == 1 and "volumes assign" in lines[-1]["message"]
+
+
+def test_index_counts_files_it_does_not_track(env, capsys, monkeypatch) -> None:
+    """idx-13: non-photo files land in volume_usage; a video with no camera signal is `video_no_camera`."""
+    import photovault.index as index_mod
+    from photovault.metadata import MetadataResult
+
+    movies = env["drive"] / "Movies"
+    movies.mkdir()
+    (movies / "Film (2010).mp4").write_bytes(b"v" * 400)
+    (movies / "Film.mkv").write_bytes(b"m" * 300)
+    (env["drive"] / "Previews.lrdata").mkdir()
+    (env["drive"] / "Previews.lrdata/p.lrprev").write_bytes(b"p" * 60)
+
+    def read(paths, **kw):  # noqa: ANN001
+        r = fake_read([p for p in paths if "Movies" not in str(p)], **kw)
+        return MetadataResult(meta=r.meta, errors={})
+
+    monkeypatch.setattr(index_mod.metadata, "read_metadata", read)
+    assign(capsys, env["drive"])
+    c = conn()
+    vid = c.execute("SELECT volume_id FROM volumes").fetchone()[0]
+    stop = {"n": 0}
+
+    def stop_at_once() -> bool:
+        stop["n"] += 1
+        return True
+
+    index_volume(c, load_config(), env["drive"], emit=Emitter(io.StringIO()), should_stop=stop_at_once)
+    assert repo.volume_usage(c, vid) == {}  # a paused run writes no usage
+
+    index_volume(c, load_config(), env["drive"], emit=Emitter(io.StringIO()))
+    rows = repo.volume_usage(c, vid)
+    assert rows["lightroom"] == (2, len(b"not to be opened") + 60)
+    assert rows["documents"] == (1, len("ignored"))
+    assert rows["video_other"] == (1, 300)
+    assert rows["video_no_camera"] == (1, 400)
+    assert "Movies/Film (2010).mp4" in states(c)  # still tracked as a video instance

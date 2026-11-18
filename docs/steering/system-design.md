@@ -30,7 +30,8 @@ as task-execution §6 describes.
 | `photovault/protocol.py`, `cli.py` | JSON-lines `Emitter`; argparse CLI | fnd-6, ing-9 |
 | `photovault/hashing.py` | `sha256_file`, `partial_sha256` | ing-1 |
 | `photovault/copy_engine.py` | `copy_verified` (the only media writer) | ing-2 |
-| `photovault/scan.py` | `walk`, `classify`, `FileEntry` | ing-3 |
+| `photovault/scan.py` | `walk`, `walk_all`, `classify`, `FileEntry` | ing-3, idx-13 |
+| `photovault/usage.py` | `category`, `non_camera_videos`, `usage_rows`, `summarize` (drive usage) | idx-13 |
 | `photovault/groups.py` | `build_groups`, `GroupPlan`, `Member` | ing-4 |
 | `photovault/naming.py` | `shoot_date`, `canonical_stem`, `dest_dir`, `windows_safe`, `check_unique` | ing-5 |
 | `photovault/ingest.py` | `plan_card_ingest`, `run_job`, `JobSummary` | ing-6, ing-7 |
@@ -85,6 +86,7 @@ def copy_verified(src: Path, dst: Path, *, mtime_ns: int | None = None) -> CopyR
 @dataclass(frozen=True) class FileEntry: rel_path: str; abs_path: Path; size: int; mtime_ns: int; kind: str
 def classify(name: str) -> str                              # §8 kinds
 def walk(root: Path, *, include_ignored: bool = False) -> Iterator[FileEntry]
+def walk_all(root: Path) -> tuple[list[FileEntry], list[Path]]  # ignored kinds kept + the *.lrdata folders skipped (idx-13)
 
 # groups.py
 @dataclass class Member: entry: FileEntry; role: str
@@ -237,6 +239,25 @@ effective geotag. `dirty = 1` means the XMP sidecar on WORKING must be rewritten
 pool of GPS fixes (`utc_time` is UTC ISO-8601). `settings` holds user defaults (creator, copyright, default_offset,
 match_window_s).
 
+## 5c. Catalog schema v3 (migration 3)
+
+Approved by the user on 2026-11-18 (idx-13, D-063). The SQL is the `V3` string in `photovault/catalog/migrations.py`:
+
+```sql
+CREATE TABLE volume_usage (
+  volume_id TEXT NOT NULL REFERENCES volumes, category TEXT NOT NULL,
+  files INTEGER NOT NULL, bytes INTEGER NOT NULL, updated_at TEXT NOT NULL,
+  PRIMARY KEY (volume_id, category)
+);
+```
+
+The files on a volume that the catalog does not track one by one, counted by `photovault/usage.py`. A complete
+`index` replaces the volume's rows; a paused run writes none. Categories: `lightroom` (`*.lrcat*`, `*.lrprev` and
+the `*.lrdata` folders) and `photo_extras` count as photography; `video_no_camera` (tracked `video` instances with no
+camera signal), `video_other`, `audio`, `image_other`, `documents`, `archives`, `software` and `other` do not.
+`disk_used` (files = 0) holds the drive's used bytes from `statvfs` at the index; a Mac folder has none. The drive
+summary reports used − counted as "unaccounted" (system and hidden folders, unreadable files).
+
 ## 6. Naming (D-004, D-005)
 
 - **File stem:** the template `M{num:04d}_{date}-{time}-{subsec}_{body}_{ident}`, with derivative suffixes kept.
@@ -281,6 +302,11 @@ match_window_s).
 | sidecar | xmp srt aae | yes | `sidecar` / `telemetry` (srt) / `aae` |
 | proxy | lrv lrf | yes | `proxy` |
 | ignored | thm scr ais dat dsc bin lrprev db ds_store, and anything else | no | — |
+
+`ignored` files are not tracked, but `index` counts them by usage category (§5c). A `video` is camera footage when
+its folder holds camera photos, a camera sidecar (`lrv thm aae xmp`, not `srt`) shares its stem, its stem is
+camera-style, `DCIM` is on its path, or ExifTool finds a Make or Model; otherwise it counts as `video_no_camera`.
+It is still tracked and imported either way.
 
 The walk skips dot-names (including `._*`), zero-byte files, and the directories `.Trashes`,
 `.Spotlight-V100`, `.fseventsd`, `System Volume Information`, `LOST.DIR`, `*.lrdata`.

@@ -137,4 +137,21 @@ export interface DriveSummary {
     by_volume: Array<FilesBytes & { volume_id: string; label: string; role: string; mounted: boolean }>;
   } | null;
   cameras?: Array<{ camera: string; name: string; files: number; bytes: number }>;
+  usage?: DriveUsage | null;
+}
+
+/** Photography vs everything else on a drive (idx-13); null until an index has counted it. */
+export interface UsagePart {
+  category: string;
+  files: number;
+  bytes: number;
+}
+
+export interface DriveUsage {
+  photo: FilesBytes & { parts: UsagePart[] };
+  non_photo: FilesBytes & { parts: UsagePart[] };
+  unaccounted: number | null;
+  used: number | null;
+  free: number | null;
+  capacity: number | null;
 }

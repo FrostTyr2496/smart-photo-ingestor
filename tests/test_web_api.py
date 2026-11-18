@@ -566,6 +566,23 @@ def test_volume_summary_and_file_list(srv: Client) -> None:
     assert srv.call("POST", "/api/volumes/vol-work")[0] == 405
 
 
+def test_volume_summary_usage_splits_photography_from_the_rest(srv: Client) -> None:
+    """idx-13: usage is None until an index counts the drive, then photo vs non-photo with free space."""
+    assert srv.call("GET", "/api/volumes/vol-work")[1]["usage"] is None
+    c = db.connect(srv.app.catalog_path)
+    try:
+        cap = c.execute("SELECT capacity_bytes FROM volumes WHERE volume_id = 'vol-work'").fetchone()[0]
+        with repo.transaction(c):
+            repo.replace_volume_usage(c, "vol-work", {"lightroom": (2, 5), "audio": (3, 100), "disk_used": (0, 200)})
+    finally:
+        c.close()
+    u = srv.call("GET", "/api/volumes/vol-work")[1]["usage"]
+    assert u["photo"]["bytes"] == 10 + 5 and u["photo"]["files"] == 1 + 2
+    assert u["non_photo"]["parts"] == [{"category": "audio", "files": 3, "bytes": 100}]
+    assert u["unaccounted"] == 200 - 15 - 100 and u["used"] == 200
+    assert u["free"] == (max(cap - 200, 0) if cap else None)
+
+
 def test_volume_summary_lists_runs_with_their_results(srv: Client) -> None:
     c = db.connect(srv.app.catalog_path)
     with repo.transaction(c):

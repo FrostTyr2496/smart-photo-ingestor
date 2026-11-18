@@ -84,8 +84,20 @@ def walk(root: Path, *, include_ignored: bool = False) -> Iterator[FileEntry]:
     reports folders as regular files there, which made `os.walk` see no folders at all. An unreadable folder
     raises `OSError`.
     """
+    found, _ = _walk(Path(root), include_ignored)
+    yield from found
+
+
+def walk_all(root: Path) -> tuple[list[FileEntry], list[Path]]:
+    """One walk for indexing and drive usage (idx-13): every file `walk` would see, `ignored` kinds included, and
+    the `*.lrdata` folders it did not descend (Lightroom previews, which count as photography)."""
+    return _walk(Path(root), True)
+
+
+def _walk(root: Path, include_ignored: bool) -> tuple[list[FileEntry], list[Path]]:
     found: list[FileEntry] = []
-    stack = [Path(root)]
+    lrdata: list[Path] = []
+    stack = [root]
     while stack:
         folder = stack.pop()
         with os.scandir(folder) as it:
@@ -96,6 +108,8 @@ def walk(root: Path, *, include_ignored: bool = False) -> Iterator[FileEntry]:
             if stat.S_ISDIR(st.st_mode):
                 if not _skip_dir(name):
                     stack.append(folder / name)
+                elif name.endswith(SKIP_DIR_SUFFIXES):
+                    lrdata.append(folder / name)
                 continue
             if name.startswith(".") or not stat.S_ISREG(st.st_mode) or st.st_size == 0:
                 continue
@@ -113,4 +127,5 @@ def walk(root: Path, *, include_ignored: bool = False) -> Iterator[FileEntry]:
                 )
             )
     found.sort(key=lambda entry: entry.rel_path)
-    yield from found
+    lrdata.sort()
+    return found, lrdata

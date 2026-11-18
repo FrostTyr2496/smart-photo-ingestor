@@ -14,14 +14,14 @@ from collections import Counter, defaultdict
 from pathlib import Path, PurePosixPath
 from typing import Callable, Iterable
 
-from photovault import metadata, volumes
+from photovault import metadata, usage, volumes
 from photovault.catalog import repo
 from photovault.config import Config
 from photovault.groups import build_groups
 from photovault.hashing import partial_sha256, sha256_file
 from photovault.naming import body_nickname
 from photovault.protocol import Emitter, human_bytes
-from photovault.scan import FileEntry, walk
+from photovault.scan import FileEntry, walk_all
 
 META_KINDS = {"raw", "jpeg", "heic", "video", "derivative"}
 BATCH = 500
@@ -109,7 +109,8 @@ def index_volume(
     next_seq = (conn.execute("SELECT MAX(seq) FROM job_items WHERE job_id = ?", (job_id,)).fetchone()[0] or 0) + 1
 
     emit.emit("progress", phase="scan", current=0, total=0, message=f"walking {mount}")
-    entries = list(walk(mount))
+    walked, lrdata = walk_all(mount)
+    entries = [e for e in walked if e.kind != "ignored"]
     existing = repo.volume_instances(conn, vid)
     seen = {repo.path_key(e.rel_path) for e in entries}
     todo = [e for e in entries if not unchanged(existing.get(repo.path_key(e.rel_path)), e)]
@@ -161,7 +162,11 @@ def index_volume(
             emit.emit("progress", phase="index", current=done, total=len(todo), message="")
     flush()
 
+    emit.emit("progress", phase="usage", current=0, total=0, message="sorting the files that are not photos")
+    rows = usage.usage_rows(walked, lrdata, mount,
+                            lambda paths: metadata.read_metadata(paths, workers=cfg.exiftool_workers).meta)
     with repo.transaction(conn):
+        repo.replace_volume_usage(conn, vid, rows)
         gone = [r["instance_id"] for k, r in existing.items() if k not in seen and r["state"] != "missing"]
         missing = repo.mark_missing(conn, gone) if gone else 0
         repo.set_job_state(conn, job_id, "done")

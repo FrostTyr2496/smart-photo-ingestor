@@ -32,6 +32,10 @@ the walk, then progress. Unreadable files give a `read_error` warning and the ru
 - Files that have disappeared since the last run are marked `missing`.
 - **Ctrl-C pauses; run the same command again to resume.**
 - Lightroom catalog files (`.lrcat`) are never opened by `index`.
+- It also counts the files that are not photos (movies, music, documents, archives…) by kind, without tracking
+  them one by one. The drive page in `photovault serve` then shows **Space on this drive**: photography, not
+  photography (by kind), unaccounted (system folders, the recycle bin, unreadable files) and free. A drive indexed
+  before this shows nothing there until you index it again; unchanged files are skipped, so a re-index is quick.
 
 ## 2. Hash: what is identical
 
