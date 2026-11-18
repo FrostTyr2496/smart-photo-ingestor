@@ -38,6 +38,9 @@ Rules for every task:
   - Result (2026-11-18): `npm run typecheck` clean, `npm test` 12 passed, `npm run build` 107 KB gzipped;
     `uv run pytest -q` 490 passed, 4 skipped. Headless Chrome against the live server (read-only views) showed the
     home, drive view, contrast tab, a second palette and phone width; a running hash glided and counted up.
+    Fix (2026-11-18): the first build showed a black screen (the UMD palette engine lost its exports in the
+    production build). A Vite plugin now wraps that file as an ES module for dev, build and vitest alike; the built
+    page was checked in headless Chrome for console errors, not only the dev server.
     Not in rv-1: cards, file lists, setup dialogs, photos, settings (they open the classic UI).
 
 - [ ] 2. Cards view and card file lists (card-3, ui-10 filter bar)
