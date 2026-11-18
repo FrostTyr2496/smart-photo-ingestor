@@ -52,20 +52,41 @@ result). Build them as written there.
 
 ## Wave 2: related photos and shoots
 
-- [ ] 5. Related photos: tighter sessions, and field-scoped edits
-  - ID: rv-16 (approved, D-069; refines rv-9, D-065)
-  - `web/src/lib/photos.ts` `relatedSession`: default gap 15 min (not 1 h); apply each group's `time_shift_s`
-    before measuring gaps; break the chain at a `shoot_id` change and at a named non-DCIM parent folder change.
-  - `PhotoInspector.tsx`: related photos receive session fields (GPS, place / city / state / country, creator,
-    copyright, clock shift) by default. Title, keywords and rating go to them only with a toggle "Also apply
-    Title, Keywords & Rating to related", off by default.
-  - Verify: `cd web && npm test` (photos.test.ts cases for each break); **[user]** visual check.
+- [ ] 5. **[stronger]** Related photos: a gap ladder with Auto, and a scope per field
+  - ID: rv-16 (approved, D-069; amended by D-070, which replaces the "Also apply Title, Keywords & Rating" toggle;
+    refines rv-9, D-065). No schema change. The phone-track parts are sp-6.
+  - API: each `GET /api/groups` row gains `utc_time` (`geo.group_utc` with the `default_offset` setting, clock shift
+    applied; null without a capture time), `body_id` and `sequence_id`.
+  - `web/src/lib/photos.ts` `relatedSession`:
+    - Gaps are measured on `utc_time`, not the naive capture time.
+    - Gap ladder: 1 min, 5 min, 15 min, 1 h, 3 h, Same day, and **Auto** (the default). `relatedCounts` returns the
+      session size for each numeric step.
+    - Auto skips steps whose session is empty. It takes the step just before the largest jump `c[i+1] / c[i]` when
+      that jump is ≥ 1.5. With no such jump it takes the largest non-empty step up to 15 min, else 15 min. The chip
+      reads "Auto · 5 min".
+    - The chain breaks at a `shoot_id` change and at a change of named non-DCIM parent folder.
+    - Frames sharing a non-null `sequence_id` join or leave the session together; a bracket is never split.
+  - `PhotoInspector.tsx`, an "Applies to" block. Each row has a scope picker and a live count:
+    - Place (GPS, place name, city / state / country): the session (Auto by default).
+    - Description (title, keywords; rating once cu-0 lands): Selection only by default; it can widen to 1 min, 5 min,
+      15 min and so on.
+    - Credit (creator, copyright): Same day by default.
+    - Clock shift: **same camera body only**, never another camera or the phone. Options: Selection only, Same camera ·
+      this session, Same camera · same day (the default).
+    - The ticked related list (outlined in the grid) is the Place scope. Unticking a photo removes it from every
+      scope. Each scope's choice is saved with `usePref`.
+  - Verify: `cd web && npm test` (photos.test.ts: each ladder step, Auto picking before the jump and its fallback, a
+    UTC-shifted pair, shoot/folder breaks, a sequence kept whole, clock shift never crossing bodies);
+    `uv run pytest tests/test_web_api.py -q -k groups`; **[user]** visual check.
 
 - [ ] 6. **[stronger]** Schema V6 proposal: ratings, picks, labels, harvested shoot names and tiers
   - ID: cu-0 (**proposal first**; catalog change, rule 6)
   - Propose in one migration: `group_meta.rating INTEGER` (0..5), `group_meta.pick INTEGER NOT NULL DEFAULT 0`
     (-1 | 0 | 1), `group_meta.color_label TEXT`, and wherever the review finds best, a harvested shoot name and a
     lifecycle tier (`raw_selected`, `raw_unselected`, `processed`, `exported`, `social`) per instance or group.
+  - Also (approved, D-070): `geo_points.local_offset TEXT` (the fix's own UTC offset, `+HH:MM`) and
+    `geo_points.kind TEXT` (`photo` | `video`), for sp-2 and sp-7. If sp-2 starts before cu-0 is approved, these two
+    land alone as V6 and cu-0 becomes V7.
   - Review file `docs/reviews/<date>-cu-0-schema-v6.md` with the SQL, the §5 text, and how cu-1, cu-3, lr-1..lr-3
     use each column. The user approves before any migration.
 

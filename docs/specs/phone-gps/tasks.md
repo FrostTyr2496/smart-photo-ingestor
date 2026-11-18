@@ -11,7 +11,7 @@ reference folder read into `geo_points`) and `geo.suggest` (time-matched suggest
 
 ## Tasks
 
-- [ ] 1. Spike: how to read time + location (+ place names) from the Photos library, once, without downloading originals
+- [x] 1. Spike: how to read time + location (+ place names) from the Photos library, once, without downloading originals
   - ID: sp-1 [stronger]. Research by an agent; decision by the user.
   - Compare: (a) read `Photos.sqlite` read-only from a copy (needs Full Disk Access for the process; Core Data
     schema varies by macOS version; place names may sit in reverse-geocode data); (b) `osxphotos` (Python
@@ -76,10 +76,94 @@ reference folder read into `geo_points`) and `geo.suggest` (time-matched suggest
       throwaway tool if (a) is too brittle? (4) Do you want place names stored too (needs a catalog change:
       a `place_name` column or table; needs your approval, vault-rule 6)? (5) Is it OK to quit Photos while the DB is copied?
       (6) Are other people's shared-album photos or screenshots in the library to be excluded?
-- [ ] 2. Import the phone timeline into `geo_points` (shape set by sp-1; needs the user's approval for any dependency)
-  - ID: sp-2 (after sp-1)
-- [ ] 3. Place names as suggestions in the inspector's search box (from the phone's places near the photo's time)
-  - ID: sp-3 (after sp-2)
-- [ ] 4. Suggested shoots across devices: cluster camera and phone captures by time gaps and location into proposed
-  shoots the user accepts, renames or splits (the `shoots` table is empty today; relates to seq-2 and eval-1)
-  - ID: sp-4 (after sp-2; check with seq-2 before building)
+  - User's answers (D-066, amended by D-070): iTerm gets Full Disk Access; one import now (continuous sync is sp-5);
+    place names stored in the catalog and written to XMP (schema V5, committed); Photos is quit during the export;
+    only iPhone-camera photos and videos with a location (no screenshots, shared albums or "Shared with You").
+    **osxphotos runs as an external tool** (`uv tool run`), never as an engine dependency (D-070: it pulls in about
+    80 packages). It writes a JSON file; `photovault` reads that file with the stdlib.
+
+- [ ] 2. **[stronger]** Import iPhone locations from an osxphotos JSON export into `geo_points`
+  - ID: sp-2 (after sp-1, and after the V6 `geo_points` columns; see below). _Design:_ D-066, D-070, `system-design.md` §5e.
+  - Step 1, **[user]**, in iTerm with Photos quit (the output stays outside the repo):
+    `uv tool run --from 'osxphotos==0.78.1' osxphotos query --not-screenshot --not-shared --not-syndicated --location
+    --json [--from-date YYYY-MM-DD] [--to-date YYYY-MM-DD] > ~/.photovault/phone/photos-YYYYMMDD.json`
+    (use the PhotoVault home from `config.py` if it differs from `~/.photovault`).
+  - Step 2: `photovault meta phone <json>` in `photovault/phone.py` (stdlib `json` only). It accepts a JSON array or JSON lines of
+    osxphotos `PhotoInfo.asdict()` rows. It keeps a row when `exif_info.camera_make == "Apple"`, `exif_info.camera_model`
+    starts with `"iPhone"`, `latitude`/`longitude` are set, and `screenshot`, `shared`, `syndicated` and `intrash`
+    are all false. It keeps photos and movies.
+  - Each kept row is upserted into `geo_points` on `(source, source_ref)`: `source = 'iphone'`, `source_ref = uuid`,
+    `utc_time` = `geo.utc_text(date)` (`date` is ISO with an offset; if it has none, apply `tzoffset` seconds),
+    `lat`, `lon`, `place_name = place.name`, `city` / `state` / `country` from `place.address`
+    (`city`, `state_province`, `country`), falling back to the first entry of `place.names.city` /
+    `state_province` / `country`, `accuracy_m = NULL` (not in the JSON), `local_offset` = `tzoffset` as `+HH:MM`, and
+    `kind` = `'video'` if `ismovie` else `'photo'`. Re-running the same file changes nothing.
+  - Result: rows seen, kept, inserted, updated, and skipped per reason (`not_iphone`, `no_location`, `screenshot`,
+    `shared`, `trash`, `bad_date`). A file that is not osxphotos JSON fails with a message naming the export command.
+  - Schema: `geo_points.local_offset TEXT` and `geo_points.kind TEXT` (approved, D-070) belong to the cu-0 V6
+    migration. If cu-0 is not approved when sp-2 starts, these two columns land alone as V6 (with `system-design.md` §5f),
+    and cu-0 becomes V7.
+  - Also from the shelved draft: `group_meta.city/state/country` in `GET /api/groups`, `POST /api/groups/meta`, `meta set`
+    and the XMP (`photoshop:City/State/Country`); `geo.suggest` returns each point's `place_name`, `city`, `state`,
+    `country`.
+  - Verify: `uv run pytest tests/test_phone.py tests/test_geo.py tests/test_xmp.py -q`. The fixture is a synthetic
+    osxphotos JSON with invented coordinates. **[user]** then runs it on a short date range.
+
+- [ ] 3. Place names from the phone in the inspector
+  - ID: sp-3 (after sp-2). _Design:_ D-066.
+  - Suggestions show the place ("Harbourton, Westshire · +3 min"); Use sets the location, place name, city, state and
+    country. With the search box focused and empty, a list "Near this time, from your iPhone" offers the distinct
+    places of the phone points within ±1 h of the photo. Choosing one fills the same fields with no Nominatim call.
+    Nominatim results fill city/state/country from `addressdetails`. City, state and country are editable under Place
+    name.
+  - Verify: `cd web && npm test`; **[user]** visual check.
+
+- [ ] 4. **[stronger]** Suggested shoots across cameras and the phone
+  - ID: sp-4 (after sp-2). The `shoots` table is empty today; seq-2 (sequences inside a shoot) is unaffected.
+  - `photovault/shoots.py` `suggest_shoots(conn, gap_h=4, split_km=50)`: camera frames (UTC after clock shift, as
+    `geo.group_utc`) and iPhone points on one timeline. A new shoot starts after a gap longer than `gap_h`, or after a
+    move of more than `split_km` between consecutive located items. Clusters without camera frames are dropped;
+    frames already in a shoot are left out. Each suggestion has a name from the most common city (else the country,
+    else none) plus the dates ("Harbourton · 12–14 Jul"), first and last local time, frame and phone counts, cameras,
+    group ids and the centroid. Check first whether Photos' Moment titles (osxphotos `{moment}` template) are worth
+    adding to the export; that would be an extra `--field`, not a new tool.
+  - API: `GET /api/shoots/suggestions?gap_h=&split_km=`; `POST /api/shoots` (name, shoot_date, group_ids) creates a shoot
+    and assigns the frames; `POST /api/shoots/<id>` renames; `POST /api/shoots/<id>/release` unassigns its frames and
+    removes the empty shoot (catalog rows only). `/api/photo-days` gains `shoot_id`.
+  - UI `#/shoots`: gap and distance controls, suggestion cards (editable name, dates, counts, cameras, place, a
+    thumbnail strip, Accept, Open in Photos), "Accept all", and the accepted shoots (rename, release). Photos gets a
+    shoot filter and the shoot name on day headers.
+  - Verify: `uv run pytest tests/test_shoots.py tests/test_web_api.py -q`; `npm test`; a run on a copy of the real
+    catalog (counts only, into `docs/private/`).
+
+- [ ] 5. Continuous sync of phone locations (later, as its own feature; likely the Mac app via PhotoKit)
+  - ID: sp-5. The app writes the same JSON shape that sp-2 reads, so the engine side doesn't change (D-070).
+
+- [ ] 6. **[stronger]** Sessions that use the phone track, and Follow the track
+  - ID: sp-6 (after sp-2 and rv-16). _Design:_ D-070.
+  - `GET /api/geo-points?after=&before=&source=iphone` returns points (UTC, lat, lon, place fields) for the related
+    window. `web/src/lib/photos.ts` `relatedSession` chains over camera frames **and** phone points on one UTC timeline:
+    a phone point can bridge a camera gap (each consecutive item is still within the threshold). A move of more than
+    `split_km` (default 2 km) between consecutive located items (camera GPS or phone) breaks the chain, so a drive
+    between two spots splits the session even when the gap is short. Phone points are never returned as related photos.
+  - Follow the track (the default when phone points exist; D-070): saving Place to related photos calls
+    `POST /api/groups/geo-follow {group_ids, fallback: {lat, lon, alt, place_name, city, state, country}}`. For each group
+    without camera GPS, the server takes the first `geo.suggest` result with confidence `high` or `medium` (gps_source
+    `match`, place fields from that point); otherwise it uses the fallback (gps_source `neighbour`). The selected photos
+    get the user's pin. "Same point for all" (one click next to it) keeps the rv-9 behaviour. Each related row shows where its
+    location came from: "phone · +2 min" or "your pin".
+  - Verify: `uv run pytest tests/test_web_api.py -q -k geo_follow`; `cd web && npm test` (bridge, split and
+    fallback cases); **[user]** visual check.
+
+- [ ] 7. **[stronger]** Time-zone suggestions per camera from the phone timeline
+  - ID: sp-7 (after sp-2). _Design:_ D-070. Metadata only (rule 9).
+  - `photovault/clock.py` `suggest_offsets(conn, *, min_matches=20)`: split the phone timeline into runs where
+    `local_offset` stays the same (trips). For each camera body and each run, try shifts from −14 h to +14 h in 15-min
+    steps on the frames' current corrected UTC, and count frames within ±10 min of some iPhone point. When the best
+    shift is not 0, has at least `min_matches` matches, and has at least twice the matches of the runner-up, suggest it:
+    body, date range, frame count, current shift, suggested `time_shift_s`, matches. Shifts of a few minutes can't be
+    told apart this way; those stay with the manual clock shift.
+  - API `GET /api/clock-suggestions`; Photos shows a dismissible banner ("Z 6II, 12–19 Jul, looks 8 h off: shift
+    1,240 photos"). Apply sets `time_shift_s` on that body's frames in the range through the existing meta save.
+  - Verify: `uv run pytest tests/test_clock.py -q` (synthetic camera frames 8 h off against a phone track; a no-signal
+    case gives no suggestion).

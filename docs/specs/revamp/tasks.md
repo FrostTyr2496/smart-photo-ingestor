@@ -168,3 +168,10 @@ Rules for every task:
   - Verify: `uv run pytest tests/test_volumes.py -q`
   - Result (2026-11-18): `uv run pytest -q` → 532 passed, 4 skipped. On a copy of the real catalog with no mounts,
     the drive list's catalog queries take about 0.3 s (`volume_last_steps`, `meta_scan_status`); left as is.
+
+- [ ] 10. Photos: Copy filename
+  - ID: rv-10 (user ask, 2026-11-18; restored from the shelved draft, D-070). Small; can ride along with sp-3.
+  - The inspector's header has "Copy filename" (one photo): it copies the file's name on disk (the basename of
+    `rel_path`: the D-005 name on WORKING, the original name on a legacy drive), or the stem when no file is indexed.
+    A toast confirms. Uses the Clipboard API, with a fallback when it is unavailable.
+  - Verify: `cd web && npm test`; **[user]** visual check.

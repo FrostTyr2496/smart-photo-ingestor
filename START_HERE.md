@@ -79,14 +79,14 @@ task's commit:
 3. **[user] idx-6:** resume the PP 1 hash with `--skip-prefix` on the damaged folder, then run `report duplicates`
    ("If a drive shows I/O errors" in `docs/user/INDEX_WORKFLOW.md`). idx-5 is done except `lrcat mark`.
 4. **Curation (spec `docs/specs/curation`, D-069):** wave 1 is approved and ready: ing-13, idx-9, idx-10, idx-14,
-   seq-1b (then seq-2), rv-11; then rv-16, lr-0, set-1; cu-0 / dd-0 / ro-0 are proposals first.
+   seq-1b (then seq-2), rv-11; then lr-0, set-1; cu-0 / dd-0 / ro-0 are proposals first. **Phone + related
+   (D-070), next up:** rv-16 (gap ladder + Auto, a scope per field), then sp-2 (osxphotos JSON → `geo_points`), sp-3 +
+   rv-10, sp-6 (phone-track sessions, Follow the track), sp-7 (time-zone hints), sp-4 (shoots).
 5. **Card backup (spec `docs/specs/backup`, D-050..D-052):** bk-1 drive health, bk-3 backup job (after ing-13),
    vn-1 volume name on hover, then bk-2, bk-4, vn-2, vn-3. bk-5 [user]: plug in and assign the 12 TB. Metrics:
    met-2 (web view); met-4 after bk-1.
 
 ## Waiting on user
-- **Phone locations shelved (D-067):** sp-2..sp-4 specs, osxphotos and the handoff are in `git stash` ("shelved:
-  sp-2/sp-3/rv-10/sp-4 …"); only schema V5 is committed (the live catalog is V5). Say when to resume (`git stash apply`).
 - **Push the archive branch?** Run `git push -u origin archive/v0-cli-2026-11-11` if you want it on GitHub.
   (`main` is pushed.)
 - **Corpus gaps (fnd-7):** the wish list still lacks a Z6II pair, a night run, a GoPro set and an iPhone
@@ -100,11 +100,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-070 (user): field scopes for related photos, gap ladder + Auto; osxphotos as an external tool; Follow the track; V6 `geo_points` offset + kind.
 - D-069 (user): roadmap approvals: ing-13, idx-9, idx-10, eval-1 (3 of 4), rv-11 from metadata; spec `curation`.
 - D-068 (agent, rv-12..15): rename = catalog label only; `diskutil` probes run in parallel and are cached per mount.
 - D-067 (user): sp-2..sp-4 work shelved in `git stash`; schema V5 committed alone (the live catalog was already V5).
 - D-066 (user, sp-1): one iPhone import via osxphotos; place names in catalog + XMP (V5); shoots from camera + phone.
-- D-065 (user, rv-9/sp-1): related photos = the selection's capture session; phone GPS spec `phone-gps`, spike recommends reading the Photos DB copy.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.
