@@ -50,11 +50,7 @@ Reference docs:
   facts and photos stay in `docs/private/` and `testdata/` (gitignored).
 
 ## In progress
-- Task: untracked work, not ui-11 (ui-11 is committed); found uncommitted on 2026-11-18, no task ID
-- Files touched: photovault/scan.py, tests/test_scan.py (NTFS/Synology walk), photovault/web/static/app.js,
-  app.css, index.html (new-drive setup view, read-only NTFS roles)
-- Last verified: `uv run pytest -q` → 467 passed, 4 skipped (with this work in the tree)
-- Notes: from another session; it needs a task ID and its own commit. ui-11's hunks in those files are committed.
+none
 
 When you start a task, replace `none` with this block before your first edit, and set it back to `none` in the
 task's commit:
@@ -66,7 +62,7 @@ task's commit:
 ```
 
 ## Next
-0. **[user] visual check (ui-5..14, card-3):** restart `uv run photovault serve` (it picks up ui-11..14), try the
+0. **[user] visual check (ui-5..15, card-3):** restart `uv run photovault serve` (it picks up ui-11..15), try the
    Tasks home page, the sidebar groups, drives, cards, a step's Run button (e.g. Hash) and the editor (Photos).
 1. **ing-13 [stronger]** (D-042): stops a double card read at import (ing-12 is done). Then:
 2. **[user] ing-11:** the first real import (commands in `docs/user/CARD_WORKFLOW.md`), after ing-12, then paste back the
@@ -76,7 +72,7 @@ task's commit:
 4. **seq-2 [stronger]** waits for the user's answers on eval-1 (`docs/reviews/2026-11-11-eval-1-sequencing.md`).
 5. **Card backup (spec `docs/specs/backup`, D-050..D-052):** bk-1 drive health, bk-3 backup job (after ing-13),
    vn-1 volume name on hover, then bk-2, bk-4, vn-2, vn-3. bk-5 [user]: plug in and assign the 12 TB. Metrics:
-   met-2 (web view) once the uncommitted UI work is committed; met-4 after bk-1.
+   met-2 (web view); met-4 after bk-1.
 
 ## Waiting on user
 - **Push the archive branch?** Run `git push -u origin archive/v0-cli-2026-11-11` if you want it on GitHub.
@@ -95,11 +91,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-058 (agent, ui-15): NTFS drives walk via `lstat` and can only be LEGACY (read-only on macOS); Windows/Synology system folders skipped.
 - D-054 (user ask, met-1): lifetime I/O metrics per drive in `<home>/metrics.sqlite`, not the catalog.
 - D-057 (user ask, ui-14): the home page is tasks by drive; photos behind a Photos button; sidebar grouped by connection.
 - D-056 (agent, ui-13): a finished hash with indexed files still waiting shows as incomplete, never done.
 - D-055 (user ask, ui-12): each timeline step has Run; UI tasks keep the Mac awake (`caffeinate -ims -w <pid>`).
-- D-053 (agent): the UI shows runs started outside it (`ps` + `<home>/activity/<pid>.json`; catalog counts for older runs).
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

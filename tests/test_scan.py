@@ -113,3 +113,69 @@ def test_walk_is_read_only(card: Path) -> None:
 )
 def test_classify(name: str, kind: str) -> None:
     assert classify(name) == kind
+
+
+def test_walk_skips_windows_system_folders(tmp_path: Path) -> None:
+    """An NTFS drive's system folders are never descended; macOS cannot even open `$RECYCLE.BIN` (EINVAL)."""
+    root = tmp_path / "ntfs"
+    _write(root, "Photos/DSC_0001.NEF")
+    for rel in ("$RECYCLE.BIN/S-1-5-21/x.JPG", "$Recycle.Bin/x.JPG", "system volume information/x.JPG",
+                "$WinREAgent/x.JPG", "Config.Msi/x.JPG", "Photos/$RECYCLE.BIN/x.JPG"):
+        _write(root, rel)
+    assert [e.rel_path for e in walk(root)] == ["Photos/DSC_0001.NEF"]
+
+
+def test_walk_skips_synology_folders(tmp_path: Path) -> None:
+    root = tmp_path / "nas"
+    _write(root, "Music/Album/@eaDir/Cover.jpg/SYNOPHOTO_THUMB_M.jpg")
+    _write(root, "#recycle/old.JPG")
+    _write(root, "#snapshot/x.JPG")
+    _write(root, "Photos/DSC_0001.JPG")
+    assert [e.rel_path for e in walk(root)] == ["Photos/DSC_0001.JPG"]
+
+
+def test_walk_does_not_trust_the_directory_entry_type(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Paragon's NTFS driver labels folders as regular files in readdir; the walk must still descend them."""
+    import os as _os
+
+    _write(tmp_path, "Photos/Nikon/DSC_0001.NEF")
+    _write(tmp_path, "top.JPG")
+    real_scandir = _os.scandir
+
+    class Lying:
+        def __init__(self, entry):
+            self._e = entry
+            self.name, self.path = entry.name, entry.path
+
+        def is_dir(self, *, follow_symlinks=True):
+            return False
+
+        def is_file(self, *, follow_symlinks=True):
+            return True
+
+    class Wrap:
+        def __init__(self, path):
+            self._it = real_scandir(path)
+
+        def __enter__(self):
+            return (Lying(e) for e in self._it)
+
+        def __exit__(self, *exc):
+            self._it.close()
+
+        def __iter__(self):
+            return (Lying(e) for e in self._it)
+
+    monkeypatch.setattr("photovault.scan.os.scandir", Wrap)
+    assert [e.rel_path for e in walk(tmp_path)] == ["Photos/Nikon/DSC_0001.NEF", "top.JPG"]
+
+
+def test_walk_raises_on_an_unreadable_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write(tmp_path, "Photos/DSC_0001.JPG")
+
+    def boom(path):
+        raise OSError(22, "Invalid argument", str(path))
+
+    monkeypatch.setattr("photovault.scan.os.scandir", boom)
+    with pytest.raises(OSError):
+        list(walk(tmp_path))

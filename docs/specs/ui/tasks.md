@@ -307,3 +307,14 @@ still naive, apply the `settings` value `default_offset` (default "+00:00"). The
   - Verify: `uv run pytest tests/test_web_api.py -q`, and a browser check
   - Result (2026-11-18): full suite 470 passed, 4 skipped. Headless Chrome on a copy of the catalog with injected
     tasks: busy blocks per drive, idle list, Tasks/Photos/Back switching and group folding all behaved.
+
+- [x] 15. NTFS and Synology drives: walk them, set them up read-only (visual check pending, user)
+  - ID: ui-15 (found uncommitted on 2026-11-18 from another session; given its ID and committed on its own)
+  - `scan.walk` takes each entry's type from `lstat`, not the directory entry: Paragon's NTFS driver reports
+    folders as files, so `os.walk` saw no folders. It also skips Windows and Synology system folders
+    (`$RECYCLE.BIN`, `System Volume Information`, `@eaDir`, `#recycle`, …) case-insensitively. In the UI, an NTFS
+    drive can only be set up as LEGACY (macOS mounts NTFS read-only), with a note saying why. The setup dialog gains
+    "Run the workflow when setup finishes", and a drive being set up shows its progress in the middle view.
+    No API, schema or engine signature change.
+  - Verify: `uv run pytest tests/test_scan.py -q`
+  - Result (2026-11-18): full suite 489 passed, 4 skipped.

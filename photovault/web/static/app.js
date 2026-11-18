@@ -53,6 +53,7 @@ const st = {
   earlierOpen: false,
   importDrive: null,
   assignDrive: null,
+  setupView: null,     // { drive, taskId, role, runAfter }: a new drive being set up, shown in the middle view
   saving: false,
   loaded: false,
 };
@@ -538,6 +539,10 @@ function driveCard(d) {
     if (!isNew) {
       const status = driveStatus(d);
       kids.push(el("div", { class: `drive-status ${status.cls}` }, status.text));
+    } else if (!d.looks_like_card) {
+      const t = assignTaskFor(d.mount);
+      if (t && !t.final) kids.push(el("div", { class: "drive-status running" }, `Setting up as ${assignRoleWord(t)}…`));
+      else if (t && t.state === "failed") kids.push(el("div", { class: "drive-status warn" }, "Setup failed · click to see why"));
     }
   } else {
     const seen = d.last_seen_at ? ` · last seen ${relTime(d.last_seen_at)}` : "";
@@ -557,11 +562,13 @@ function driveCard(d) {
     }, kids);
   }
   if (isNew) {
-    // A drive the catalog does not know yet: the whole card opens the setup dialog.
+    // A drive the catalog does not know yet opens the setup dialog, or, once a setup was started, its setup view.
+    const open = st.setupView && st.setupView.drive.mount === d.mount;
+    if (open) cls.push("open");
     return el("div", {
       class: `${cls.join(" ")} is-clickable`, role: "button", tabindex: "0", title: "Set up this drive",
-      onclick: () => openAssign(d),
-      onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openAssign(d); } },
+      onclick: () => clickNewDrive(d),
+      onkeydown: (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); clickNewDrive(d); } },
     }, kids);
   }
   // A registered drive opens its summary in the middle view. A click on one of its buttons does only that button's job.
@@ -661,19 +668,32 @@ async function loadDrives() {
 
 // ---------------------------------------------------------------- dialogs for drive actions
 
-function openAssign(d) {
+// macOS mounts NTFS read-only, and working and master drives need the ID file written to them.
+function readOnlyFs(d) {
+  return !d.local && /ntfs/i.test(d.fs || "");
+}
+
+function openAssign(d, preset = {}) {
   st.assignDrive = d;
   $("#assign-name").textContent = d.local
     ? `Folder on this Mac: ${d.mount}. Only this folder is used.`
     : `Drive: ${baseName(d.mount) || driveName(d)}${d.fs ? ` · ${d.fs}` : ""}`;
   const form = $("#f-assign");
+  const ro = readOnlyFs(d);
   for (const opt of form.elements.role.options) {  // a Mac folder has no disk UUID, so it cannot be a legacy drive
-    const off = Boolean(d.local) && opt.hasAttribute("data-not-local");
+    const off = (Boolean(d.local) && opt.hasAttribute("data-not-local")) || (ro && opt.value !== "LEGACY");
     opt.hidden = off;
     opt.disabled = off;
   }
-  form.elements.role.value = "WORKING";
-  form.elements.label.value = d.label || "";
+  const note = $("#assign-note");
+  note.hidden = !ro;
+  note.textContent = ro
+    ? `macOS can read ${d.fs.toUpperCase()} drives but cannot write to them, so this drive can only be a legacy drive. `
+      + "To use it as a working drive or master backup, reformat it as APFS or exFAT (this erases it)."
+    : "";
+  form.elements.role.value = ro ? "LEGACY" : (preset.role || "WORKING");
+  form.elements.label.value = preset.label ?? d.label ?? "";
+  form.elements.run_after.checked = preset.runAfter ?? true;
   $("#dlg-assign").showModal();
 }
 
@@ -968,9 +988,13 @@ function renderTasks() {
 // is running changes, so a focused card keeps focus.
 let driveSig = "";
 function syncDriveViews() {
-  const sig = st.drives.map((d) => `${d.volume_id}:${liveStep(d)?.step || ""}`).join("|");
+  const sig = st.drives.map((d) => {
+    const a = d.volume_id ? null : assignTaskFor(d.mount);
+    return `${d.volume_id}:${liveStep(d)?.step || ""}:${a ? a.state : ""}`;
+  }).join("|");
   if (sig !== driveSig) { driveSig = sig; renderDrives(); }
   updateWorkflowUI();
+  renderSetupView();
 }
 
 // The slim header bar: average progress when every running task is countable, else a moving bar.
@@ -1081,6 +1105,7 @@ async function onTasksFinished(list) {
   }
   await Promise.allSettled([loadDrives(), loadShoots(), loadGroups()]);
   if (st.driveView && !st.workflow) await loadDriveView().catch(reportError);
+  finishSetup();
 }
 
 // One loop for tasks: 1 s while anything runs, 5 s when idle. kick() runs it now.
@@ -1667,6 +1692,165 @@ const FILE_STATE_TILES = [
 const FILE_STATE_NAME = { indexed: "Not hashed yet", verified: "Hashed", mismatch: "Unreadable", missing: "Missing" };
 const FILE_PAGE = 200;
 
+// ---------------------------------------------------------------- setting up a new drive
+
+// The newest assign task for a mount (live or finished), or null.
+function assignTaskFor(mount) {
+  if (!mount) return null;
+  let best = null;
+  for (const t of st.tasks.values()) {
+    const w = argvWords(t.argv);
+    if (commandKey(w) === "assign" && w[2] === mount && (!best || t.task_id > best.task_id)) best = t;
+  }
+  const sv = st.setupView;  // a task just started has no argv until its first poll
+  if (sv && sv.drive.mount === mount && sv.taskId != null && (!best || sv.taskId > best.task_id)) {
+    best = st.tasks.get(sv.taskId) || best;
+  }
+  return best;
+}
+
+function assignRoleWord(t) {
+  const role = flagValue(argvWords(t.argv), "--role")
+    || (st.setupView && st.setupView.taskId === t.task_id ? st.setupView.role : "");
+  return ROLE_WORD[role] || "a drive";
+}
+
+// A new drive with a setup already started (running, or failed) shows that setup; otherwise the dialog opens.
+function clickNewDrive(d) {
+  const t = assignTaskFor(d.mount);
+  if (t && t.state !== "done") openSetup(d, { taskId: t.task_id });
+  else openAssign(d);
+}
+
+function openSetup(d, { taskId, role, label, runAfter } = {}) {
+  hideCards();
+  st.driveView = null;
+  st.driveSummary = null;
+  timelineBox = workflowBtn = null;
+  const t = st.tasks.get(taskId);
+  const keep = st.setupView && st.setupView.taskId === taskId ? st.setupView : {};
+  st.setupView = {
+    drive: d, taskId,
+    role: role || keep.role || (t ? flagValue(argvWords(t.argv), "--role") : "") || "",
+    label: label ?? keep.label ?? "",
+    runAfter: runAfter ?? keep.runAfter ?? false,
+  };
+  setupSig = "";
+  $("#photo-panel").hidden = true;
+  $("#drive-view").hidden = false;
+  renderSetupView();
+  renderDrives();
+  finishSetup();
+}
+
+// Plain words for why a setup failed, and whether the drive is read-only to this Mac.
+function setupProblem(t, d) {
+  const msg = t.error || `The setup stopped (exit code ${t.exit_code ?? "unknown"}).`;
+  if (/Errno 30|Read-only file system/i.test(msg)) {
+    const fs = (d.fs || "").toUpperCase();
+    return {
+      readOnly: true,
+      lines: [
+        fs === "NTFS"
+          ? "macOS can read NTFS drives but cannot write to them, so the drive's ID file could not be written."
+          : "This drive is mounted read-only, so the drive's ID file could not be written.",
+        "A working drive or master backup gets a small ID file (.photovault-id) at its top, so it is recognised "
+          + "whatever its name. Nothing was written and nothing on the drive changed.",
+        "You can set it up as a legacy drive instead: nothing is written to it, and its photos are listed, hashed "
+          + "and counted as copies. To use it as a master backup, reformat it as APFS or exFAT first (this erases it).",
+      ],
+      msg,
+    };
+  }
+  return { readOnly: false, lines: [msg], msg };
+}
+
+let setupSig = "";
+let setupElapsed = null;
+
+// The middle view while a new drive is set up: the setup step, then the workflow that follows it. Rebuilt only
+// when the task's state changes; the elapsed time is updated in place.
+function renderSetupView() {
+  const sv = st.setupView;
+  if (!sv) return;
+  const d = sv.drive;
+  const t = sv.taskId != null ? st.tasks.get(sv.taskId) : null;
+  const state = t ? t.state : "running";
+  if (t && setupElapsed && state === "running") {
+    setupElapsed.textContent = t.startMs ? `${fmtElapsed((Date.now() - t.startMs) / 1000)} elapsed` : "";
+  }
+  const sig = `${sv.taskId}:${state}:${t ? t.error : ""}:${sv.role}`;
+  if (sig === setupSig) return;
+  setupSig = sig;
+  setupElapsed = null;
+
+  const role = sv.role || (t ? flagValue(argvWords(t.argv), "--role") : "") || "";
+  const roleWord = ROLE_WORD[role] || "a drive";
+  const steps = ["index", "hash", "scan"].concat(role === "WORKING" ? ["sidecars"] : []);
+  const failed = state === "failed" || state === "paused";
+  const done = state === "done";
+  const after = sv.runAfter ? "Starts after setup" : "Run it after setup";
+
+  const setupStep = el("li", { class: `tl-step is-${failed ? "warn" : done ? "done" : "running"}` },
+    el("span", { class: "tl-dot", "aria-hidden": "true" }, done ? "✓" : "1"),
+    el("span", { class: "tl-name" }, "Set up"),
+    el("span", { class: "tl-when" }, failed ? "Failed" : done ? "Done" : "Running now"),
+    el("span", { class: "tl-hint muted small" }, `Add it to the catalog as ${roleWord}`),
+    failed || done ? null : el("div", { class: "bar indet", role: "progressbar", "aria-label": "Set up" }, el("div", { class: "fill" })));
+  const items = [setupStep, ...steps.map((id, i) => el("li", { class: `tl-step is-${failed ? "never" : "queued"}` },
+    el("span", { class: "tl-dot", "aria-hidden": "true" }, String(i + 2)),
+    el("span", { class: "tl-name" }, STEP_NAME[id]),
+    el("span", { class: "tl-when" }, failed ? "Not started" : after),
+    el("span", { class: "tl-hint muted small" }, STEP_HINT[id])))];
+
+  const head = el("div", { class: "section-head" },
+    el("h2", null, driveName(d)),
+    el("span", { class: "muted small" }, failed ? "Setup failed" : `Setting up as ${roleWord}`));
+  const back = button("Back to photos", closeDrive);
+  let body;
+  if (failed) {
+    const p = setupProblem(t, d);
+    const actions = p.readOnly
+      ? [button("Set up as legacy drive…", () => openAssign(d, { role: "LEGACY", label: sv.label }), "primary"), back]
+      : [button("Try again…", () => openAssign(d, { role, label: sv.label }), "primary"), back];
+    body = el("div", { class: "empty" },
+      el("h3", null, `Could not set up ${driveName(d)} as ${roleWord}`),
+      el("div", { class: "setup-why" },
+        p.lines.map((line) => el("p", null, line)),
+        el("p", null, el("code", null, p.msg))),
+      el("div", { class: "empty-actions" }, actions));
+  } else {
+    setupElapsed = el("span", { class: "muted small" },
+      t && t.startMs ? `${fmtElapsed((Date.now() - t.startMs) / 1000)} elapsed` : "");
+    body = el("div", null,
+      el("div", { class: "loading", role: "status" },
+        el("span", { class: "spinner", "aria-hidden": "true" }),
+        el("span", { class: "muted" }, done ? "Set up. Opening the drive…" : "Writing the drive's ID file and adding it to the catalog…"),
+        setupElapsed),
+      el("p", { class: "muted small" }, sv.runAfter
+        ? "When setup finishes, this page shows the drive and the workflow starts."
+        : "When setup finishes, this page shows the drive. Press Run workflow there to index and hash it."),
+      el("div", { class: "bulkbar" }, back));
+  }
+  $("#drive-view").replaceChildren(head,
+    el("p", { class: "muted small" }, [d.fs, d.size ? `${d.size} total` : null, d.free ? `${d.free} free` : null].filter(Boolean).join(" · ")),
+    el("ol", { class: "timeline", "aria-label": "Setup and workflow" }, items),
+    body);
+}
+
+// When the setup task has finished and the drive list knows the new volume, open its summary (and start the
+// workflow if asked).
+function finishSetup() {
+  const sv = st.setupView;
+  if (!sv) return;
+  const t = sv.taskId != null ? st.tasks.get(sv.taskId) : null;
+  if (!t || t.state !== "done") return;
+  const d = st.drives.find((x) => x.volume_id && x.mount === sv.drive.mount);
+  if (!d) return;
+  openDrive(d.volume_id);
+  if (sv.runAfter) runWorkflow(d).catch(reportError);
+}
+
 // Placeholder while a drive's summary loads: a spinner, then grey blocks in the shape of the real summary.
 function renderDriveLoading(volumeId) {
   const d = st.drives.find((x) => x.volume_id === volumeId) || {};
@@ -1684,6 +1868,8 @@ function renderDriveLoading(volumeId) {
 
 function openDrive(volumeId) {
   hideCards();
+  st.setupView = null;
+  setupSig = "";
   st.driveView = volumeId;
   st.driveSummary = null;
   timelineBox = workflowBtn = null;
@@ -1704,6 +1890,8 @@ function openDrive(volumeId) {
 }
 
 function closeDrive() {
+  st.setupView = null;
+  setupSig = "";
   st.driveView = null;
   st.driveSummary = null;
   timelineBox = workflowBtn = null;
@@ -2094,7 +2282,7 @@ function hideCards() {
 }
 
 function openCards(volumeId) {
-  if (st.driveView) closeDrive();
+  if (st.driveView || st.setupView) closeDrive();
   st.cardsOpen = true;
   st.cardView = volumeId;
   st.cardFiles = { tier: "", copies: "", other: "", camera: "", offset: 0 };
@@ -2604,8 +2792,10 @@ async function assignDrive(event) {
   const args = { mount: d.mount, role: form.elements.role.value };
   const label = form.elements.label.value.trim();
   if (label) args.label = label;
+  const runAfter = form.elements.run_after.checked;
   $("#dlg-assign").close();
-  await startTask("assign", args);
+  const taskId = await startTask("assign", args);
+  if (taskId) openSetup(d, { taskId, role: args.role, label, runAfter });
 }
 
 async function ignoreAssignDrive() {

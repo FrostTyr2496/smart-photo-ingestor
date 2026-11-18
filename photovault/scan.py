@@ -23,6 +23,14 @@ PROXY_EXTS = frozenset({"lrv", "lrf"})
 SKIP_DIR_NAMES = frozenset(
     {".Trashes", ".Spotlight-V100", ".fseventsd", "System Volume Information", "LOST.DIR"}
 )
+# Windows system folders on NTFS drives, and Synology NAS system folders. macOS cannot open some of them (`$RECYCLE.BIN` gives EINVAL), and none
+# hold photos to track. Matched case-insensitively, since Windows writes both `$RECYCLE.BIN` and `$Recycle.Bin`.
+SKIP_DIR_NAMES_CI = frozenset(
+    {"$recycle.bin", "system volume information", "$winreagent", "$windows.~bt", "$windows.~ws", "$sysreset",
+     "config.msi", "recycler",
+     # Synology NAS folders: thumbnail caches, its recycle bin and snapshots.
+     "@eadir", "#recycle", "#snapshot"}
+)
 SKIP_DIR_SUFFIXES = (".lrdata",)
 
 
@@ -62,32 +70,39 @@ def classify(name: str) -> str:
 
 
 def _skip_dir(name: str) -> bool:
-    return name.startswith(".") or name in SKIP_DIR_NAMES or name.endswith(SKIP_DIR_SUFFIXES)
-
-
-def _raise(err: OSError) -> None:
-    raise err
+    return (name.startswith(".") or name in SKIP_DIR_NAMES or name.casefold() in SKIP_DIR_NAMES_CI
+            or name.endswith(SKIP_DIR_SUFFIXES))
 
 
 def walk(root: Path, *, include_ignored: bool = False) -> Iterator[FileEntry]:
     """Yield regular, non-empty, non-dot files under `root` in sorted `rel_path` order.
 
-    Directories in SKIP_DIR_NAMES, `*.lrdata` and dot-directories are not descended.
-    Files of kind `ignored` are yielded only when `include_ignored` is true.
+    Directories in SKIP_DIR_NAMES and SKIP_DIR_NAMES_CI, `*.lrdata` and dot-directories are not descended.
+    Files of kind `ignored` are yielded only when `include_ignored` is true. Symlinks are never followed.
+
+    Each entry's type comes from `lstat`, never from the directory entry's type field: Paragon's NTFS driver
+    reports folders as regular files there, which made `os.walk` see no folders at all. An unreadable folder
+    raises `OSError`.
     """
     found: list[FileEntry] = []
-    for dirpath, dirnames, filenames in os.walk(root, followlinks=False, onerror=_raise):
-        dirnames[:] = [d for d in dirnames if not _skip_dir(d)]
-        for name in filenames:
-            if name.startswith("."):
+    stack = [Path(root)]
+    while stack:
+        folder = stack.pop()
+        with os.scandir(folder) as it:
+            entries = list(it)
+        for entry in entries:
+            name = entry.name
+            st = os.lstat(entry.path)
+            if stat.S_ISDIR(st.st_mode):
+                if not _skip_dir(name):
+                    stack.append(folder / name)
                 continue
-            path = Path(dirpath) / name
-            st = os.lstat(path)
-            if not stat.S_ISREG(st.st_mode) or st.st_size == 0:
+            if name.startswith(".") or not stat.S_ISREG(st.st_mode) or st.st_size == 0:
                 continue
             kind = classify(name)
             if kind == "ignored" and not include_ignored:
                 continue
+            path = folder / name
             found.append(
                 FileEntry(
                     rel_path=path.relative_to(root).as_posix(),
