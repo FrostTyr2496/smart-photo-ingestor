@@ -137,6 +137,14 @@ rep-1 is replaced by bk-5; rep-0 still covers legacy content on the 12 TB.
 | P5c.3 | met-3 off-Mac copy (`metrics export`) | met-1 | **[user]** decision |
 | P5c.4 | met-4 metrics feed drive health | met-1, bk-1 | — |
 
+## Phase 5d: UI revamp (spec `revamp`, D-059)
+
+| Item | Task | Blocks on | Gate |
+|---|---|---|---|
+| P5d.1 | rv-1 scaffold, shell, tasks and drive view at `/next` (**done 2026-11-18**) | ui-15 | **[user]** visual check |
+| P5d.2 | rv-2..rv-5 cards, file lists, setup dialogs, photos and settings | rv-1 | **[user]** visual check |
+| P5d.3 | rv-6 `/next` becomes the default; classic UI removed | rv-2..rv-5 | **[user]** confirms parity |
+
 ## Phase 5: app (spec `app`)
 
 | Item | Task | Blocks on | Gate |

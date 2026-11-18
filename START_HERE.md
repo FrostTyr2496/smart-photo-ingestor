@@ -30,8 +30,7 @@ Reference docs:
   `docs/user/CARD_WORKFLOW.md`, `docs/user/INDEX_WORKFLOW.md`. `uv run pytest -q` → 442 passed, 4 skipped (`live`).
 - Index done: idx-1..4, idx-11 (D-044). Flats 1 is indexed and hashed; its duplicate report found 113.5 GB
   reclaimable (`docs/private/IDX5_FLATS1_RESULTS.md`). `lrcat mark` not run on a real catalog yet (idx-3 unverified).
-- ing-12 done: a frame first seen on a legacy drive or a card check gets the D-005 name at import.
-- eval-1 done; its recommendation awaits the user (`docs/reviews/2026-11-11-eval-1-sequencing.md`).
+- ing-12 done (legacy-seen frames get the D-005 name at import). eval-1 done; its recommendation awaits the user (`docs/reviews/2026-11-11-eval-1-sequencing.md`).
 - A live dry run planned both real cards (D-031); no real import has run yet (ing-11 is the user's).
 - Drives: cards exFAT; X9 Pro (1 TB exFAT) WORKING; Flats 1 (1 TB APFS, 98 % full) LEGACY, hashed; PP 1 (4 TB
   APFS HDD, LEGACY) indexed, its hash paused on I/O errors (resume with idx-11); the 12 TB is offline.
@@ -45,6 +44,9 @@ Reference docs:
   lists (ui-10: Show · Copies · Camera, "x / N files", drives always named). Tasks also shows runs started in a
   terminal, plus jobs left `running` with no process (ui-11, D-053). ui-7..11 and card-3 not seen in a browser yet.
   The Mac folder (`mac_folder`, default `~/Sandbox`) is a drive (D-047).
+- **UI revamp (D-059, spec `docs/specs/revamp`):** rv-1 at `127.0.0.1:8765/next`: React + Tailwind + framer-motion
+  like Argus, ambient glow, dev palette picker with contrast grades. Source `web/`, build committed under
+  `photovault/web/static/next/` (`cd web && npm install && npm run build`). Cards, photos, settings still classic.
 - Hooks: `guard_volumes.py` blocks agent writes and engine runs on `/Volumes`; live tests read mounts only under
   `-m live` (D-028, D-031). Old v0 code: local branch `archive/v0-cli-2026-11-11`. The repo is public: real-drive
   facts and photos stay in `docs/private/` and `testdata/` (gitignored).
@@ -62,7 +64,8 @@ task's commit:
 ```
 
 ## Next
-0. **[user] visual check (ui-5..15, card-3):** restart `uv run photovault serve` (it picks up ui-11..15), try the
+0. **[user] visual check of `/next` (rv-1)**, then rv-2..rv-5 (spec `docs/specs/revamp`). Also the older
+   **[user] visual check (ui-5..15, card-3):** restart `uv run photovault serve` (it picks up ui-11..15), try the
    Tasks home page, the sidebar groups, drives, cards, a step's Run button (e.g. Hash) and the editor (Photos).
 1. **ing-13 [stronger]** (D-042): stops a double card read at import (ing-12 is done). Then:
 2. **[user] ing-11:** the first real import (commands in `docs/user/CARD_WORKFLOW.md`), after ing-12, then paste back the
@@ -91,11 +94,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-060 (agent, rv-1): `/next` beside classic; dev palette picker on by default with contrast grades; calmer task cards.
+- D-059 (user, rv-1): UI rebuilt in Vite + React + TS + Tailwind + framer-motion at `/next`; build committed; palette engine vendored.
 - D-058 (agent, ui-15): NTFS drives walk via `lstat` and can only be LEGACY (read-only on macOS); Windows/Synology system folders skipped.
-- D-054 (user ask, met-1): lifetime I/O metrics per drive in `<home>/metrics.sqlite`, not the catalog.
 - D-057 (user ask, ui-14): the home page is tasks by drive; photos behind a Photos button; sidebar grouped by connection.
 - D-056 (agent, ui-13): a finished hash with indexed files still waiting shows as incomplete, never done.
-- D-055 (user ask, ui-12): each timeline step has Run; UI tasks keep the Mac awake (`caffeinate -ims -w <pid>`).
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

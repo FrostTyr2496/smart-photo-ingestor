@@ -1,0 +1,213 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Tokens: Argus's night palette. The palette engine (src/lib/theme.tsx) overwrites them on <html> when a palette
+ * is picked; these are the values before it runs. Space-separated RGB so Tailwind can add alpha.
+ */
+:root {
+  --c-bg: 7 10 18;
+  --c-surface: 14 19 31;
+  --c-raised: 22 29 45;
+  --c-ink: 234 238 245;
+  --c-ivory: 244 246 250;
+  --c-muted: 150 160 178;
+  --c-faint: 126 136 156;
+  --c-accent: 125 170 250;
+  --c-on-accent: 7 10 18;
+  --c-go: 74 222 128;
+  --c-maybe: 250 204 21;
+  --c-err: 248 113 113;
+  --c-skip: 148 163 184;
+  --c-card: 167 139 250;
+  --c-master: 96 165 250;
+  color-scheme: dark;
+}
+
+@layer base {
+  html {
+    background: rgb(var(--c-bg));
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-bg font-sans text-base text-ink antialiased;
+    margin: 0;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'cv11', 'ss01';
+    text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+  }
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.011em;
+  }
+  *,
+  ::before,
+  ::after {
+    border-color: rgb(var(--c-ink) / 0.08);
+  }
+  ::selection {
+    background: rgb(var(--c-accent) / 0.3);
+  }
+  :focus-visible {
+    outline: 2px solid rgb(var(--c-accent) / 0.85);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  button,
+  a {
+    -webkit-tap-highlight-color: transparent;
+  }
+  button,
+  a,
+  input,
+  select {
+    transition-property: background-color, border-color, color, opacity, box-shadow, transform;
+    transition-duration: 150ms;
+    transition-timing-function: ease-out;
+  }
+  input,
+  select {
+    background: rgb(var(--c-raised));
+    border: 1px solid rgb(var(--c-ink) / 0.09);
+    border-radius: 8px;
+    padding: 3px 8px;
+    color: inherit;
+    font: inherit;
+  }
+  summary {
+    list-style: none;
+    cursor: pointer;
+  }
+  summary::-webkit-details-marker {
+    display: none;
+  }
+}
+
+@layer components {
+  /* Mono micro-label, as on the website: section labels, units, timestamps. */
+  .label {
+    @apply font-mono text-2xs uppercase leading-none tracking-[0.08em] text-muted;
+  }
+  .card {
+    @apply rounded-card border border-line bg-surface/80 backdrop-blur-sm;
+  }
+  .btn {
+    @apply inline-flex h-8 items-center gap-1.5 rounded-lg border border-line-strong bg-raised/70 px-3 text-sm text-ink hover:border-ink/25 hover:bg-raised active:scale-[0.97] disabled:pointer-events-none disabled:opacity-45;
+  }
+  .btn-primary {
+    @apply btn border-transparent bg-accent font-medium text-on-accent hover:bg-accent/90;
+  }
+  .btn-ghost {
+    @apply btn border-transparent bg-transparent text-muted hover:bg-ink/5 hover:text-ink;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-2xs font-medium leading-4;
+  }
+}
+
+@layer utilities {
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* A running bar: a soft highlight sweeps across the filled part. */
+@keyframes bar-sheen {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+.bar-sheen::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.35), transparent);
+  animation: bar-sheen 1.8s ease-in-out infinite;
+}
+
+/* A bar with no total yet: a segment slides back and forth. */
+@keyframes bar-indet {
+  0% {
+    left: -35%;
+    width: 35%;
+  }
+  60% {
+    left: 100%;
+    width: 50%;
+  }
+  100% {
+    left: 100%;
+    width: 50%;
+  }
+}
+.bar-indet {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  animation: bar-indet 1.6s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+
+/* The step that is running breathes. */
+@keyframes ring-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgb(var(--c-accent) / 0.55);
+  }
+  100% {
+    box-shadow: 0 0 0 12px rgb(var(--c-accent) / 0);
+  }
+}
+.ring-pulse {
+  animation: ring-pulse 1.8s ease-out infinite;
+}
+
+/* A live dot: running tasks and connected drives. */
+@keyframes live-dot {
+  50% {
+    opacity: 0.35;
+  }
+}
+.live-dot {
+  animation: live-dot 1.6s ease-in-out infinite;
+}
+
+/* The ambient glow drifts slowly so the page never looks frozen. */
+@keyframes glow-drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(3vmax, -2vmax, 0) scale(1.06);
+  }
+}
+.glow-drift {
+  animation: glow-drift 24s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar-sheen::after,
+  .ring-pulse,
+  .live-dot,
+  .glow-drift {
+    animation: none;
+  }
+  .bar-indet {
+    animation: none;
+    left: 0;
+    width: 100%;
+    opacity: 0.5;
+  }
+}

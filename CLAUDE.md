@@ -25,6 +25,8 @@ task IDs, a decisions log, and `/close-the-loop`.
 - Setup: `uv sync`. Add an approved dependency with `uv add <pkg>`, only in the task that approves it.
 - Tests: `uv run pytest <file> -q` for the task's Verify line, then `uv run pytest -q` once before committing.
   Real-photo tests run with `uv run pytest -m realfiles` and skip when `testdata/corpus` is absent.
+- Web UI (D-059): source in `web/` (Node via Homebrew): `cd web && npm install`, `npm run typecheck`, `npm test`,
+  `npm run build` (writes `photovault/web/static/next/`, which is committed; rebuild before each UI commit).
 - CLI (from fnd-6): `uv run photovault --json <command>`. Against real drives, it is the user who runs it.
 - Commits: `feat(<task-id>): …  [<task-id>]`, one per task, staged with `git add <paths>`.
   - Commit each task as it finishes: at most 1–2 finished tasks uncommitted, more only when concurrent work
