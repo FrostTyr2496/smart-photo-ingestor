@@ -442,6 +442,18 @@ def test_photo_days_and_day_filter(srv: Client) -> None:
     groups = srv.call("GET", f"/api/groups?day={day['day']}")[1]["groups"]
     assert len(groups) == day["groups"]
 
+def test_groups_carry_utc_time_body_and_sequence(srv: Client) -> None:
+    a = srv.ids["a"]
+    rows = {g["group_id"]: g for g in srv.call("GET", "/api/groups")[1]["groups"]}
+    assert rows[a]["utc_time"] == "2026-11-10T21:00:00+00:00"  # default offset +00:00
+    assert {"body_id", "sequence_id"} <= set(rows[a])
+    assert srv.call("POST", "/api/settings", {"default_offset": "+01:00"})[0] == 200
+    srv.call("POST", "/api/groups/meta", {"group_ids": [a], "fields": {"time_shift_s": 60}})
+    rows = {g["group_id"]: g for g in srv.call("GET", "/api/groups")[1]["groups"]}
+    assert rows[a]["utc_time"] == "2026-11-10T20:01:00+00:00"  # 21:00 at +01:00, shifted a minute later
+    assert rows[srv.ids["b"]]["utc_time"] == "2026-11-10T20:00:00+00:00"
+
+
 def test_groups_meta_round_trip(srv: Client) -> None:
     a, b = srv.ids["a"], srv.ids["b"]
     status, body = srv.call("GET", "/api/groups")

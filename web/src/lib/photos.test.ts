@@ -2,6 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   addKeywords,
   applyFields,
+  autoStep,
+  buildFieldsByScope,
+  clockPhotos,
+  namedFolder,
+  planSaves,
+  reachPhotos,
+  relatedCounts,
+  relatedWindowFor,
   buildFields,
   commonValue,
   hasEdits,
@@ -41,6 +49,9 @@ const g = (id: number, over: Partial<PhotoGroup> = {}): PhotoGroup => ({
   dirty: null,
   rel_path: null,
   volume_id: null,
+  utc_time: null,
+  body_id: 1,
+  sequence_id: null,
   ...over,
 });
 
@@ -133,7 +144,9 @@ describe('month rail', () => {
 });
 
 describe('related photos', () => {
-  const at = (id: number, t: string | null) => g(id, { capture_time: t });
+  // utc_time follows the -05:00 offset the helper gives every frame
+  const utcOf = (t: string | null, off = -5) => (t ? `${new Date(Date.parse(`${t}Z`) - off * 3600000).toISOString().slice(0, 19)}+00:00` : null);
+  const at = (id: number, t: string | null, over: Partial<PhotoGroup> = {}) => g(id, { capture_time: t, utc_time: utcOf(t), ...over });
   const ids = (l: PhotoGroup[]) => l.map((x) => x.group_id);
 
   it('stops at the first gap that is too long, in both directions', () => {
@@ -170,5 +183,109 @@ describe('related photos', () => {
     const sel = [at(1, '2021-01-15T23:30:00')];
     expect(relatedWindow(sel, 3600)).toEqual({ after: '2021-01-15T11:30:00', before: '2021-01-16T11:30:00' });
     expect(relatedWindow(sel, 'day')).toEqual({ after: '2021-01-15T00:00:00', before: '2021-01-15T23:59:59' });
+  });
+
+  // Minutes after 10:00 for the ladder: each frame joins at the next step up.
+  const ladder = () => {
+    const mins = [0, 0.5, 4, 12, 50, 200, 1000];
+    return mins.map((m, i) => at(i + 1, new Date(Date.parse('2021-01-15T10:00:00Z') + m * 60000).toISOString().slice(0, 19)));
+  };
+
+  it('grows with each step of the ladder and counts them', () => {
+    const pool = ladder();
+    const sel = [pool[0]!];
+    expect(ids(relatedSession(pool, sel, 60))).toEqual([2]);
+    expect(ids(relatedSession(pool, sel, 300))).toEqual([2, 3]);
+    expect(ids(relatedSession(pool, sel, 900))).toEqual([2, 3, 4]);
+    expect(ids(relatedSession(pool, sel, 3600))).toEqual([2, 3, 4, 5]);
+    expect(ids(relatedSession(pool, sel, 10800))).toEqual([2, 3, 4, 5, 6]);
+    expect(ids(relatedSession(pool, sel, 'day'))).toEqual([2, 3, 4, 5, 6]);
+    expect(relatedCounts(pool, sel)).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it('Auto takes the step before the biggest jump', () => {
+    expect(autoStep([3, 3, 3, 30, 30])).toBe(900);
+    expect(autoStep([1, 2, 3, 4, 5])).toBe(60); // the 1 -> 2 jump is the largest
+    expect(autoStep([2, 2, 2, 2, 3])).toBe(3600); // exactly 1.5 counts
+    expect(autoStep([0, 0, 4, 4, 12])).toBe(3600); // empty steps are skipped
+    const pool = ladder();
+    expect(ids(relatedSession(pool, [pool[0]!], 'auto'))).toEqual([2]);
+  });
+
+  it('Auto falls back to the largest non-empty step up to 15 min, else 15 min', () => {
+    expect(autoStep([0, 0, 5, 5, 5])).toBe(900);
+    expect(autoStep([2, 2, 0, 0, 0])).toBe(300);
+    expect(autoStep([2, 2, 2, 2, 2])).toBe(900);
+    expect(autoStep([0, 0, 0, 4, 5])).toBe(900); // nothing up to 15 min, jump 1.25 is too small
+    expect(autoStep([0, 0, 0, 0, 0])).toBe(900);
+  });
+
+  it('measures gaps in UTC, not on the naive capture time', () => {
+    const a = at(1, '2021-01-15T10:00:00'); // 15:00 UTC
+    const b = g(2, { capture_time: '2021-01-15T20:00:30', capture_offset: '+05:00', utc_time: '2021-01-15T15:00:30+00:00' });
+    expect(ids(relatedSession([b], [a], 60))).toEqual([2]);
+    const c = g(3, { capture_time: '2021-01-15T10:00:30', capture_offset: '+05:00', utc_time: '2021-01-15T05:00:30+00:00' });
+    expect(ids(relatedSession([c], [a], 3600))).toEqual([]); // 30 s apart on the clock, 10 h apart in UTC
+  });
+
+  it('breaks the chain at a shoot change and at a named-folder change', () => {
+    const pool = [at(1, '2021-01-15T10:00:00', { shoot_id: 1 }), at(2, '2021-01-15T10:00:30', { shoot_id: 1 }), at(3, '2021-01-15T10:01:00', { shoot_id: 2 }), at(4, '2021-01-15T10:01:30', { shoot_id: 2 })];
+    expect(ids(relatedSession(pool, [pool[0]!], 300))).toEqual([2]);
+    expect(ids(relatedSession(pool, [pool[3]!], 300))).toEqual([3]);
+    const f = (id: number, t: string, path: string | null) => at(id, t, { rel_path: path });
+    const dirs = [f(1, '2021-01-15T10:00:00', 'Harbourton/DCIM/100NCZ_6/a.NEF'), f(2, '2021-01-15T10:00:20', 'Harbourton/DCIM/101NCZ_6/b.NEF'), f(3, '2021-01-15T10:00:40', 'Quayside/DCIM/100NCZ_6/c.NEF'), f(4, '2021-01-15T10:01:00', null)];
+    expect(ids(relatedSession(dirs, [dirs[0]!], 300))).toEqual([2]); // a numbered camera folder is not a name
+    expect(ids(relatedSession(dirs, [dirs[2]!], 300))).toEqual([4]); // an unknown path never breaks the chain
+    expect(namedFolder('DCIM/100NCZ_6/a.NEF')).toBe('');
+    expect(namedFolder('a/Harbourton/DCIM/100NCZ_6/a.NEF')).toBe('Harbourton');
+    expect(namedFolder(null)).toBeUndefined();
+  });
+
+  it('keeps a sequence whole', () => {
+    const pool = [at(1, '2021-01-15T10:00:00', { sequence_id: 9 }), at(2, '2021-01-15T10:01:10', { sequence_id: 9 }), at(3, '2021-01-15T10:02:20', { sequence_id: 9 }), at(4, '2021-01-15T10:30:00')];
+    expect(ids(relatedSession(pool, [pool[0]!], 60))).toEqual([2, 3]); // 70 s apart, yet the bracket is not split
+    expect(ids(relatedSession([pool[1]!, pool[2]!, pool[3]!], [pool[2]!], 60))).toEqual([2]);
+  });
+
+  it('never carries a clock shift to another camera body', () => {
+    const pool = [
+      at(1, '2021-01-15T10:00:00', { body_id: 1 }),
+      at(2, '2021-01-15T10:00:10', { body_id: 1 }),
+      at(3, '2021-01-15T10:00:20', { body_id: 2 }),
+      at(4, '2021-01-15T10:00:30', { body_id: null }),
+      at(5, '2021-01-15T18:00:00', { body_id: 1 }),
+      at(6, '2021-01-15T18:00:00', { body_id: 2 }),
+    ];
+    const sel = [pool[0]!];
+    expect(ids(clockPhotos('session', pool, sel, 300))).toEqual([2]);
+    expect(ids(clockPhotos('day', pool, sel, 300))).toEqual([2, 5]);
+    expect(clockPhotos('selection', pool, sel, 300)).toEqual([]);
+    expect(ids(reachPhotos('day', pool, sel))).toEqual([2, 3, 4, 5, 6]);
+    expect(reachPhotos('selection', pool, sel)).toEqual([]);
+  });
+
+  it('fetches enough for 3 h, Auto and a day', () => {
+    const sel = [at(1, '2021-01-15T10:00:00')];
+    expect(relatedWindowFor(sel, ['auto', 10800])).toEqual({ after: '2021-01-14T22:00:00', before: '2021-01-15T22:00:00' });
+    expect(relatedWindowFor(sel, ['auto', 'day'])).toEqual({ after: '2021-01-14T22:00:00', before: '2021-01-15T23:59:59' });
+  });
+
+  it('splits an edit by scope and gives each field only its scope\'s photos', () => {
+    const p = { ...NO_EDITS, loc: { lat: 1, lon: 2, alt: null, source: 'map' as const }, creator: 'A', title: 'T', kwAdd: ['k'], shift: 60 };
+    expect(Object.keys(buildFieldsByScope(p).description)).toEqual(['title', 'keywords_add']);
+    const reqs = planSaves(p, [1], { place: [2, 3], description: [], credit: [2, 3, 4], clock: [5] });
+    expect(reqs).toEqual([
+      { ids: [1, 2, 3], fields: { lat: 1, lon: 2, alt: null, gps_source: 'map' } },
+      { ids: [1, 2, 3, 4], fields: { creator: 'A' } },
+      { ids: [1], fields: { title: 'T', keywords_add: ['k'] } },
+      { ids: [1, 5], fields: { time_shift_s: 60 } },
+    ]);
+    expect(planSaves(p, [1], { place: [2], description: [2], credit: [2], clock: [2] })).toHaveLength(1);
+    expect(planSaves(NO_EDITS, [1], { place: [2], description: [], credit: [], clock: [] })).toEqual([]);
+  });
+
+  it('moves utc_time with a saved clock shift', () => {
+    const a = at(1, '2021-01-15T10:00:00', { time_shift_s: 0 });
+    expect(applyFields(a, { time_shift_s: 90 }).utc_time).toBe('2021-01-15T15:01:30+00:00');
   });
 });

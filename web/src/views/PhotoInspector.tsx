@@ -6,26 +6,37 @@ import { api } from '../lib/api';
 import { fmtInt, plural } from '../lib/format';
 import {
   addKeywords,
-  buildFields,
+  autoStep,
+  clockPhotos,
   commonValue,
   fmtCoord,
   fmtDelta,
+  gapLabel,
   GPS_LABEL,
   hasEdits,
   keywordChips,
+  LADDER,
   nearestWithLocation,
   NO_EDITS,
+  planSaves,
+  reachPhotos,
+  relatedCounts,
   relatedSession,
-  relatedWindow,
+  relatedWindowFor,
   removeKeyword,
+  SCOPE_DEFAULTS,
   secondsBetween,
   shiftedTime,
   shiftSeconds,
   splitShift,
+  type ClockReach,
+  type Gap,
   type Pending,
   type PendingLoc,
   type PhotoGroup,
   type PhotoSettings,
+  type Reach,
+  type ScopeName,
 } from '../lib/photos';
 import { usePref } from '../lib/prefs';
 import { useStore } from '../lib/store';
@@ -80,19 +91,53 @@ export function PhotoInspector({
   const selKey = selected.map((g) => g.group_id).join(',');
   const edited = hasEdits(pend);
 
-  // Related photos (rv-9): the eligible ones are all ticked unless excluded; Save also goes to the ticked ones.
-  const [gap, setGap] = usePref<number | 'day'>('photos.relatedGap', 3600);
+  // Related photos (rv-9, rv-16): each kind of edit has its own reach. The ticked list is the Place scope, and
+  // unticking a photo leaves it out of every scope.
+  const [placeReach, setPlaceReach] = usePref<Reach>('photos.scope.place', SCOPE_DEFAULTS.place);
+  const [descReach, setDescReach] = usePref<Reach>('photos.scope.description', SCOPE_DEFAULTS.description);
+  const [creditReach, setCreditReach] = usePref<Reach>('photos.scope.credit', SCOPE_DEFAULTS.credit);
+  const [clockReach, setClockReach] = usePref<ClockReach>('photos.scope.clock', SCOPE_DEFAULTS.clock);
   const [onlyNoLoc, setOnlyNoLoc] = useState(true);
   const [excluded, setExcluded] = useState<Set<number>>(() => new Set());
-  const rel = useRelated(selected, selKey, gap, onlyNoLoc, savedEpoch);
+  const needDay = [placeReach, descReach, creditReach, clockReach].includes('day');
+  const rel = useRelated(selected, selKey, needDay, savedEpoch);
   useEffect(() => setExcluded(new Set()), [selKey]);
-  const relIds = useMemo(() => rel.eligible.filter((g) => !excluded.has(g.group_id)).map((g) => g.group_id), [rel.eligible, excluded]);
+  const scopes = useMemo(() => {
+    const keep = (l: PhotoGroup[]) => l.filter((g) => !excluded.has(g.group_id));
+    const counts = relatedCounts(rel.rows, selected);
+    const dayCount = relatedSession(rel.rows, selected, 'day').length;
+    const sessionGap: Gap = placeReach === 'selection' ? 'auto' : placeReach;
+    const placeAll = reachPhotos(placeReach, rel.rows, selected);
+    const placeList = onlyNoLoc ? placeAll.filter((g) => g.lat === null) : placeAll;
+    const clock = clockPhotos(clockReach, rel.rows, selected, sessionGap);
+    const extra: Record<ScopeName, number[]> = {
+      place: keep(placeList).map((g) => g.group_id),
+      description: keep(reachPhotos(descReach, rel.rows, selected)).map((g) => g.group_id),
+      credit: keep(reachPhotos(creditReach, rel.rows, selected)).map((g) => g.group_id),
+      clock: keep(clock).map((g) => g.group_id),
+    };
+    return {
+      counts,
+      dayCount,
+      autoS: autoStep(counts),
+      placeList,
+      extra,
+      clockCounts: {
+        session: clockPhotos('session', rel.rows, selected, sessionGap).length,
+        day: clockPhotos('day', rel.rows, selected, sessionGap).length,
+      },
+    };
+  }, [rel.rows, selected, placeReach, descReach, creditReach, clockReach, onlyNoLoc, excluded]);
+  const relIds = scopes.extra.place;
   const relKey = relIds.join(',');
   useEffect(() => {
     onRelated(relIds);
   }, [relKey]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => onRelated([]), []); // eslint-disable-line react-hooks/exhaustive-deps
-  const total = n + relIds.length;
+  const selIds = useMemo(() => selected.map((g) => g.group_id), [selKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const plan = useMemo(() => planSaves(pend, selIds, scopes.extra), [pend, selIds, scopes.extra]);
+  const planIds = new Set(plan.flatMap((r) => r.ids));
+  const alsoCount = [...planIds].filter((id) => !selIds.includes(id)).length;
 
   // The map refits when the selection changes; a pin from a search or suggestion flies there too.
   const [focus, setFocus] = useState(0);
@@ -105,15 +150,15 @@ export function PhotoInspector({
   };
 
   const save = async () => {
-    const fields = buildFields(pend);
-    if (!Object.keys(fields).length) return;
+    if (!plan.length) return;
     setSaving(true);
     try {
-      const ids = [...selected.map((g) => g.group_id), ...relIds];
-      await api('POST', '/api/groups/meta', { group_ids: ids, fields });
-      await onSaved(fields, ids);
+      for (const req of plan) {
+        await api('POST', '/api/groups/meta', { group_ids: req.ids, fields: req.fields });
+        await onSaved(req.fields, req.ids);
+      }
       setPend(NO_EDITS);
-      toast(`Saved to ${plural(ids.length, 'photo')}.`);
+      toast(`Saved to ${plural(planIds.size, 'photo')}.`);
     } catch (err) {
       toast((err as Error).message, 'err');
     } finally {
@@ -195,21 +240,35 @@ export function PhotoInspector({
           <Keywords selected={selected} pend={pend} setPend={setPend} />
         </Section>
 
-        <Section title="Related photos">
-          <Related
-            selected={selected}
-            gap={gap}
-            setGap={setGap}
-            onlyNoLoc={onlyNoLoc}
-            setOnlyNoLoc={setOnlyNoLoc}
-            rel={rel}
-            excluded={excluded}
-            setExcluded={setExcluded}
-          />
-        </Section>
-
         <Section title="Clock">
           <ClockShift first={first} n={n} pend={pend} set={(v) => set('shift', v)} defaultOffset={settings.default_offset} />
+        </Section>
+
+        <Section title="Applies to">
+          <AppliesTo
+            selected={selected}
+            rel={rel}
+            placeReach={placeReach}
+            setPlaceReach={setPlaceReach}
+            descReach={descReach}
+            setDescReach={setDescReach}
+            creditReach={creditReach}
+            setCreditReach={setCreditReach}
+            clockReach={clockReach}
+            setClockReach={setClockReach}
+            onlyNoLoc={onlyNoLoc}
+            setOnlyNoLoc={setOnlyNoLoc}
+            excluded={excluded}
+            setExcluded={setExcluded}
+            placeList={scopes.placeList}
+            descCount={scopes.extra.description.length}
+            creditCount={scopes.extra.credit.length}
+            clockCount={scopes.extra.clock.length}
+            clockCounts={scopes.clockCounts}
+            autoS={scopes.autoS}
+            counts={scopes.counts}
+            dayCount={scopes.dayCount}
+          />
         </Section>
       </div>
 
@@ -226,7 +285,7 @@ export function PhotoInspector({
                 Discard
               </button>
               <button type="button" className="btn-primary" onClick={save} disabled={saving}>
-                {saving ? 'Saving…' : relIds.length ? `Save to ${fmtInt(n)} + ${fmtInt(relIds.length)} related` : total === 1 ? 'Save' : `Save to ${fmtInt(total)} photos`}
+                {saving ? 'Saving…' : alsoCount ? `Save to ${fmtInt(n)} + ${fmtInt(alsoCount)} related` : n === 1 ? 'Save' : `Save to ${fmtInt(n)} photos`}
               </button>
             </div>
           </motion.div>
@@ -508,30 +567,23 @@ function ClockShift({ first, n, pend, set, defaultOffset }: { first: PhotoGroup 
 
 const REL_LIMIT = 1000;
 const REL_SHOWN = 200;
-const GAPS: Array<{ label: string; value: number | 'day' }> = [
-  { label: '15 min', value: 900 },
-  { label: '1 h', value: 3600 },
-  { label: '3 h', value: 10800 },
-  { label: 'Same day', value: 'day' },
-];
 
 interface RelatedState {
-  eligible: PhotoGroup[];
-  session: number; // photos in the session before the location filter
+  rows: PhotoGroup[]; // every photo fetched around the selection (the selection included)
   fetched: number;
   loading: boolean;
   error: string;
 }
 
-/** Fetch photos around the selection and pick the session; refetches on a new selection, a new gap or a save. */
-function useRelated(selected: PhotoGroup[], selKey: string, gap: number | 'day', onlyNoLoc: boolean, savedEpoch: number): RelatedState {
+/** Fetch photos around the selection; refetches on a new selection, when a scope needs the whole day, or after a save. */
+function useRelated(selected: PhotoGroup[], selKey: string, needDay: boolean, savedEpoch: number): RelatedState {
   const [data, setData] = useState<{ key: string; rows: PhotoGroup[] } | null>(null);
   const [error, setError] = useState('');
   const sel = useRef(selected);
   sel.current = selected;
-  const key = `${selKey}|${gap}`;
+  const key = `${selKey}|${needDay ? 'day' : 'near'}`;
   useEffect(() => {
-    const { after, before } = relatedWindow(sel.current, gap);
+    const { after, before } = relatedWindowFor(sel.current, needDay ? ['day'] : ['auto']);
     if (!after) {
       setData({ key, rows: [] });
       return undefined;
@@ -551,47 +603,123 @@ function useRelated(selected: PhotoGroup[], selKey: string, gap: number | 'day',
   }, [key, savedEpoch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return useMemo(() => {
-    if (!data || data.key !== key) return { eligible: [], session: 0, fetched: 0, loading: true, error: '' };
-    const session = relatedSession(data.rows, selected, gap);
-    return {
-      eligible: onlyNoLoc ? session.filter((g) => g.lat === null) : session,
-      session: session.length,
-      fetched: data.rows.length,
-      loading: false,
-      error,
-    };
-  }, [data, key, selected, gap, onlyNoLoc, error]);
+    if (!data || data.key !== key) return { rows: [], fetched: 0, loading: true, error: '' };
+    return { rows: data.rows, fetched: data.rows.length, loading: false, error };
+  }, [data, key, error]);
 }
 
-function Related({
+interface ScopeOption {
+  value: string;
+  label: string;
+}
+
+const encode = (v: Reach | ClockReach): string => String(v);
+const decode = (s: string): Reach => (s === 'selection' || s === 'auto' || s === 'day' ? s : Number(s));
+
+/** One row of "Applies to": which fields, a picker, and how many other photos it reaches right now. */
+function ScopeRow({
+  label,
+  fields,
+  value,
+  options,
+  onChange,
+  count,
+  children,
+}: {
+  label: string;
+  fields: string;
+  value: string;
+  options: ScopeOption[];
+  onChange: (v: string) => void;
+  count: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-xs font-medium">{label}</span>
+        <span className="truncate text-2xs text-faint">{fields}</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <select value={value} onChange={(e) => onChange(e.target.value)} className="h-8 min-w-0 flex-1 text-xs" aria-label={`${label} applies to`}>
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        <span className="shrink-0 text-xs text-muted tabular">{count}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+const ladderOptions = (counts: number[], dayCount: number, auto: number): ScopeOption[] => [
+  { value: 'selection', label: 'Selection only' },
+  { value: 'auto', label: `Auto · ${gapLabel(auto)} (${fmtInt(counts[LADDER.indexOf(auto)] ?? 0)})` },
+  ...LADDER.map((s, i) => ({ value: String(s), label: `${gapLabel(s)} (${fmtInt(counts[i] ?? 0)})` })),
+  { value: 'day', label: `Same day (${fmtInt(dayCount)})` },
+];
+
+const more = (n: number): string => (n === 0 ? 'only these' : `+${fmtInt(n)} more`);
+
+function AppliesTo({
   selected,
-  gap,
-  setGap,
+  rel,
+  placeReach,
+  setPlaceReach,
+  descReach,
+  setDescReach,
+  creditReach,
+  setCreditReach,
+  clockReach,
+  setClockReach,
   onlyNoLoc,
   setOnlyNoLoc,
-  rel,
   excluded,
   setExcluded,
+  placeList,
+  descCount,
+  creditCount,
+  clockCount,
+  clockCounts,
+  autoS,
+  counts,
+  dayCount,
 }: {
   selected: PhotoGroup[];
-  gap: number | 'day';
-  setGap: (g: number | 'day') => void;
+  rel: RelatedState;
+  placeReach: Reach;
+  setPlaceReach: (v: Reach) => void;
+  descReach: Reach;
+  setDescReach: (v: Reach) => void;
+  creditReach: Reach;
+  setCreditReach: (v: Reach) => void;
+  clockReach: ClockReach;
+  setClockReach: (v: ClockReach) => void;
   onlyNoLoc: boolean;
   setOnlyNoLoc: (v: boolean) => void;
-  rel: RelatedState;
   excluded: Set<number>;
   setExcluded: (s: Set<number>) => void;
+  placeList: PhotoGroup[];
+  descCount: number;
+  creditCount: number;
+  clockCount: number;
+  clockCounts: { session: number; day: number };
+  autoS: number;
+  counts: number[];
+  dayCount: number;
 }) {
-  const gapLabel = gap === 'day' ? 'the same day' : `within ${GAPS.find((x) => x.value === gap)?.label ?? ''} of each other`;
+  const hasTime = selected.some((g) => g.capture_time);
   const toggle = (id: number) => {
     const next = new Set(excluded);
     if (next.has(id)) next.delete(id);
     else next.add(id);
     setExcluded(next);
   };
-  const shown = rel.eligible.slice(0, REL_SHOWN);
-  const ticked = rel.eligible.filter((g) => !excluded.has(g.group_id)).length;
-  const hasTime = selected.some((g) => g.capture_time);
+  const shown = placeList.slice(0, REL_SHOWN);
+  const ticked = placeList.filter((g) => !excluded.has(g.group_id)).length;
   const delta = (g: PhotoGroup): string => {
     let best: number | null = null;
     for (const s of selected) {
@@ -600,59 +728,49 @@ function Related({
     }
     return best === null ? '' : ` · ${fmtDelta(best)}`;
   };
-
-  let summary: string;
-  if (!hasTime) summary = 'No related photos: the selection has no capture time.';
-  else if (rel.loading) summary = 'Looking for related photos…';
-  else if (rel.error) summary = `Could not load related photos: ${rel.error}`;
-  else if (rel.eligible.length) summary = `${plural(rel.eligible.length, 'related photo')} (taken ${gapLabel})`;
-  else if (rel.session > 0) summary = `No related photos: ${plural(rel.session, 'photo')} nearby already ${rel.session === 1 ? 'has' : 'have'} a location.`;
-  else summary = `No related photos taken ${gapLabel}.`;
+  const opts = ladderOptions(counts, dayCount, autoS);
+  const clockOpts: ScopeOption[] = [
+    { value: 'selection', label: 'Selection only' },
+    { value: 'session', label: `Same camera · this session (${fmtInt(clockCounts.session)})` },
+    { value: 'day', label: `Same camera · same day (${fmtInt(clockCounts.day)})` },
+  ];
+  const state = !hasTime ? 'The selection has no capture time, so nothing else can be related.' : rel.loading ? 'Looking for related photos…' : rel.error ? `Could not load related photos: ${rel.error}` : '';
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap gap-1.5" role="group" aria-label="How close in time">
-        {GAPS.map((o) => (
-          <button
-            key={o.label}
-            type="button"
-            aria-pressed={gap === o.value}
-            className={`btn h-7 px-2 text-xs ${gap === o.value ? 'border-accent/50 bg-accent/10 text-accent' : ''}`}
-            onClick={() => setGap(o.value)}
-          >
-            {o.label}
-          </button>
-        ))}
-      </div>
-      <label className="flex items-center gap-2 text-xs text-muted">
-        <input type="checkbox" checked={onlyNoLoc} onChange={(e) => setOnlyNoLoc(e.target.checked)} />
-        Only without a location
-      </label>
-      <p className="text-xs text-muted">{summary}</p>
-      {rel.fetched >= REL_LIMIT && <p className="text-xs text-faint">The list may be cut short: only the first {fmtInt(REL_LIMIT)} photos nearby were checked.</p>}
-      {rel.eligible.length > 0 && (
-        <>
-          <div className="flex items-center justify-between text-xs text-muted">
-            <span>{fmtInt(ticked)} ticked</span>
-            <span className="flex gap-2">
-              <button type="button" className="text-accent hover:underline" onClick={() => setExcluded(new Set())}>
-                All
-              </button>
-              <button type="button" className="text-accent hover:underline" onClick={() => setExcluded(new Set(rel.eligible.map((g) => g.group_id)))}>
-                None
-              </button>
-            </span>
-          </div>
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(52px,1fr))] gap-1">
-            {shown.map((g) => (
-              <RelatedThumb key={g.group_id} g={g} on={!excluded.has(g.group_id)} title={`${g.canonical_stem || `Photo ${g.group_id}`} · ${g.capture_time?.replace('T', ' ') ?? ''}${delta(g)}`} onToggle={() => toggle(g.group_id)} />
-            ))}
-          </div>
-          {rel.eligible.length > shown.length && (
-            <p className="text-xs text-faint">+{fmtInt(rel.eligible.length - shown.length)} more (all ticked unless you chose None)</p>
-          )}
-        </>
-      )}
+    <div className="flex flex-col gap-3">
+      <p className="text-xs text-muted">Each kind of edit reaches its own set of photos. Untick a photo below to leave it out of all of them.</p>
+      {state && <p className="text-xs text-faint">{state}</p>}
+      <ScopeRow label="Place" fields="GPS, place name" value={encode(placeReach)} options={opts} onChange={(v) => setPlaceReach(decode(v))} count={more(ticked)}>
+        <label className="flex items-center gap-2 text-xs text-muted">
+          <input type="checkbox" checked={onlyNoLoc} onChange={(e) => setOnlyNoLoc(e.target.checked)} />
+          Only without a location
+        </label>
+        {rel.fetched >= REL_LIMIT && <p className="text-xs text-faint">The list may be cut short: only the first {fmtInt(REL_LIMIT)} photos nearby were checked.</p>}
+        {placeList.length > 0 && (
+          <>
+            <div className="flex items-center justify-between text-xs text-muted">
+              <span>{fmtInt(ticked)} ticked</span>
+              <span className="flex gap-2">
+                <button type="button" className="text-accent hover:underline" onClick={() => setExcluded(new Set())}>
+                  All
+                </button>
+                <button type="button" className="text-accent hover:underline" onClick={() => setExcluded(new Set(placeList.map((g) => g.group_id)))}>
+                  None
+                </button>
+              </span>
+            </div>
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(52px,1fr))] gap-1">
+              {shown.map((g) => (
+                <RelatedThumb key={g.group_id} g={g} on={!excluded.has(g.group_id)} title={`${g.canonical_stem || `Photo ${g.group_id}`} · ${g.capture_time?.replace('T', ' ') ?? ''}${delta(g)}`} onToggle={() => toggle(g.group_id)} />
+              ))}
+            </div>
+            {placeList.length > shown.length && <p className="text-xs text-faint">+{fmtInt(placeList.length - shown.length)} more (all ticked unless you chose None)</p>}
+          </>
+        )}
+      </ScopeRow>
+      <ScopeRow label="Description" fields="title, keywords" value={encode(descReach)} options={opts} onChange={(v) => setDescReach(decode(v))} count={more(descCount)} />
+      <ScopeRow label="Credit" fields="creator, copyright" value={encode(creditReach)} options={opts} onChange={(v) => setCreditReach(decode(v))} count={more(creditCount)} />
+      <ScopeRow label="Clock shift" fields="same camera body only" value={clockReach} options={clockOpts} onChange={(v) => setClockReach(v as ClockReach)} count={more(clockCount)} />
     </div>
   );
 }

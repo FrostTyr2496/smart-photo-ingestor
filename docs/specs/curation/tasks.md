@@ -52,7 +52,7 @@ result). Build them as written there.
 
 ## Wave 2: related photos and shoots
 
-- [ ] 5. **[stronger]** Related photos: a gap ladder with Auto, and a scope per field
+- [x] 5. **[stronger]** Related photos: a gap ladder with Auto, and a scope per field
   - ID: rv-16 (approved, D-069; amended by D-070, which replaces the "Also apply Title, Keywords & Rating" toggle;
     refines rv-9, D-065). No schema change. The phone-track parts are sp-6.
   - API: each `GET /api/groups` row gains `utc_time` (`geo.group_utc` with the `default_offset` setting, clock shift
@@ -78,6 +78,7 @@ result). Build them as written there.
   - Verify: `cd web && npm test` (photos.test.ts: each ladder step, Auto picking before the jump and its fallback, a
     UTC-shifted pair, shoot/folder breaks, a sequence kept whole, clock shift never crossing bodies);
     `uv run pytest tests/test_web_api.py -q -k groups`; **[user]** visual check.
+  - Result (2026-11-18): `uv run pytest -q` → 528 passed, 9 skipped; `cd web && npm test` → 43 passed; typecheck and build clean. The visual check is still the user's.
 
 - [ ] 6. **[stronger]** Schema V6 proposal: ratings, picks, labels, harvested shoot names and tiers
   - ID: cu-0 (**proposal first**; catalog change, rule 6)

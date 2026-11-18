@@ -32,7 +32,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from photovault import activity, cards, preview, usage, volumes
 from photovault.catalog import db, repo
 from photovault.drives import DEFAULT_MAC_FOLDER, VOLUMES_ROOT, scan_mounts
-from photovault.geo import offset_tz, suggest
+from photovault.geo import group_utc, offset_tz, suggest, utc_text
 from photovault.protocol import EXIT_PAUSED, human_bytes
 
 logger = logging.getLogger(__name__)
@@ -970,7 +970,14 @@ def _groups(conn, query: dict) -> dict:
         counts = repo.missing_counts(conn, volume_id=volume_id)
     except ValueError as exc:
         raise BadRequest(str(exc)) from exc
+    default_offset = repo.get_setting(conn, "default_offset", SETTING_DEFAULTS["default_offset"]) or "+00:00"
     groups = [_group_row(r) for r in rows]
+    for g in groups:  # corrected UTC (clock shift applied) so related photos can be chained across zones (rv-16)
+        try:
+            when = group_utc(g, default_offset)
+        except ValueError:
+            when = None
+        g["utc_time"] = utc_text(when) if when else None
     unhashed = [g["group_id"] for g in groups if g["rel_path"] is None]
     if unhashed:  # files indexed but not hashed yet: located through their index job (rv-7)
         found = repo.indexed_primary_files(conn, unhashed)

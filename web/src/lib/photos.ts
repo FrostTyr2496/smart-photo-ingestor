@@ -22,6 +22,10 @@ export interface PhotoGroup {
   dirty: boolean | null;
   rel_path: string | null;
   volume_id: string | null;
+  /** Corrected UTC (clock shift applied), ISO; null without a capture time (rv-16). */
+  utc_time: string | null;
+  body_id: number | null;
+  sequence_id: number | null;
 }
 
 export interface PhotoDay {
@@ -173,21 +177,61 @@ export function hasEdits(p: Pending): boolean {
   return Object.keys(buildFields(p)).length > 0;
 }
 
+export type ScopeName = 'place' | 'description' | 'credit' | 'clock';
+
+/** Pending edits as the `fields` of POST /api/groups/meta, split by the scope each field belongs to (rv-16). */
+export function buildFieldsByScope(p: Pending): Record<ScopeName, Record<string, unknown>> {
+  const place: Record<string, unknown> = {};
+  const description: Record<string, unknown> = {};
+  const credit: Record<string, unknown> = {};
+  const clock: Record<string, unknown> = {};
+  if (p.loc) Object.assign(place, { lat: p.loc.lat, lon: p.loc.lon, alt: p.loc.alt, gps_source: p.loc.source });
+  if (p.place !== null) place.place_name = p.place.trim() || null;
+  for (const k of ['creator', 'copyright'] as const) if (p[k] !== null) credit[k] = p[k]!.trim() || null;
+  if (p.title !== null) description.title = p.title.trim() || null;
+  if (p.kwAdd.length) description.keywords_add = [...p.kwAdd];
+  if (p.kwRemove.length) description.keywords_remove = [...p.kwRemove];
+  if (p.shift !== null) clock.time_shift_s = p.shift;
+  return { place, description, credit, clock };
+}
+
 /** Pending edits as the `fields` of POST /api/groups/meta. */
 export function buildFields(p: Pending): Record<string, unknown> {
-  const f: Record<string, unknown> = {};
-  if (p.loc) Object.assign(f, { lat: p.loc.lat, lon: p.loc.lon, alt: p.loc.alt, gps_source: p.loc.source });
-  if (p.place !== null) f.place_name = p.place.trim() || null;
-  for (const k of ['creator', 'copyright', 'title'] as const) if (p[k] !== null) f[k] = p[k]!.trim() || null;
-  if (p.kwAdd.length) f.keywords_add = [...p.kwAdd];
-  if (p.kwRemove.length) f.keywords_remove = [...p.kwRemove];
-  if (p.shift !== null) f.time_shift_s = p.shift;
-  return f;
+  const by = buildFieldsByScope(p);
+  return { ...by.place, ...by.credit, ...by.description, ...by.clock };
+}
+
+export interface SaveRequest {
+  ids: number[];
+  fields: Record<string, unknown>;
+}
+
+/**
+ * The POST /api/groups/meta requests that give each field only to its scope's photos: the selection plus that
+ * scope's extra ids. Scopes with the same photos share one request. Fields nobody changed send nothing.
+ */
+export function planSaves(p: Pending, selectedIds: number[], extra: Record<ScopeName, number[]>): SaveRequest[] {
+  const by = buildFieldsByScope(p);
+  const out = new Map<string, SaveRequest>();
+  for (const scope of ['place', 'credit', 'description', 'clock'] as const) {
+    if (!Object.keys(by[scope]).length) continue;
+    const ids = [...new Set([...selectedIds, ...extra[scope]])];
+    const key = [...ids].sort((x, y) => x - y).join(',');
+    const hit = out.get(key);
+    if (hit) Object.assign(hit.fields, by[scope]);
+    else out.set(key, { ids, fields: { ...by[scope] } });
+  }
+  return [...out.values()];
 }
 
 /** A group as it reads after the server applied `fields` (the same order as repo.update_group_meta). */
 export function applyFields(g: PhotoGroup, f: Record<string, unknown>): PhotoGroup {
   const out: PhotoGroup = { ...g, keywords: [...g.keywords], dirty: true };
+  if (typeof f.time_shift_s === 'number' && g.utc_time) {
+    // keep the corrected UTC in step with the clock shift
+    const ms = Date.parse(g.utc_time) + (f.time_shift_s - (g.time_shift_s ?? 0)) * 1000;
+    if (!Number.isNaN(ms)) out.utc_time = `${new Date(ms).toISOString().slice(0, 19)}+00:00`;
+  }
   for (const k of ['lat', 'lon', 'alt', 'gps_source', 'place_name', 'creator', 'copyright', 'title', 'time_shift_s'] as const) {
     if (k in f) (out as unknown as Record<string, unknown>)[k] = f[k];
   }
@@ -287,50 +331,162 @@ export function nearestWithLocation(target: PhotoGroup, pool: PhotoGroup[], sele
 
 export const fmtCoord = (lat: number, lon: number): string => `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
 
-// ---------------------------------------------------------------- related photos (rv-9)
+// ---------------------------------------------------------------- related photos (rv-9, rv-16)
 
 const naiveMs = (t: string): number => Date.parse(`${t.slice(0, 19)}Z`);
 const fmtNaive = (ms: number): string => new Date(ms).toISOString().slice(0, 19);
 
+/** A gap between neighbouring photos in seconds, 'day' for the whole day, or 'auto' to let the session size decide. */
+export type Gap = number | 'day' | 'auto';
+/** The numeric steps of the ladder, in seconds: 1 min, 5 min, 15 min, 1 h, 3 h. */
+export const LADDER: readonly number[] = [60, 300, 900, 3600, 10800];
+const AUTO_JUMP = 1.5;
+const AUTO_FALLBACK_MAX_S = 900;
+
+export function gapLabel(gap: Gap): string {
+  if (gap === 'day') return 'Same day';
+  if (gap === 'auto') return 'Auto';
+  return gap % 3600 === 0 ? `${gap / 3600} h` : `${gap / 60} min`;
+}
+
+/** The moment a photo was taken in UTC (clock shift applied); the naive capture time when the API gave no UTC. */
+function timeMs(g: PhotoGroup): number {
+  if (g.utc_time) {
+    const ms = Date.parse(g.utc_time);
+    if (!Number.isNaN(ms)) return ms;
+  }
+  return g.capture_time ? naiveMs(g.capture_time) : Number.NaN;
+}
+
+const CAMERA_DIR = /^(dcim|\d{3}[a-z0-9_]{5})$/i;
+
 /**
- * Photos in the same session as the selection: walking outwards from the selection's earliest and latest capture
- * time, each next photo joins while it is within `gapS` seconds of the previous one. 'day' takes every candidate
- * from a selected photo's day. The selected photos themselves are not returned.
+ * The named folder a photo sits in: its nearest parent that is not DCIM or a camera's numbered folder ("100NCZ_6").
+ * '' when it only sits in camera folders, undefined when the path is not known.
  */
-export function relatedSession(candidates: PhotoGroup[], selected: PhotoGroup[], gapS: number | 'day'): PhotoGroup[] {
+export function namedFolder(relPath: string | null): string | undefined {
+  if (!relPath) return undefined;
+  const dirs = relPath.split('/').slice(0, -1);
+  for (let i = dirs.length - 1; i >= 0; i -= 1) if (dirs[i] && !CAMERA_DIR.test(dirs[i]!)) return dirs[i];
+  return '';
+}
+
+function chainBroken(a: PhotoGroup, b: PhotoGroup): boolean {
+  if (a.shoot_id !== b.shoot_id) return true;
+  const fa = namedFolder(a.rel_path);
+  const fb = namedFolder(b.rel_path);
+  return fa !== undefined && fb !== undefined && fa !== fb;
+}
+
+/**
+ * Which step Auto takes, from the session sizes of the numeric steps (`counts[i]` for `LADDER[i]`). Steps with an
+ * empty session are skipped. The step just before the largest jump c[next] / c[this] wins when that jump is at least
+ * 1.5; otherwise the largest non-empty step up to 15 min, else 15 min.
+ */
+export function autoStep(counts: number[]): number {
+  const live = counts.map((c, i) => ({ c, i })).filter((x) => x.c > 0);
+  let best: { ratio: number; i: number } | null = null;
+  for (let k = 0; k + 1 < live.length; k += 1) {
+    const ratio = live[k + 1]!.c / live[k]!.c;
+    if (!best || ratio > best.ratio) best = { ratio, i: live[k]!.i };
+  }
+  if (best && best.ratio >= AUTO_JUMP) return LADDER[best.i]!;
+  const small = live.filter((x) => LADDER[x.i]! <= AUTO_FALLBACK_MAX_S);
+  return small.length ? LADDER[small[small.length - 1]!.i]! : AUTO_FALLBACK_MAX_S;
+}
+
+/** Session size (selected photos not counted) for each numeric step of the ladder. */
+export function relatedCounts(candidates: PhotoGroup[], selected: PhotoGroup[]): number[] {
+  return LADDER.map((s) => relatedSession(candidates, selected, s).length);
+}
+
+/** The concrete step (seconds, or 'day') a gap means for this selection: Auto becomes the step it picks. */
+export function resolveGap(candidates: PhotoGroup[], selected: PhotoGroup[], gap: Gap): number | 'day' {
+  return gap === 'auto' ? autoStep(relatedCounts(candidates, selected)) : gap;
+}
+
+/**
+ * Photos in the same session as the selection: walking outwards from the selection's earliest and latest moment (UTC),
+ * each next photo joins while it is within the gap of the previous one, and the walk stops at a shoot change or a
+ * change of named folder. 'day' takes every candidate from a selected photo's capture day. Frames that share a
+ * sequence (a bracket) join together, so a sequence is never split. The selected photos are not returned.
+ */
+export function relatedSession(candidates: PhotoGroup[], selected: PhotoGroup[], gap: Gap): PhotoGroup[] {
   const sel = new Set(selected.map((g) => g.group_id));
-  const timedSel = selected.filter((g) => g.capture_time);
+  const timedSel = selected.filter((g) => !Number.isNaN(timeMs(g)));
   if (!timedSel.length) return [];
+  const step = gap === 'auto' ? autoStep(relatedCounts(candidates, selected)) : gap;
   const seen = new Set<number>();
   const all: PhotoGroup[] = [];
   for (const g of [...candidates, ...timedSel]) {
-    if (!g.capture_time || seen.has(g.group_id)) continue;
+    if (Number.isNaN(timeMs(g)) || seen.has(g.group_id)) continue;
     seen.add(g.group_id);
     all.push(g);
   }
-  all.sort((a, b) => naiveMs(a.capture_time!) - naiveMs(b.capture_time!));
-  if (gapS === 'day') {
-    const days = new Set(timedSel.map((g) => g.capture_time!.slice(0, 10)));
-    return all.filter((g) => !sel.has(g.group_id) && days.has(g.capture_time!.slice(0, 10)));
+  all.sort((a, b) => timeMs(a) - timeMs(b));
+  const member = new Set<number>();
+  if (step === 'day') {
+    const days = new Set(timedSel.map((g) => g.capture_time?.slice(0, 10)));
+    for (const g of all) if (days.has(g.capture_time?.slice(0, 10))) member.add(g.group_id);
+  } else {
+    let lo = all.findIndex((g) => sel.has(g.group_id));
+    let hi = all.length - 1;
+    while (hi > lo && !sel.has(all[hi]!.group_id)) hi -= 1;
+    const near = (i: number, j: number) => Math.abs(timeMs(all[j]!) - timeMs(all[i]!)) / 1000 <= step && !chainBroken(all[i]!, all[j]!);
+    while (lo > 0 && near(lo - 1, lo)) lo -= 1;
+    while (hi < all.length - 1 && near(hi, hi + 1)) hi += 1;
+    for (const g of all.slice(lo, hi + 1)) member.add(g.group_id);
   }
-  let lo = all.findIndex((g) => sel.has(g.group_id));
-  let hi = all.length - 1;
-  while (hi > lo && !sel.has(all[hi]!.group_id)) hi -= 1;
-  const gap = (i: number, j: number) => Math.abs(naiveMs(all[j]!.capture_time!) - naiveMs(all[i]!.capture_time!)) / 1000;
-  while (lo > 0 && gap(lo - 1, lo) <= gapS) lo -= 1;
-  while (hi < all.length - 1 && gap(hi, hi + 1) <= gapS) hi += 1;
-  return all.slice(lo, hi + 1).filter((g) => !sel.has(g.group_id));
+  const seqs = new Set<number>();
+  for (const g of all) if (member.has(g.group_id) && g.sequence_id !== null) seqs.add(g.sequence_id);
+  for (const g of all) if (g.sequence_id !== null && seqs.has(g.sequence_id)) member.add(g.group_id);
+  return all.filter((g) => member.has(g.group_id) && !sel.has(g.group_id));
 }
 
-/** The capture-time range to fetch around the selection: 12 h either side, or the selected days for 'day'. */
-export function relatedWindow(selected: PhotoGroup[], gapS: number | 'day'): { after: string; before: string } {
+/** The capture-time range to fetch around the selection: 12 h either side (enough for 3 h and Auto), or the selected days for 'day'. */
+export function relatedWindow(selected: PhotoGroup[], gap: Gap): { after: string; before: string } {
   const times = selected.filter((g) => g.capture_time).map((g) => naiveMs(g.capture_time!));
   if (!times.length) return { after: '', before: '' };
   const min = Math.min(...times);
   const max = Math.max(...times);
-  if (gapS === 'day') {
+  if (gap === 'day') {
     const dayStart = (ms: number) => ms - (((ms % 86400000) + 86400000) % 86400000);
     return { after: fmtNaive(dayStart(min)), before: fmtNaive(dayStart(max) + 86400000 - 1000) };
   }
   return { after: fmtNaive(min - 12 * 3600000), before: fmtNaive(max + 12 * 3600000) };
+}
+
+/** The range that covers every gap in `gaps` (an ISO string compares in time order). */
+export function relatedWindowFor(selected: PhotoGroup[], gaps: Gap[]): { after: string; before: string } {
+  const wins = [relatedWindow(selected, 'auto'), ...(gaps.includes('day') ? [relatedWindow(selected, 'day')] : [])];
+  if (!wins[0]!.after) return { after: '', before: '' };
+  return { after: wins.map((w) => w.after).sort()[0]!, before: wins.map((w) => w.before).sort().reverse()[0]! };
+}
+
+// ---------------------------------------------------------------- scopes (rv-16)
+
+/** How far a field's edits reach: the selection alone, or a session / same-day set of related photos. */
+export type Reach = 'selection' | Gap;
+/** The clock shift's reach: always the same camera body. */
+export type ClockReach = 'selection' | 'session' | 'day';
+
+export interface ScopeDefaults {
+  place: Reach;
+  description: Reach;
+  credit: Reach;
+  clock: ClockReach;
+}
+export const SCOPE_DEFAULTS: ScopeDefaults = { place: 'auto', description: 'selection', credit: 'day', clock: 'day' };
+
+/** The related photos (not the selection) a reach gives. */
+export function reachPhotos(reach: Reach, candidates: PhotoGroup[], selected: PhotoGroup[]): PhotoGroup[] {
+  return reach === 'selection' ? [] : relatedSession(candidates, selected, reach);
+}
+
+/** The photos a clock shift reaches: only frames from a camera body that is in the selection (matched on body_id). */
+export function clockPhotos(reach: ClockReach, candidates: PhotoGroup[], selected: PhotoGroup[], sessionGap: Gap): PhotoGroup[] {
+  if (reach === 'selection') return [];
+  const bodies = new Set(selected.map((g) => g.body_id).filter((b): b is number => b !== null));
+  const pool = relatedSession(candidates, selected, reach === 'day' ? 'day' : sessionGap);
+  return pool.filter((g) => g.body_id !== null && bodies.has(g.body_id));
 }
