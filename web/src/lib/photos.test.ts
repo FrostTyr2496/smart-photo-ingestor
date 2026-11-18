@@ -12,6 +12,7 @@ import {
   relatedWindowFor,
   buildFields,
   commonValue,
+  copyName,
   hasEdits,
   keywordChips,
   monthRail,
@@ -287,5 +288,14 @@ describe('related photos', () => {
   it('moves utc_time with a saved clock shift', () => {
     const a = at(1, '2021-01-15T10:00:00', { time_shift_s: 0 });
     expect(applyFields(a, { time_shift_s: 90 }).utc_time).toBe('2021-01-15T15:01:30+00:00');
+  });
+});
+
+describe('copy filename (rv-10)', () => {
+  it('uses the basename of rel_path, else the stem', () => {
+    expect(copyName({ rel_path: '2026/11/18/20261118_101500_Z6II_0042.NEF', canonical_stem: 'x' })).toBe('20261118_101500_Z6II_0042.NEF');
+    expect(copyName({ rel_path: 'DSC_0042.NEF', canonical_stem: 'DSC_0042' })).toBe('DSC_0042.NEF');
+    expect(copyName({ rel_path: null, canonical_stem: 'DSC_0042' })).toBe('DSC_0042');
+    expect(copyName({ rel_path: null, canonical_stem: null })).toBe('');
   });
 });

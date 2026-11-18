@@ -9,6 +9,8 @@ import {
   autoStep,
   clockPhotos,
   commonValue,
+  copyName,
+  copyText,
   fmtCoord,
   fmtDelta,
   gapLabel,
@@ -179,9 +181,25 @@ export function PhotoInspector({
             {n === 1 && first ? [first.body_nickname, first.capture_time?.replace('T', ' ')].filter(Boolean).join(' · ') : 'Changes apply to every selected photo.'}
           </p>
         </div>
-        <button type="button" className="btn-ghost h-7 px-2" onClick={onClear} aria-label="Clear selection">
-          <Icon name="x" />
-        </button>
+        <div className="flex shrink-0 items-center gap-1">
+          {n === 1 && first && copyName(first) && (
+            <button
+              type="button"
+              className="btn-ghost h-7 px-2 text-xs"
+              title={copyName(first)}
+              onClick={async () => {
+                const name = copyName(first);
+                if (await copyText(name)) toast(`Copied ${name}`);
+                else toast('Could not copy. Select the name by hand.', 'err');
+              }}
+            >
+              Copy filename
+            </button>
+          )}
+          <button type="button" className="btn-ghost h-7 px-2" onClick={onClear} aria-label="Clear selection">
+            <Icon name="x" />
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-col gap-5 overflow-y-auto px-4 py-4">

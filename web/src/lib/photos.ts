@@ -104,6 +104,38 @@ export function clockTime(iso: string | null): string {
   return m ? m[1]! : '';
 }
 
+/** The name to copy for one photo (rv-10): the basename of its file on disk, else the stem, else ''. */
+export function copyName(g: Pick<PhotoGroup, 'rel_path' | 'canonical_stem'>): string {
+  if (g.rel_path) return g.rel_path.split('/').filter(Boolean).pop() ?? g.canonical_stem ?? '';
+  return g.canonical_stem ?? '';
+}
+
+/** Copy text with the Clipboard API, falling back to a hidden textarea and execCommand. */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* fall through to the fallback */
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------- selection
 
 /** Ids from `from` to `to` (inclusive, either order) in display order; just `to` when either is not shown. */
