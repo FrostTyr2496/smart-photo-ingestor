@@ -84,10 +84,15 @@ reference folder read into `geo_points`) and `geo.suggest` (time-matched suggest
 
 - [ ] 2. **[stronger]** Import iPhone locations from an osxphotos JSON export into `geo_points`
   - ID: sp-2 (after sp-1, and after the V6 `geo_points` columns; see below). _Design:_ D-066, D-070, `system-design.md` §5e.
-  - Step 1, **[user]**, in iTerm with Photos quit (the output stays outside the repo):
-    `uv tool run --from 'osxphotos==0.78.1' osxphotos query --not-screenshot --not-shared --not-syndicated --location
-    --json [--from-date YYYY-MM-DD] [--to-date YYYY-MM-DD] > "<home>/phone/photos-YYYYMMDD.json"`, where `<home>`
-    is `config.default_home()` (`~/Library/Application Support/PhotoVault`, or `$PHOTOVAULT_HOME`).
+  - Step 1, **[user]**, in iTerm with Photos quit (the output stays in the PhotoVault home, outside the repo). Paste as is:
+    ```sh
+    mkdir -p "$HOME/Library/Application Support/PhotoVault/phone"
+    uv tool run --from 'osxphotos==0.78.1' osxphotos query \
+      --not-screenshot --not-shared --not-syndicated --location --json \
+      > "$HOME/Library/Application Support/PhotoVault/phone/photos-$(date +%Y%m%d).json"
+    ```
+    To limit the range, add `--from-date 2026-01-01 --to-date 2026-03-31` before the `>`. With `$PHOTOVAULT_HOME`
+    set, use that folder instead (`config.default_home()`).
   - Step 2: `photovault meta phone <json>` in `photovault/phone.py` (stdlib `json` only). It accepts a JSON array or JSON lines of
     osxphotos `PhotoInfo.asdict()` rows. It keeps a row when `exif_info.camera_make == "Apple"`, `exif_info.camera_model`
     starts with `"iPhone"`, `latitude`/`longitude` are set, and `screenshot`, `shared`, `syndicated` and `intrash`
