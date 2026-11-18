@@ -24,6 +24,8 @@ const GPS_LABEL = { match: "Matched by time", map: "Picked on map", search: "Pla
 const st = {
   settings: {},
   showIgnored: readPref("showIgnoredDrives") === "1", // the folded "Ignored drives" list is expanded
+  foldedGroups: new Set((readPref("driveFold") || "").split(",").filter(Boolean)), // collapsed sidebar groups
+  photosOpen: false,   // the photo grid is the middle view; otherwise, with nothing else open, the home view
   driveView: null,     // volume_id of the drive whose summary replaces the photo grid, or null
   driveFiles: { state: "", copies: "", camera: "", offset: 0 }, // file list filter and paging inside that summary
   cardsOpen: false,    // the Cards view replaces the photo grid
@@ -575,24 +577,56 @@ function driveCard(d) {
   }, kids);
 }
 
-// Ignored drives (system volumes, tool installers, anything that is not photos) fold under one toggle at the end.
+// Drives fall into Mounted, Not connected and Ignored (system volumes, tool installers, anything that is not
+// photos), each under a header that folds. Ignored starts folded.
+const DRIVE_GROUPS = [
+  { key: "mounted", label: "Mounted", test: (d) => !d.ignored && d.mounted },
+  { key: "unmounted", label: "Not connected", test: (d) => !d.ignored && !d.mounted },
+  { key: "ignored", label: "Ignored", test: (d) => d.ignored },
+];
+
+function groupFolded(key) {
+  return key === "ignored" ? !st.showIgnored : st.foldedGroups.has(key);
+}
+
+function toggleGroup(key) {
+  if (key === "ignored") {
+    st.showIgnored = !st.showIgnored;
+    writePref("showIgnoredDrives", st.showIgnored ? "1" : "0");
+  } else {
+    if (st.foldedGroups.has(key)) st.foldedGroups.delete(key);
+    else st.foldedGroups.add(key);
+    writePref("driveFold", [...st.foldedGroups].join(","));
+  }
+  renderDrives();
+}
+
+function groupToggle(key, text, count) {
+  const open = !groupFolded(key);
+  return el("button", {
+    type: "button", class: `link ignored-toggle group-toggle group-${key}`, "aria-expanded": open ? "true" : "false",
+    onclick: () => toggleGroup(key),
+  }, `${open ? "▾" : "▸"} ${text} (${count})`);
+}
+
 function renderDrives() {
+  syncBase();
+  renderHome();
   const box = $("#drives");
   const shown = st.drives.filter((d) => !d.ignored);
-  const ignored = st.drives.filter((d) => d.ignored);
-  const nodes = shown.map(driveCard);
+  const nodes = [];
   if (!st.drives.length || !shown.length) {
-    nodes.unshift(el("p", { class: "muted small" }, st.drives.length
-      ? "Every drive is ignored. Open Ignored drives to bring one back."
+    nodes.push(el("p", { class: "muted small" }, st.drives.length
+      ? "Every drive is ignored. Open Ignored to bring one back."
       : "No drives yet. Plug one in, and it appears here."));
   }
-  if (ignored.length) {
-    const open = st.showIgnored;
-    nodes.push(el("button", {
-      type: "button", class: "link ignored-toggle", "aria-expanded": open ? "true" : "false",
-      onclick: () => { st.showIgnored = !st.showIgnored; writePref("showIgnoredDrives", st.showIgnored ? "1" : "0"); renderDrives(); },
-    }, `${open ? "▾" : "▸"} Ignored drives (${ignored.length})`));
-    if (open) nodes.push(el("div", { class: "drive-list ignored-list" }, ignored.map(driveCard)));
+  for (const g of DRIVE_GROUPS) {
+    const list = st.drives.filter(g.test);
+    if (!list.length) continue;
+    nodes.push(groupToggle(g.key, g.label, list.length));
+    if (!groupFolded(g.key)) {
+      nodes.push(el("div", { class: `drive-list${g.key === "ignored" ? " ignored-list" : ""}` }, list.map(driveCard)));
+    }
   }
   box.replaceChildren(...nodes);
 }
@@ -601,7 +635,7 @@ async function setIgnored(d, ignored) {
   await api("POST", "/api/drives/ignore", { key: d.key, ignored });
   for (const x of st.drives) if (x.key === d.key) x.ignored = ignored;
   renderDrives();
-  toast(ignored ? `${driveName(d)} is ignored. Find it under Ignored drives.` : `${driveName(d)} is back in the list.`);
+  toast(ignored ? `${driveName(d)} is ignored. Find it under Ignored.` : `${driveName(d)} is back in the list.`);
 }
 
 function renderDriveFilter() {
@@ -927,6 +961,7 @@ function renderTasks() {
   setChildren(box, nodes);
   updateGlobal();
   syncDriveViews();
+  renderHome();
 }
 
 // Keeps the sidebar status lines and the open drive's timeline current. The sidebar is rebuilt only when what
@@ -1222,6 +1257,7 @@ function renderElsewhere() {
   }
   box.hidden = nodes.length === 0;
   setChildren(box, nodes);
+  renderHome();
 }
 
 async function loadActivity() {
@@ -1237,6 +1273,223 @@ async function loadActivity() {
     await Promise.allSettled([loadDrives(), loadShoots(), loadGroups()]);
     if (st.driveView && !st.workflow) await loadDriveView().catch(reportError);
   }
+}
+
+// ---------------------------------------------------------------- home: tasks by drive (ui-13)
+
+// With no drive, card or setup open, the middle view is the home page (tasks on each drive) or the photo grid.
+function syncBase() {
+  const base = !st.driveView && !st.setupView && !st.cardsOpen;
+  $("#home-view").hidden = !(base && !st.photosOpen);
+  $("#photo-panel").hidden = !(base && st.photosOpen);
+  $("#btn-home").setAttribute("aria-pressed", base && !st.photosOpen ? "true" : "false");
+  $("#btn-photos").setAttribute("aria-pressed", base && st.photosOpen ? "true" : "false");
+}
+
+// Closing a drive or the Cards view goes back to whichever of the two was open before.
+function backLabel() {
+  return st.photosOpen ? "Back to photos" : "Back to tasks";
+}
+
+function showBaseView(photos) {
+  st.photosOpen = photos;
+  if (st.cardsOpen) hideCards();
+  if (st.driveView || st.setupView) closeDrive(); // closeDrive re-renders the sidebar, which calls syncBase
+  else renderDrives();
+}
+
+// The mounts a command works on. An import lists its card first, then its target.
+function taskMounts(words) {
+  switch (commandKey(words)) {
+    case "assign": case "card_check": return [words[2]];
+    case "index": case "hash": case "card-status": return [words[1]];
+    case "meta_scan": case "meta_sidecars": return [flagValue(words, "--volume")];
+    case "ingest": return [flagValue(words, "--source"), flagValue(words, "--target")];
+    default: return [];
+  }
+}
+
+function sameMount(a, b) {
+  return Boolean(a && b) && a.replace(/\/+$/, "") === b.replace(/\/+$/, "");
+}
+
+// The sidebar drive a mount belongs to, or a stand-in for a mount the drive list does not show.
+function deviceForMount(mount) {
+  const d = st.drives.find((x) => x.mount && sameMount(x.mount, mount));
+  if (d) return { key: d.key || d.volume_id || `mount:${d.mount}`, drive: d };
+  return { key: `path:${mount}`, drive: null, mount };
+}
+
+const homeViews = { dev: new Map(), task: new Map(), ext: new Map() }; // kept between polls, like the sidebar's
+
+function homeTaskNode(devKey, t, now) {
+  const k = `${devKey}|${t.task_id}`;
+  let v = homeViews.task.get(k);
+  if (!v) { v = makeTaskView(t.task_id); homeViews.task.set(k, v); }
+  paintTask(v, t, now);
+  return v.root;
+}
+
+function homeExtNode(devKey, e, now) {
+  const k = `${devKey}|${e.pid}`;
+  let v = homeViews.ext.get(k);
+  if (!v) { v = makeExtView(); homeViews.ext.set(k, v); }
+  paintExt(v, e, now);
+  return v.root;
+}
+
+// Opens a card in the Cards view and a registered drive in its summary. A drive not set up yet has no Open:
+// its sidebar entry starts the setup.
+function openDevice(d) {
+  if (isCardDrive(d)) openCards(d.volume_id || null);
+  else openDrive(d.volume_id);
+}
+
+function deviceBlock(dev) {
+  let v = homeViews.dev.get(dev.key);
+  if (!v) {
+    v = {};
+    v.pills = el("span", { class: "dev-pills" });
+    v.name = el("span", { class: "dev-name" });
+    v.sub = el("span", { class: "muted small dev-sub" });
+    v.open = el("button", { type: "button", class: "small-btn" }, "Open");
+    v.head = el("div", { class: "dev-head" }, el("div", { class: "dev-title" }, v.pills, v.name), v.sub, v.open);
+    v.running = el("div", { class: "dev-tasks" });
+    v.recent = el("details", { class: "earlier" }, el("summary", null), el("div", null));
+    v.root = el("article", { class: "dev" }, v.head, v.running, v.recent);
+    homeViews.dev.set(dev.key, v);
+  }
+  const d = dev.drive;
+  v.root.className = `dev role-${d ? roleKey(d.role) : "new"}`;
+  v.name.textContent = d ? driveName(d) : mountName(dev.mount);
+  v.pills.replaceChildren(el("span", { class: `pill role-${d ? roleKey(d.role) : "new"}` }, d ? roleLabel(d.role) : "Folder"));
+  v.sub.textContent = !d ? "Not in the drive list"
+    : !d.mounted ? `Not connected${d.last_seen_at ? ` · last seen ${relTime(d.last_seen_at)}` : ""}`
+      : d.local ? `${d.mount} on this Mac · ${d.free ?? "?"} free`
+        : `${d.fs || "Unknown format"} · ${d.free ?? "?"} free of ${d.size || "?"}`;
+  const canOpen = Boolean(d) && (isCardDrive(d) || Boolean(d.volume_id));
+  v.open.hidden = !canOpen;
+  v.open.onclick = canOpen ? () => openDevice(d) : null;
+  v.open.setAttribute("aria-label", `Open ${v.name.textContent}`);
+  return v;
+}
+
+function renderHome() {
+  const box = $("#home-view");
+  if (!box || box.hidden) return;
+  const now = Date.now();
+  const devs = new Map(); // key -> { key, drive, mount, running: [nodes], finished: [tasks], stale: [jobs] }
+  const devOf = (mount) => {
+    const base = deviceForMount(mount);
+    if (!devs.has(base.key)) devs.set(base.key, { ...base, running: [], finished: [], stale: [] });
+    return devs.get(base.key);
+  };
+  const other = [];
+  const all = [...st.tasks.values()].sort((a, b) => b.task_id - a.task_id);
+  for (const t of all) {
+    const mounts = taskMounts(argvWords(t.argv)).filter(Boolean);
+    if (!mounts.length) { if (!t.final) other.push(homeTaskNode("other", t, now)); continue; }
+    for (const m of mounts) {
+      const dev = devOf(m);
+      if (t.final) dev.finished.push(t);
+      else dev.running.push(homeTaskNode(dev.key, t, now));
+    }
+  }
+  for (const e of st.elsewhere) {
+    const mounts = taskMounts(e.words || []).filter(Boolean);
+    if (!mounts.length) { other.push(homeExtNode("other", e, now)); continue; }
+    for (const m of mounts) {
+      const dev = devOf(m);
+      dev.running.push(homeExtNode(dev.key, e, now));
+    }
+  }
+  const staleLeft = [];
+  for (const j of st.staleJobs) {
+    const d = st.drives.find((x) => x.label && x.label === j.label);
+    if (d && d.mount) devOf(d.mount).stale.push(j);
+    else staleLeft.push(j);
+  }
+
+  const busy = [...devs.values()].filter((x) => x.running.length);
+  const nRunning = [...st.tasks.values()].filter((t) => !t.final).length + st.elsewhere.length;
+  const h = homeParts(box);
+  h.count.textContent = nRunning
+    ? `${plural(nRunning, "task")} running${busy.length ? ` on ${plural(busy.length, "drive")}` : ""}`
+      + (st.elsewhere.length ? ` · ${fmtInt(st.elsewhere.length)} started in a terminal` : "")
+    : "Nothing is running";
+
+  const used = new Set();
+  const block = (dev, idle) => {
+    const v = deviceBlock(dev);
+    used.add(dev.key);
+    v.root.classList.toggle("idle", idle);
+    const kids = [...dev.running];
+    for (const j of dev.stale) {
+      kids.push(el("div", { class: "task-note problem" },
+        `Job ${j.job_id} (${JOB_WORD[j.kind] || j.kind}) is marked running, but no process is doing it. `
+        + `Started ${relTime(j.created_at) || j.created_at}.`));
+    }
+    if (idle && !kids.length) {
+      const status = dev.drive && dev.drive.volume_id ? driveStatus(dev.drive) : null;
+      const last = dev.finished[0];
+      const s = last ? summarize(last) : null;
+      kids.push(el("div", { class: `task-note${s && s.problem ? " problem" : ""}` },
+        last ? `${taskTitle(last)}: ${s.text}` : (status ? status.text : "Nothing has run here yet.")));
+    }
+    setChildren(v.running, kids);
+    const recent = idle ? [] : dev.finished.slice(0, RECENT_FINISHED);
+    v.recent.hidden = !recent.length;
+    if (recent.length) {
+      v.recent.firstChild.textContent = `Finished here (${recent.length})`;
+      setChildren(v.recent.lastChild, recent.map((t) => homeTaskNode(dev.key, t, now)));
+    }
+    return v.root;
+  };
+  setChildren(h.busy, busy.map((dev) => block(dev, false)));
+  h.busy.hidden = !busy.length;
+  h.empty.hidden = busy.length > 0;
+  h.otherHead.hidden = h.other.hidden = !other.length;
+  setChildren(h.other, other);
+
+  // Connected drives with nothing running: one compact row each, with the last thing that ran.
+  const idle = st.drives.filter((d) => d.mounted && !d.ignored && !used.has(deviceForMount(d.mount).key));
+  h.idleHead.hidden = h.idle.hidden = !idle.length;
+  h.idleHead.textContent = `Idle drives (${idle.length})`;
+  setChildren(h.idle, idle.map((d) => {
+    const base = deviceForMount(d.mount);
+    return block(devs.get(base.key) || { ...base, running: [], finished: [], stale: [] }, true);
+  }));
+
+  h.staleHead.hidden = h.stale.hidden = !staleLeft.length;
+  h.staleHead.textContent = `Marked running, but stopped (${staleLeft.length})`;
+  h.stale.replaceChildren(...staleLeft.map((j) => el("div", { class: "task-note" },
+    `Job ${j.job_id} · ${JOB_WORD[j.kind] || j.kind} · ${j.label || "unknown drive"} · started ${relTime(j.created_at) || j.created_at}`)));
+
+  for (const k of [...homeViews.dev.keys()]) if (!used.has(k)) homeViews.dev.delete(k);
+  for (const map of [homeViews.task, homeViews.ext]) {
+    for (const [k, v] of [...map]) if (!v.root.isConnected) map.delete(k);
+  }
+}
+
+// The home page's fixed parts, built once, so focused buttons and open details survive the 1 s repaint.
+let homeEl = null;
+function homeParts(box) {
+  if (homeEl) return homeEl;
+  const h = {};
+  h.count = el("span", { class: "muted small" });
+  h.busy = el("div", { class: "dev-list" });
+  h.empty = el("p", { class: "muted home-empty" },
+    "No task is running. Open a drive to index, hash or scan it, or open Cards to import a card.");
+  h.otherHead = el("h3", { class: "sub" }, "Other tasks");
+  h.other = el("div", { class: "dev-tasks" });
+  h.idleHead = el("h3", { class: "sub" });
+  h.idle = el("div", { class: "dev-list compact" });
+  h.staleHead = el("h3", { class: "sub" });
+  h.stale = el("div", { class: "dev-tasks" });
+  box.replaceChildren(el("div", { class: "section-head" }, el("h2", null, "Tasks"), h.count),
+    h.busy, h.empty, h.otherHead, h.other, h.idleHead, h.idle, h.staleHead, h.stale);
+  homeEl = h;
+  return h;
 }
 
 // ---------------------------------------------------------------- metadata grid
@@ -1446,7 +1699,7 @@ function openDrive(volumeId) {
     $("#drive-view").replaceChildren(el("div", { class: "empty" },
       el("h3", null, "Could not load this drive"),
       el("p", null, err.message),
-      button("Back to photos", closeDrive)));
+      button(backLabel(), closeDrive)));
   });
 }
 
@@ -1454,7 +1707,6 @@ function closeDrive() {
   st.driveView = null;
   st.driveSummary = null;
   timelineBox = workflowBtn = null;
-  $("#photo-panel").hidden = false;
   $("#drive-view").hidden = true;
   $("#drive-view").replaceChildren();
   renderDrives();
@@ -1567,7 +1819,7 @@ function renderDriveView(s, files, total) {
         title: mounted ? undefined : "Connect this drive to show it in Finder",
         onclick: () => revealOnDrive(""),
       }, "Show in Finder"),
-      button("Back to photos", closeDrive)),
+      button(backLabel(), closeDrive)),
     (timelineBox = el("ol", { class: "timeline", "aria-label": "Workflow" })),
     el("p", { class: "muted small" },
       [d.fs || "Unknown format", d.size ? `${d.size} total` : null,
@@ -1856,13 +2108,12 @@ function openCards(volumeId) {
   loadCards().catch((err) => {
     reportError(err);
     $("#cards-view").replaceChildren(el("div", { class: "empty" },
-      el("h3", null, "Could not load cards"), el("p", null, err.message), button("Back to photos", closeCards)));
+      el("h3", null, "Could not load cards"), el("p", null, err.message), button(backLabel(), closeCards)));
   });
 }
 
 function closeCards() {
   hideCards();
-  $("#photo-panel").hidden = false;
   renderDrives();
 }
 
@@ -1933,7 +2184,7 @@ function renderCards(data) {
   const connected = data.cards.filter((c) => c.mounted);
   const remembered = data.cards.filter((c) => !c.mounted);
   $("#cards-view").replaceChildren(
-    el("div", { class: "section-head" }, el("h2", null, "Cards"), button("Back to photos", closeCards)),
+    el("div", { class: "section-head" }, el("h2", null, "Cards"), button(backLabel(), closeCards)),
     el("p", { class: "muted small" }, "Which files on your cards are safe to remove. A card takes the colour of its least safe file."),
     legend(),
     connected.length
@@ -2384,6 +2635,8 @@ function onGlobalKey(event) {
 function wire() {
   $("#btn-settings").addEventListener("click", openSettings);
   $("#btn-cards").addEventListener("click", () => (st.cardsOpen ? closeCards() : openCards(null)));
+  $("#btn-home").addEventListener("click", () => showBaseView(false));
+  $("#btn-photos").addEventListener("click", () => showBaseView(true));
   $("#f-settings").addEventListener("submit", saveSettings);
   $("#f-assign").addEventListener("submit", assignDrive);
   $("#btn-assign-ignore").addEventListener("click", () => ignoreAssignDrive().catch(reportError));
@@ -2430,6 +2683,8 @@ function reportError(err) {
 
 async function init() {
   wire();
+  syncBase();
+  renderHome();
   showSkeleton();
   try {
     await loadSettings();

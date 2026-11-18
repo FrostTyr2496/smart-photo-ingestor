@@ -396,6 +396,37 @@ details.earlier { margin-top: 4px; }
 details.earlier > summary { padding: 4px 0; font-weight: 500; }
 details.earlier > div { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; }
 
+/* ---------------------------------------------------------------- home: tasks by drive (ui-13) */
+
+.home-view { min-height: 240px; }
+.home-empty { margin: 8px 0 0; }
+.dev-list { display: flex; flex-direction: column; gap: 12px; }
+.dev-list.compact { gap: 8px; }
+.dev {
+  --tone: var(--c-skip);
+  border: 1px solid rgb(var(--tone) / 0.3); border-left: 3px solid rgb(var(--tone));
+  border-radius: var(--r-lg); padding: 12px; background: rgb(var(--tone) / 0.05);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.dev.role-card { --tone: var(--c-card); }
+.dev.role-working { --tone: var(--c-go); }
+.dev.role-legacy { --tone: var(--c-maybe); }
+.dev.role-master { --tone: var(--c-master); }
+.dev.idle { padding: 8px 12px; gap: 4px; background: none; }
+.dev-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
+.dev-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.dev-name { font-weight: 600; overflow-wrap: anywhere; }
+.dev-sub { flex: 1 1 auto; }
+.dev-head .small-btn { margin-left: auto; }
+.dev-tasks { display: flex; flex-direction: column; gap: 8px; }
+.dev .task { background: rgb(var(--c-surface)); }
+.dev .task-note.problem, .home-view .task-note.problem { color: rgb(var(--c-err)); }
+.dev details.earlier { margin-top: 0; }
+
+/* Sidebar drive groups: Mounted, Not connected, Ignored. */
+.group-toggle { padding-top: 2px; font-size: 13px; }
+.group-toggle + .drive-list { margin-top: 4px; }
+
 /* ---------------------------------------------------------------- toolbar and grid */
 
 .toolbar { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 8px; }
@@ -607,7 +638,7 @@ dialog.dlg[open] { animation: dlg-in 160ms var(--ease); }
 
 .top-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .global:not([hidden]) + .top-actions { margin-left: 0; }
-#btn-cards[aria-pressed="true"] { border-color: rgb(var(--c-accent)); box-shadow: 0 0 0 1px rgb(var(--c-accent)); }
+.top-actions button[aria-pressed="true"] { border-color: rgb(var(--c-accent)); box-shadow: 0 0 0 1px rgb(var(--c-accent)); }
 .t-backed_up { --tone: var(--c-go); }
 .t-needs_backup { --tone: var(--c-maybe); }
 .t-only_on_card { --tone: var(--c-err); }

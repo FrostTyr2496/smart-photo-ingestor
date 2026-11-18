@@ -294,3 +294,16 @@ still naive, apply the `settings` value `default_offset` (default "+00:00"). The
   - Verify: `uv run pytest tests/test_web_api.py tests/test_catalog_repo.py -q`
   - Result (2026-11-18): `uv run pytest tests/test_web_api.py tests/test_catalog_repo.py -q` → 66 passed; full suite
     470 passed, 4 skipped. The real catalog now reports the 12 TB drive's hash as incomplete, 112,797 pending.
+
+- [x] 14. Home page: tasks by drive; sidebar grouped by connection (visual check pending, user)
+  - ID: ui-14 (after ui-11)
+  - With no drive, card or setup open, the middle view is a Tasks page, not the photo grid. Each drive with
+    something running gets a block: role, name, free space, an Open button, its running tasks in full (UI tasks
+    with Pause, terminal runs from ui-11), its stale jobs, and "Finished here". An import shows under its card and
+    its target. Tasks with no drive go under Other tasks; connected drives with nothing running are listed as Idle
+    drives with their last result. The header gains Tasks and Photos buttons; Back from a drive or Cards returns
+    to whichever was open. The sidebar always groups drives as Mounted, Not connected and Ignored, each header
+    folding (remembered per browser; Ignored starts folded). Front end only; no API or schema change (D-057).
+  - Verify: `uv run pytest tests/test_web_api.py -q`, and a browser check
+  - Result (2026-11-18): full suite 470 passed, 4 skipped. Headless Chrome on a copy of the catalog with injected
+    tasks: busy blocks per drive, idle list, Tasks/Photos/Back switching and group folding all behaved.
