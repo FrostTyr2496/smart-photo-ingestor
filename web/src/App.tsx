@@ -9,6 +9,8 @@ import { ThemeProvider } from './lib/theme';
 import { DriveView } from './views/DriveView';
 import { Header } from './views/Header';
 import { Home } from './views/Home';
+import { SetupView } from './views/SetupView';
+import { Settings } from './views/Settings';
 import { Sidebar } from './views/Sidebar';
 
 function Shell() {
@@ -31,7 +33,17 @@ function Shell() {
                 exit={{ opacity: 0, y: -6, transition: { duration: 0.12 } }}
                 transition={{ type: 'spring', stiffness: 420, damping: 34 }}
               >
-                {route.view === 'drive' ? <DriveView id={route.id} /> : route.view === 'cards' ? <Cards id={route.id} /> : <Home />}
+                {route.view === 'drive' ? (
+                  <DriveView id={route.id} />
+                ) : route.view === 'cards' ? (
+                  <Cards id={route.id} />
+                ) : route.view === 'setup' ? (
+                  <SetupView driveKey={route.key} />
+                ) : route.view === 'settings' ? (
+                  <Settings />
+                ) : (
+                  <Home />
+                )}
               </motion.div>
             </AnimatePresence>
           </div>

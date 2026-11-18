@@ -53,6 +53,11 @@ function DeviceBlock({ dev, idle }: { dev: Dev; idle: boolean }) {
       <div className="flex items-center gap-2.5">
         <RolePill role={d?.role ?? null} isNew={!d} text={d ? undefined : 'Folder'} />
         <h3 className="min-w-0 flex-1 truncate font-semibold">{name}</h3>
+        {!href && d && !d.volume_id && (
+          <a href={hrefFor({ view: 'setup', key: d.key })} className="btn-primary h-7 px-2.5 text-xs" aria-label={`Set up ${name}`}>
+            Set up
+          </a>
+        )}
         {href && (
           <a href={href} className="btn h-7 px-2.5 text-xs" aria-label={`Open ${name}`}>
             Open

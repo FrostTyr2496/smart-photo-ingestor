@@ -1,13 +1,14 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { useState } from 'react';
 import { Disclosure, Icon, RolePill, ROLE_DOT } from '../components/bits';
+import { RefsDialog } from './RefsDialog';
 import { ProgressBar } from '../components/ProgressBar';
 import { extVM, FinishedRow, RunningCard, taskVM } from '../components/TaskCard';
 import { parseSize, relTime } from '../lib/format';
-import { driveName, driveStatus, isCardDrive, liveStep, roleKey, staleText } from '../lib/labels';
+import { argvWords, driveName, driveStatus, flagValue, isCardDrive, liveStep, newestAssignTask, ROLE_WORD, roleKey, staleText } from '../lib/labels';
 import { rise, springs } from '../lib/motion';
 import { usePref } from '../lib/prefs';
-import { CLASSIC, hrefFor, type Route } from '../lib/route';
+import { hrefFor, type Route } from '../lib/route';
 import { useStore } from '../lib/store';
 import type { Drive } from '../lib/types';
 
@@ -20,16 +21,27 @@ const GROUPS = [
 ] as const;
 
 function DriveRow({ d, active }: { d: Drive; active: boolean }) {
-  const { tasks, elsewhere } = useStore();
+  const { tasks, elsewhere, setIgnored } = useStore();
   const isNew = !d.volume_id && !isCardDrive(d);
   const live = d.mounted ? liveStep(d, tasks, elsewhere) : null;
-  const status = isNew ? { text: 'Not set up · click to set up (classic UI)', tone: 'plain' as const } : driveStatus(d, live);
+  const assign = isNew ? newestAssignTask(tasks, d.mount) : null;
+  const assignRole = assign ? ROLE_WORD[flagValue(argvWords(assign.argv), '--role') ?? ''] || 'a drive' : '';
+  const status = isNew
+    ? assign && !assign.final
+      ? { text: `Setting up as ${assignRole}…`, tone: 'running' as const }
+      : assign && (assign.state === 'failed' || assign.state === 'paused')
+        ? { text: 'Setup failed · click to see why', tone: 'warn' as const }
+        : {
+            text: d.local ? `The folder ${d.mount} on this Mac. Click to use it as a working drive.` : 'Not set up · click to set it up',
+            tone: 'plain' as const,
+          }
+    : driveStatus(d, live);
   const size = parseSize(d.size);
   const free = parseSize(d.free);
   const used = size && free !== null ? (size - free) / size : null;
   const key = isNew ? 'new' : roleKey(d.role);
-  // A card opens in Cards; a new drive is set up in the classic UI until rv-4.
-  const href = isCardDrive(d) ? hrefFor({ view: 'cards', id: d.volume_id }) : d.volume_id ? hrefFor({ view: 'drive', id: d.volume_id }) : CLASSIC;
+  // A card opens in Cards; a new drive opens its setup page.
+  const href = isCardDrive(d) ? hrefFor({ view: 'cards', id: d.volume_id }) : d.volume_id ? hrefFor({ view: 'drive', id: d.volume_id }) : hrefFor({ view: 'setup', key: d.key });
 
   return (
     <a
@@ -45,6 +57,18 @@ function DriveRow({ d, active }: { d: Drive; active: boolean }) {
         <span className="min-w-0 flex-1 truncate text-sm font-medium" title={d.mount}>
           {driveName(d)}
         </span>
+        <button
+          type="button"
+          title={d.ignored ? 'Show this drive in the list again' : 'Hide this drive under Ignored'}
+          className="shrink-0 rounded px-1 text-2xs text-muted opacity-0 hover:text-ink focus:opacity-100 group-hover:opacity-100"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void setIgnored(d, !d.ignored);
+          }}
+        >
+          {d.ignored ? 'Unignore' : 'Ignore'}
+        </button>
         <RolePill role={d.role} isNew={isNew} />
       </div>
       <p className={`mt-1 truncate pl-4 text-xs ${status.tone === 'running' ? 'text-accent' : status.tone === 'warn' ? 'text-maybe' : 'text-muted'}`}>
@@ -69,6 +93,7 @@ function DriveRow({ d, active }: { d: Drive; active: boolean }) {
 function DriveList({ route }: { route: Route }) {
   const { drives, loaded } = useStore();
   const [folded, setFolded] = usePref<string[]>('pv:driveFold', ['ignored']);
+  const [refsOpen, setRefsOpen] = useState(false);
   const shown = drives.filter((d) => !d.ignored);
   const toggle = (k: string) => setFolded((f) => (f.includes(k) ? f.filter((x) => x !== k) : [...f, k]));
 
@@ -121,7 +146,11 @@ function DriveList({ route }: { route: Route }) {
                     <div className="flex flex-col gap-1.5 pb-2">
                       {list.map((d, i) => (
                         <motion.div key={d.key} {...rise(i)}>
-                          <DriveRow d={d} active={(route.view === 'drive' || route.view === 'cards') && route.id !== null && route.id === d.volume_id} />
+                          <DriveRow d={d} active={
+                              route.view === 'setup'
+                                ? route.key === d.key
+                                : (route.view === 'drive' || route.view === 'cards') && route.id !== null && route.id === d.volume_id
+                            } />
                         </motion.div>
                       ))}
                     </div>
@@ -132,6 +161,10 @@ function DriveList({ route }: { route: Route }) {
           );
         })}
       </div>
+      <button type="button" className="text-xs text-accent hover:underline px-1 pt-2" onClick={() => setRefsOpen(true)}>
+        Add GPS reference folder…
+      </button>
+      <RefsDialog open={refsOpen} onClose={() => setRefsOpen(false)} />
     </section>
   );
 }

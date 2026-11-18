@@ -5,14 +5,16 @@ export type Route =
   | { view: 'home' }
   | { view: 'drive'; id: string }
   | { view: 'cards'; id: string | null }
+  | { view: 'setup'; key: string }
   | { view: 'photos' }
   | { view: 'settings' };
 
 export function parseRoute(hash: string): Route {
-  const m = /^#\/(drive|cards|photos|settings)(?:\/(.+))?$/.exec(hash);
+  const m = /^#\/(drive|cards|setup|photos|settings)(?:\/(.+))?$/.exec(hash);
   if (!m) return { view: 'home' };
   const id = m[2] ? decodeURIComponent(m[2]) : null;
   if (m[1] === 'drive' && id) return { view: 'drive', id };
+  if (m[1] === 'setup' && id) return { view: 'setup', key: id };
   if (m[1] === 'cards') return { view: 'cards', id };
   if (m[1] === 'photos') return { view: 'photos' };
   if (m[1] === 'settings') return { view: 'settings' };
@@ -23,6 +25,8 @@ export function hrefFor(r: Route): string {
   switch (r.view) {
     case 'drive':
       return `#/drive/${encodeURIComponent(r.id)}`;
+    case 'setup':
+      return `#/setup/${encodeURIComponent(r.key)}`;
     case 'cards':
       return r.id ? `#/cards/${encodeURIComponent(r.id)}` : '#/cards';
     case 'photos':

@@ -54,11 +54,41 @@ Rules for every task:
   - Verify: `cd web && npm test && npm run build`; built page checked for console errors on each route.
   - Result (2026-11-18): `npm test` 14 passed, build clean; `uv run pytest -q` 490 passed, 4 skipped. Headless
     Chrome on live data: cards list, Card A detail, home showing "62,755 of 112,797 files on the drive".
-- [ ] 3. Drive file lists and the filter bar (ui-7, ui-10)
-  - ID: rv-3 (after rv-1)
-- [ ] 4. New-drive setup, assign / ignore / rename dialogs, import (ui-9, ui-15)
-  - ID: rv-4 (after rv-1)
-- [ ] 5. Photos grid, editor, GPS references, Settings
-  - ID: rv-5 (after rv-1)
-- [ ] 6. Make `/next` the default; delete the classic UI; update the user guides
-  - ID: rv-6 (after rv-2..5; the user confirms parity first)
+- [x] 3. Drive file lists and the filter bar (ui-7, ui-10) (visual check pending, user)
+  - ID: rv-3 (after rv-1). Built by a Haiku agent from a brief; reviewed and checked in a browser.
+  - The drive view gains a Files section (shared FilterBar, FileTable with copies rows, Pager, Show in Finder per
+    file); the four state tiles filter it and scroll to it; an empty drive says how to fill it. The file list
+    reloads on filter and after a run, not every few seconds, so paging is never reset under the user.
+  - Result (2026-11-18): `npm test` 16 passed; FLATS1 filtered to Hashed showed 27,326 files with copies.
+- [x] 4. New-drive setup, assign and ignore (ui-9, ui-15) (visual check pending, user)
+  - ID: rv-4 (after rv-1). Built by a Sonnet agent from a brief; reviewed (a failed start no longer opens a setup
+    that never runs) and checked in a browser. Rename stays with vn-2 (spec `backup`).
+  - `#/setup/<drive key>`: the Set up drive dialog (roles, NTFS = legacy only with the reason, Mac folder never
+    legacy, Run the workflow after setup, Ignore drive), then a setup timeline; a read-only failure explains why and
+    offers "Set up as legacy drive…"; when done it opens the drive and starts the workflow if asked. Every drive
+    row has Ignore / Unignore on hover.
+  - Result (2026-11-18): `npm test` 16 passed (helpers newestAssignTask, setupProblem); "This Mac" opened the
+    dialog with the local-folder roles. Setup itself was not run (it writes the drive's ID file).
+- [x] 5. Settings and GPS reference folders (visual check pending, user)
+  - ID: rv-5 (after rv-1). Photos moved out to rv-7 (user, 2026-11-18). Built by a Haiku agent; reviewed.
+  - `#/settings`: creator, copyright, default time zone, GPS match window, Mac folder; Save only when changed.
+    "Add GPS reference folder…" (Settings and the sidebar) starts `meta_refs` on a folder.
+  - Result (2026-11-18): `npm test` 16 passed; Settings loaded the saved values in a browser.
+- [ ] 6. Make the new UI the default at `/`; delete the classic UI; update the user guides
+  - ID: rv-6 (after rv-2..5). The user asked for it on 2026-11-18 without Photos, which "does not work on the old UI
+    anyway"; the Photos nav item shows the rv-7 placeholder until then.
+
+- [ ] 7. Photos: the grid and the metadata editor, rebuilt and made to work [stronger]
+  - ID: rv-7 (after rv-6; its own task, worked on separately)
+  - Why separate: the classic Photos view (grid, selection, editor with Leaflet map, place search, GPS
+    suggestions, creator/copyright/title, keywords, time shift, Save) does not work today (user, 2026-11-18), so
+    porting it as is would carry the breakage over. First find out why it fails, then rebuild it.
+  - Start by: running the classic UI from git (`git show <rv-6 commit>^:photovault/web/static/app.js`) against a
+    copy of the catalog and recording what breaks (API errors, empty grid, map, save). Write the findings and a
+    task plan into this entry before coding.
+  - Pieces it uses: `GET /api/shoots`, `GET /api/groups` (filters drive, shoot, missing; paging),
+    `GET /api/groups/<id>/thumb`, `GET /api/groups/<id>/suggestions`, `POST /api/groups/meta`, `GET /api/settings`
+    (creator, copyright, default_offset, match_window_s); the map tiles and place search (Nominatim) are external
+    calls, so keep the user's private data out of them (vault rule 10).
+  - Leaflet would be a new front-end dependency in `web/`: ask the user first.
+  - Verify: to be set by the plan above; at least a browser check that a selection's location and keywords save.

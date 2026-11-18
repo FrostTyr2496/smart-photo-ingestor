@@ -98,7 +98,7 @@ export function Header({ route }: { route: Route }) {
             dot={worst ? TIER_DOT[worst] : undefined}
             title={worst ? `Connected cards: ${TIER_WORD[worst]}` : 'Cards'}
           />
-          <NavItem label="Settings" href={CLASSIC} active={false} external title="Opens in the classic UI (not ported yet)" />
+          <NavItem label="Settings" href="#/settings" active={route.view === 'settings'} title="Settings" />
         </nav>
       </div>
     </header>

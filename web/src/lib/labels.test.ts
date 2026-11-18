@@ -5,6 +5,8 @@ import {
   driveStatus,
   hashOverall,
   liveStep,
+  newestAssignTask,
+  setupProblem,
   longLine,
   pace,
   shortLine,
@@ -186,5 +188,23 @@ describe('cards', () => {
     );
     expect(worstTier([{ mounted: true, tier: 'backed_up' }, { mounted: true, tier: 'needs_backup' }, { mounted: false, tier: 'only_on_card' }])).toBe('needs_backup');
     expect(worstTier([{ mounted: false, tier: 'only_on_card' }])).toBeNull();
+  });
+});
+
+describe('drive setup helpers', () => {
+  const task = (id: number, mount: string): TaskRec =>
+    ({ id, argv: ['python', '-m', 'photovault', '--json', 'volumes', 'assign', mount, '--role', 'LEGACY'], state: 'done', error: '' }) as unknown as TaskRec;
+  it('finds the newest assign task for a mount', () => {
+    const list = [task(3, '/mnt/B'), task(2, '/mnt/A'), task(1, '/mnt/A')];
+    expect(newestAssignTask(list, '/mnt/A')?.id).toBe(2);
+    expect(newestAssignTask(list, '/mnt/C')).toBeNull();
+  });
+  it('detects a read-only failure', () => {
+    const p = setupProblem({ error: "OSError: [Errno 30] Read-only file system: '/x'", exitCode: 1 }, 'ntfs');
+    expect(p.readOnly).toBe(true);
+    expect(p.lines[0]).toMatch(/NTFS/);
+    const q = setupProblem({ error: 'boom', exitCode: 1 }, 'apfs');
+    expect(q.readOnly).toBe(false);
+    expect(q.lines).toEqual(['boom']);
   });
 });

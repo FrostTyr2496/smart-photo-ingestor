@@ -356,3 +356,35 @@ export function stepView(
   if (last.state === 'failed') return { tone: 'warn', when: `Failed ${ago}` };
   return { tone: 'warn', when: `Interrupted ${ago}` };
 }
+
+// ---------------------------------------------------------------- drive setup (rv-4)
+
+/** The newest `volumes assign` task for a mount (tasks are newest first). */
+export function newestAssignTask(tasks: TaskRec[], mount: string): TaskRec | null {
+  for (const t of tasks) {
+    const w = argvWords(t.argv);
+    if (commandKey(w) === 'assign' && sameMount(w[2], mount)) return t;
+  }
+  return null;
+}
+
+/** Why a setup failed, ported from the classic setupProblem. A read-only drive gets an explanation and an exit. */
+export function setupProblem(t: Pick<TaskRec, 'error' | 'exitCode'>, fs: string | null): { readOnly: boolean; lines: string[]; msg: string } {
+  const msg = t.error || `The setup stopped (exit code ${t.exitCode ?? 'unknown'}).`;
+  if (/Errno 30|Read-only file system/i.test(msg)) {
+    return {
+      readOnly: true,
+      lines: [
+        (fs || '').toUpperCase() === 'NTFS'
+          ? "macOS can read NTFS drives but cannot write to them, so the drive's ID file could not be written."
+          : "This drive is mounted read-only, so the drive's ID file could not be written.",
+        'A working drive or master backup gets a small ID file (.photovault-id) at its top, so it is recognised ' +
+          'whatever its name. Nothing was written and nothing on the drive changed.',
+        "You can set it up as a legacy drive instead: nothing is written to it, and its photos are listed, hashed " +
+          'and counted as copies. To use it as a master backup, reformat it as APFS or exFAT first (this erases it).',
+      ],
+      msg,
+    };
+  }
+  return { readOnly: false, lines: [msg], msg };
+}
