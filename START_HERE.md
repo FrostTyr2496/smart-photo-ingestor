@@ -100,11 +100,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-071 (user): phone import also takes iPad + Meta glasses (DJI later); proposal dv-0 links EXIF-less astro TIFFs to originals.
 - D-070 (user): field scopes for related photos, gap ladder + Auto; osxphotos as an external tool; Follow the track; V6 `geo_points` offset + kind.
 - D-069 (user): roadmap approvals: ing-13, idx-9, idx-10, eval-1 (3 of 4), rv-11 from metadata; spec `curation`.
 - D-068 (agent, rv-12..15): rename = catalog label only; `diskutil` probes run in parallel and are cached per mount.
 - D-067 (user): sp-2..sp-4 work shelved in `git stash`; schema V5 committed alone (the live catalog was already V5).
-- D-066 (user, sp-1): one iPhone import via osxphotos; place names in catalog + XMP (V5); shoots from camera + phone.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

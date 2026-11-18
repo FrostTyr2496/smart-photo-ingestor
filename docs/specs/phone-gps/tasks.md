@@ -94,17 +94,23 @@ reference folder read into `geo_points`) and `geo.suggest` (time-matched suggest
     To limit the range, add `--from-date 2026-01-01 --to-date 2026-03-31` before the `>`. With `$PHOTOVAULT_HOME`
     set, use that folder instead (`config.default_home()`).
   - Step 2: `photovault meta phone <json>` in `photovault/phone.py` (stdlib `json` only). It accepts a JSON array or JSON lines of
-    osxphotos `PhotoInfo.asdict()` rows. It keeps a row when `exif_info.camera_make == "Apple"`, `exif_info.camera_model`
-    starts with `"iPhone"`, `latitude`/`longitude` are set, and `screenshot`, `shared`, `syndicated` and `intrash`
-    are all false. It keeps photos and movies.
-  - Each kept row is upserted into `geo_points` on `(source, source_ref)`: `source = 'iphone'`, `source_ref = uuid`,
+    osxphotos `PhotoInfo.asdict()` rows (the first real export: 262 MB, 19,845 rows, `json.load` in 2 s at about
+    1.35 GB peak, which is acceptable). It keeps photos and movies with `latitude`/`longitude` set and `screenshot`,
+    `screen_recording`, `shared`, `syndicated` and `intrash` all false, from the user's own devices (D-071):
+    - `source = 'iphone'`: `exif_info.camera_model` contains `"iPhone"` and `camera_make` is `"Apple"` or empty
+      (two real rows have no make and a model like "Apple iPhone 14 Pro 77mm").
+    - `source = 'ipad'`: model starts with `"iPad"`, make Apple.
+    - `source = 'glasses'`: make `"Meta AI"`, or model contains `"Meta"` (rows with no make exist).
+    - Everything else is skipped as `other_device`: DJI drone frames (later, D-071), Vision Pro, and rows with no
+      model (images saved from apps).
+  - Each kept row is upserted into `geo_points` on `(source, source_ref)`: `source` as above, `source_ref = uuid`,
     `utc_time` = `geo.utc_text(date)` (`date` is ISO with an offset; if it has none, apply `tzoffset` seconds),
     `lat`, `lon`, `place_name = place.name`, `city` / `state` / `country` from `place.address`
     (`city`, `state_province`, `country`), falling back to the first entry of `place.names.city` /
     `state_province` / `country`, `accuracy_m = NULL` (not in the JSON), `local_offset` = `tzoffset` as `+HH:MM`, and
     `kind` = `'video'` if `ismovie` else `'photo'`. Re-running the same file changes nothing.
   - Result: rows seen, kept, inserted, updated, and skipped per reason (`not_iphone`, `no_location`, `screenshot`,
-    `shared`, `trash`, `bad_date`). A file that is not osxphotos JSON fails with a message naming the export command.
+    `shared`, `trash`, `other_device`, `bad_date`), and kept per source. A file that is not osxphotos JSON fails with a message naming the export command.
   - Schema: `geo_points.local_offset TEXT` and `geo_points.kind TEXT` (approved, D-070) belong to the cu-0 V6
     migration. If cu-0 is not approved when sp-2 starts, these two columns land alone as V6 (with `system-design.md` §5f),
     and cu-0 becomes V7.

@@ -118,6 +118,25 @@ result). Build them as written there.
     (`SelectTile`, rv-13).
   - Verify: `npm test`; **[user]** visual check.
 
+- [ ] 9b. **[stronger]** Processed images without EXIF find their originals (proposal first)
+  - ID: dv-0 (user ask, 2026-11-18, D-071; **proposal first**: a link table is a schema change and joins cu-0's V6)
+  - Case: an astro stack or blend goes Lightroom → stacker → Photoshop → TIFF → Lightroom and loses its EXIF (no
+    capture time, GPS or camera). It ends up under Undated, and no time-based match can reach it.
+  - Signals, metadata only (rule 9), strongest first: (1) the Lightroom catalog, read-only (rule 7): stacks
+    (`AgLibraryFolderStackImage`) with originals, plus Lightroom's own `captureTime` for the TIFF; (2) XMP embedded in the TIFF
+    that survived: `crs:RawFileName`, `xmpMM:DerivedFrom`, `photoshop:DocumentAncestors`, and `xmpMM:History` (tools
+    and dates); (3) the filename: original stems or ranges inside the name, and more suffixes (`-Edit-2`, `_stacked`,
+    `-Blend`); (4) the folder: next to the raws, or a folder that names a shoot (cu-1); (5) the file's dates as an
+    upper bound (it was captured before it was processed); (6) pixel dimensions that point to a camera body.
+  - Proposal: `group_links (child_group_id, parent_group_id, kind ('edit'|'stack'|'blend'|'pano'), source
+    ('lrcat'|'xmp'|'name'|'folder'|'user'), confidence)`. One derivative can have many parents (sky frames +
+    foreground). A linked derivative takes its parents' time range (`time_source = 'derived'`), location, place and shoot,
+    shows on their day with a "stack of N" badge, and gets a "Find originals" helper in the inspector for the rest
+    (ranked candidates, often a night run from seq-2).
+  - Open for the review: Lightroom ignores `.xmp` sidecars for TIFF/PSD/JPEG and reads only embedded XMP, and
+    embedding changes the file's bytes and hash (rules 3, 5). So derived metadata for these files stays in the
+    catalog until the user picks a way to get it into Lightroom.
+
 ## Wave 3: culling and Lightroom Classic
 
 - [ ] 10. Keep Lightroom 15 `.acr` sidecars with their raws
