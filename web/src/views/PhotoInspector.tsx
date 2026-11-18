@@ -126,7 +126,7 @@ export function PhotoInspector({
   const pin = pend.loc && pend.loc.lat !== null && pend.loc.lon !== null ? { lat: pend.loc.lat, lon: pend.loc.lon } : null;
 
   return (
-    <aside className="card flex h-full flex-col overflow-hidden bg-surface/95 shadow-2xl xl:sticky xl:top-[72px] xl:h-auto xl:max-h-[calc(100vh-88px)] xl:bg-surface/80 xl:shadow-none">
+    <aside className="card flex h-full flex-col overflow-hidden bg-surface/95 shadow-2xl xl:h-auto xl:max-h-[calc(100vh-88px)] xl:bg-surface/80 xl:shadow-none">
       <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3">
         <div className="min-w-0">
           <p className="truncate font-medium">{n === 1 ? first?.canonical_stem || `Photo ${first?.group_id}` : `${fmtInt(n)} photos selected`}</p>

@@ -282,7 +282,7 @@ export function Photos() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 24, transition: { duration: 0.12 } }}
               transition={{ type: 'spring', stiffness: 420, damping: 36 }}
-              className="fixed bottom-2 right-2 top-16 z-20 w-[min(380px,calc(100vw-1rem))] xl:static xl:w-auto"
+              className="fixed bottom-2 right-2 top-16 z-20 w-[min(380px,calc(100vw-1rem))] xl:sticky xl:top-[72px] xl:bottom-auto xl:right-auto xl:z-auto xl:w-auto xl:self-start"
             >
               <PhotoInspector selected={selected} pool={pool} settings={settings} windowS={windowS} onClear={clear} onSaved={onSaved} onRelated={onRelated} savedEpoch={savedEpoch} />
             </motion.div>
