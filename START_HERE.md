@@ -73,12 +73,13 @@ task's commit:
    **[user] visual check (ui-5..15, card-3):** restart `uv run photovault serve` (it picks up ui-11..15), try the
    Tasks home page, the sidebar groups, drives, cards, a step's Run button (e.g. Hash) and the editor (Photos).
 1. **[user] re-index Big Boy Old** (`uv run photovault index "/Volumes/Big Boy Old"`), then open its drive page.
-   **ing-13 [stronger]** (D-042): stops a double card read at import (ing-12 is done). Then:
+   Then:
 2. **[user] ing-11:** the first real import (commands in `docs/user/CARD_WORKFLOW.md`), after ing-12, then paste back the
    timings, `sync_method` and counts.
 3. **[user] idx-6:** resume the PP 1 hash with `--skip-prefix` on the damaged folder, then run `report duplicates`
    ("If a drive shows I/O errors" in `docs/user/INDEX_WORKFLOW.md`). idx-5 is done except `lrcat mark`.
-4. **seq-2 [stronger]** waits for the user's answers on eval-1 (`docs/reviews/2026-11-11-eval-1-sequencing.md`).
+4. **Curation (spec `docs/specs/curation`, D-069):** wave 1 is approved and ready: ing-13, idx-9, idx-10, idx-14,
+   seq-1b (then seq-2), rv-11; then rv-16, lr-0, set-1; cu-0 / dd-0 / ro-0 are proposals first.
 5. **Card backup (spec `docs/specs/backup`, D-050..D-052):** bk-1 drive health, bk-3 backup job (after ing-13),
    vn-1 volume name on hover, then bk-2, bk-4, vn-2, vn-3. bk-5 [user]: plug in and assign the 12 TB. Metrics:
    met-2 (web view); met-4 after bk-1.
@@ -92,21 +93,18 @@ task's commit:
   HEIC+AAE (`docs/private/CORPUS.md`). Copy them when you can.
 - **X9 sample:** should `testdata/x9_sample/` move into `testdata/corpus/x9/` (D-017)?
 - The exFAT answer looked cut off ("honestly considering…"). Tell us if you are weighing APFS after all.
-- **idx-10 (D-042):** approve `lrcat mark --was-mounted-as` (new CLI flag)? Until then, run `lrcat mark` for PP 1
-  before renaming the drive: a rename breaks Lightroom's stored paths.
-- **eval-1 (4 questions):** read the camera's bracket flag (a metadata field change), make search segmentation the
-  production segmenter, which bracket steps count, and a boundary check from memory. See the review file.
-- **Stale job 3:** `jobs` shows an index job on PP 1 as `running` with no process (job 4 is the live one). Propose
-  idx-9 (mark ownerless `running` jobs `paused` at the next start)? Details: `docs/private/IDX5_FLATS1_RESULTS.md`.
+- **eval-1, last question:** the boundary check from memory (the other three are answered, D-069). See the review file.
+- **Curation proposals (D-069):** cu-0 (schema V6), dd-0 (duplicate quarantine), ro-0 (shoot folder layout) each
+  come back as a review for your approval before any code.
 - **lrcat mark:** run it on a copy of one catalog (guide step 3) or say you are skipping it for now. Keep Lightroom
   closed while you do.
 
 ## Recent decisions
+- D-069 (user): roadmap approvals: ing-13, idx-9, idx-10, eval-1 (3 of 4), rv-11 from metadata; spec `curation`.
 - D-068 (agent, rv-12..15): rename = catalog label only; `diskutil` probes run in parallel and are cached per mount.
 - D-067 (user): sp-2..sp-4 work shelved in `git stash`; schema V5 committed alone (the live catalog was already V5).
 - D-066 (user, sp-1): one iPhone import via osxphotos; place names in catalog + XMP (V5); shoots from camera + phone.
 - D-065 (user, rv-9/sp-1): related photos = the selection's capture session; phone GPS spec `phone-gps`, spike recommends reading the Photos DB copy.
-- D-064 (user, rv-7): Photos rebuilt as a day timeline + inspector; V4 `assets(group_id)` index; Leaflet, OSM tiles, search on Enter.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

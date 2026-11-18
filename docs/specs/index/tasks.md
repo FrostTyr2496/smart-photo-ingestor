@@ -169,6 +169,7 @@ Rules:
 
 - [ ] 10. **[stronger]** `lrcat mark`: handle catalogs written under an older mount name
   - ID: idx-10
+  - Approved by the user on 2026-11-18 (D-069).
   - Blocks on: idx-3, **user approval** (it adds a CLI flag and fields to the `lrcat mark` result and warning
     events, and CLAUDE.md puts protocol and CLI changes behind the user)
   - Why (review of 2026-11-11, a gap rather than a bug): `keys_on_volume` keeps only catalog paths that start
