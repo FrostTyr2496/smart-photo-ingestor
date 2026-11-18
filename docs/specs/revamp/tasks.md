@@ -13,12 +13,11 @@ Rules for every task:
   unchanged from mkh4n-website `src/lib/palette/`, v1.0.0). Never edit the vendored file; copy a new version over.
 - A dev palette picker (bottom left) tries presets, a custom background and accent, and shows the contrast of
   ink, muted text, accent, button text and status colours against the surfaces (WCAG grades, "Lift accent to AA").
-  On by default while the revamp is in progress; `?dev=0` or its × hides it in that browser, `?dev=1` brings it back.
+  On by default; `?dev=0` or its × hides it in that browser, `?dev=1` brings it back.
   A palette is shared with `?theme=<id>` or `?bg=…&accent=…`.
-- Same API, same behaviour as the classic UI (`photovault/web/static/app.js`): no API, schema or engine change
+- Same API and behaviour as the old plain-JS UI (deleted in rv-6; `git show 503cf49^:photovault/web/static/app.js`): no API, schema or engine change
   unless a task says so. Data from the API is rendered as text by React, never as HTML.
-- Until rv-6, the new UI lives at `/next` beside the classic UI at `/`; a "Classic" link reaches screens not
-  ported yet. rv-6 makes it the default and removes the classic files.
+- The new UI is served at `/` (and `/next`, kept for bookmarks) since rv-6; the classic UI is gone.
 - Respect `prefers-reduced-motion`: no shimmer, no count-up, no springs.
 
 ## Tasks
@@ -96,3 +95,15 @@ Rules for every task:
     calls, so keep the user's private data out of them (vault rule 10).
   - Leaflet would be a new front-end dependency in `web/`: ask the user first.
   - Verify: to be set by the plan above; at least a browser check that a selection's location and keywords save.
+
+- [x] 8. Clean up what the classic UI left behind
+  - ID: rv-8 (after rv-6; asked for by the user on 2026-11-18 so old references cause no bugs in the new UI)
+  - Find every reference to the classic UI (`static/index.html`, `app.js`, `app.css`, the "Classic" link, `/next` as
+    a separate address, classic-only routes, prefs or hash routes) in `photovault/`, `web/src/`, `tests/`, the
+    README, `docs/user/` and the live parts of `docs/specs/` and `docs/steering/`. Remove dead code and fix what
+    is stale. Keep `/next` serving the build (bookmarks). History (`docs/decisions.md`, done task entries in other
+    specs, `docs/legacy/`) stays as written. Keep every API that rv-7 Photos uses (`/api/shoots`, `/api/groups*`,
+    `/api/settings`).
+  - Verify: `uv run pytest -q`; `cd web && npm run typecheck && npm test && npm run build`; the built page loads
+    with no console errors on every route.
+  - Result (2026-11-18): `uv run pytest -q` 490 passed, 4 skipped; typecheck, `npm test` (16 passed) and build clean. Only comments and docs changed (stale "classic UI" wording); server and routes had no classic-only code.

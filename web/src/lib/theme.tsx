@@ -53,7 +53,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 // ---------------------------------------------------------------- dev mode
 
 /**
- * Dev mode shows the palette picker. It is on by default while the revamp is in progress (this is a local,
+ * Dev mode shows the palette picker. It is on by default (this is a local,
  * single-user tool); ?dev=0 turns it off in this browser and ?dev=1 back on.
  */
 const DEV_KEY = 'pv:dev';

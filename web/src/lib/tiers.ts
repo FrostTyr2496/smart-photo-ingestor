@@ -1,4 +1,4 @@
-// What a card's files are, ranked by where else their bytes are (card-3, D-046). Ported from the classic UI.
+// What a card's files are, ranked by where else their bytes are (card-3, D-046). Ported from the earlier plain-JS UI.
 import { plural } from './format';
 import { roleLabel } from './labels';
 import type { FilesBytes } from './types';

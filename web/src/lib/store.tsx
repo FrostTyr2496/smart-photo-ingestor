@@ -4,7 +4,7 @@ import { readPref, writePref } from './prefs';
 import { argvWords, driveName, isHash, workflowSteps, liveStep, STEP_NAME, type WorkflowStep } from './labels';
 import type { Drive, ExtRun, StaleJob, TaskDetail, TaskRec, TaskSummary, CardInfo } from './types';
 
-// Same cadence as the classic UI.
+// Poll cadence.
 const TASK_FAST_MS = 1000; // poll running tasks this often
 const TASK_IDLE_MS = 5000; // and this often when nothing runs
 const TASK_LIST_MS = 5000; // re-read the full task list

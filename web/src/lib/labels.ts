@@ -1,4 +1,4 @@
-// What people read about drives and tasks. Ported from the classic UI (removed in rv-6; see git history) so both
+// What people read about drives and tasks. Wording ported from the earlier plain-JS UI, so both
 // say the same thing; the API keeps its own values.
 import { fmtBytes, fmtDate, fmtElapsed, fmtInt, fmtLeft, plural, relTime } from './format';
 import type { Drive, ExtRun, Progress, Run, StaleJob, StepInfo, TaskRec } from './types';
@@ -368,7 +368,7 @@ export function newestAssignTask(tasks: TaskRec[], mount: string): TaskRec | nul
   return null;
 }
 
-/** Why a setup failed, ported from the classic setupProblem. A read-only drive gets an explanation and an exit. */
+/** Why a setup failed, ported from the earlier plain-JS UI. A read-only drive gets an explanation and an exit. */
 export function setupProblem(t: Pick<TaskRec, 'error' | 'exitCode'>, fs: string | null): { readOnly: boolean; lines: string[]; msg: string } {
   const msg = t.error || `The setup stopped (exit code ${t.exitCode ?? 'unknown'}).`;
   if (/Errno 30|Read-only file system/i.test(msg)) {

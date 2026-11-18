@@ -1,4 +1,4 @@
-// Numbers, sizes and times for people. Same wording and units as the classic UI (decimal: 1 KB = 1000 B).
+// Numbers, sizes and times for people. Decimal units (1 KB = 1000 B).
 
 const NUM = new Intl.NumberFormat();
 export const fmtInt = (n: number | null | undefined): string => NUM.format(Math.round(Number(n) || 0));

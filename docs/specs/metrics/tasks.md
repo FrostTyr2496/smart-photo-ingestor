@@ -73,8 +73,7 @@ backfill is a lower bound. Re-running replaces the backfill rows.
     calls (file reads, not distinct files). Read MB/s uses `read_full` + `read_verify` live rows. `metrics.py`
     reads the catalog with its own read-only SQL (D-054). Not run on a real drive yet.
 - [ ] **met-2** Metrics in the web UI: `GET /api/metrics` (the `report` dict) and a Metrics view (totals, a
-  row per drive with MB/s, recent incidents). Blocks on: met-1, and the uncommitted `app.js`/`index.html` work
-  being committed first (shared files).
+  row per drive with MB/s, recent incidents). Blocks on: met-1.
   - Verify: `uv run pytest tests/test_web_api.py -q`
 - [ ] **met-3 [user decision]** Off-Mac copy. Proposal: `metrics export` writes a JSON rollup (no paths, no
   incidents' paths) to a folder the user names, e.g. iCloud Drive. Never place the live `metrics.sqlite` in

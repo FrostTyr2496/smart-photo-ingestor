@@ -181,7 +181,7 @@ describe('cards', () => {
     volume_id: 'c1', label: 'Card A', mount: '/mnt/a', mounted: true, last_seen_at: null, tier,
     files: 10, bytes: 0, counts: c, cameras: [], copies_by_volume: copies, checked_at: null,
   });
-  it('words each tier as the classic UI did', () => {
+  it('words each tier as the original UI did', () => {
     expect(cardHeadline(card('only_on_card', counts(3, 0, 7, 0)))).toBe('Back up now: 3 files only on this card.');
     expect(cardHeadline(card('needs_backup', counts(0, 0, 10, 0), [{ volume_id: 'x', label: 'X9', role: 'WORKING', files: 10, bytes: 0 }]))).toBe(
       'Needs backup: 10 files only on X9 (Working drive), not on a backup drive yet.',
