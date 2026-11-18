@@ -65,4 +65,25 @@ CREATE TABLE job_items (
 );
 """
 
-MIGRATIONS: list[str] = [V1]
+V2 = """
+CREATE TABLE group_meta (
+  group_id INTEGER PRIMARY KEY REFERENCES capture_groups,
+  cam_lat REAL, cam_lon REAL, cam_alt REAL,          -- read from the file; never edited by the user
+  lat REAL, lon REAL, alt REAL,                      -- effective geotag
+  gps_source TEXT CHECK (gps_source IN ('camera','match','map','search','neighbour')),
+  place_name TEXT,
+  time_shift_s INTEGER NOT NULL DEFAULT 0,
+  creator TEXT, copyright TEXT, title TEXT,
+  keywords_json TEXT NOT NULL DEFAULT '[]',
+  dirty INTEGER NOT NULL DEFAULT 0,                  -- 1 = sidecar needs (re)writing
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE geo_points (
+  point_id INTEGER PRIMARY KEY, utc_time TEXT NOT NULL, lat REAL NOT NULL, lon REAL NOT NULL, alt REAL,
+  source TEXT NOT NULL, source_ref TEXT NOT NULL, UNIQUE (source, source_ref)
+);
+CREATE INDEX geo_points_time ON geo_points (utc_time);
+CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+"""
+
+MIGRATIONS: list[str] = [V1, V2]

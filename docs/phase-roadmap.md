@@ -88,6 +88,16 @@ Notes:
 
 Note: seq-1 to seq-3 are pure and fixture-driven, so they make good parallel Haiku work during Phase 2.
 
+## Phase 5a: local web UI and metadata completion (spec `ui`, D-045)
+
+| Item | Task | Blocks on | Gate |
+|---|---|---|---|
+| P5a.1 | ui-1 catalog migration 2 + repo | — | approved in D-045 |
+| P5a.2 | ui-2 XMP sidecar module | — | — |
+| P5a.3 | ui-3 geo suggestions + `meta` CLI | ui-1, ui-2 | — |
+| P5a.4 | ui-4 local server + JSON API | ui-3 | — |
+| P5a.5 | ui-5 front end | ui-4 | **[user]** visual check |
+
 ## Phase 5: app (spec `app`)
 
 | Item | Task | Blocks on | Gate |

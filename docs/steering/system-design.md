@@ -204,6 +204,37 @@ CREATE TABLE job_items (
 `rel_path_key` = `unicodedata.normalize("NFC", rel_path).casefold()`. `rel_path` uses `/` separators and is
 relative to the volume root.
 
+## 5b. Catalog schema v2 (migration 2)
+
+Approved with D-045 (ui spec). Appended after v1; v1 is unchanged. The SQL is the `V2` string in
+`photovault/catalog/migrations.py`:
+
+```sql
+CREATE TABLE group_meta (
+  group_id INTEGER PRIMARY KEY REFERENCES capture_groups,
+  cam_lat REAL, cam_lon REAL, cam_alt REAL,          -- read from the file; never edited by the user
+  lat REAL, lon REAL, alt REAL,                      -- effective geotag
+  gps_source TEXT CHECK (gps_source IN ('camera','match','map','search','neighbour')),
+  place_name TEXT,
+  time_shift_s INTEGER NOT NULL DEFAULT 0,
+  creator TEXT, copyright TEXT, title TEXT,
+  keywords_json TEXT NOT NULL DEFAULT '[]',
+  dirty INTEGER NOT NULL DEFAULT 0,                  -- 1 = sidecar needs (re)writing
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE geo_points (
+  point_id INTEGER PRIMARY KEY, utc_time TEXT NOT NULL, lat REAL NOT NULL, lon REAL NOT NULL, alt REAL,
+  source TEXT NOT NULL, source_ref TEXT NOT NULL, UNIQUE (source, source_ref)
+);
+CREATE INDEX geo_points_time ON geo_points (utc_time);
+CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+```
+
+`group_meta` holds the user's edits per capture group. `cam_*` is what the camera wrote. `lat/lon/alt` is the
+effective geotag. `dirty = 1` means the XMP sidecar on WORKING must be rewritten. `geo_points` is the time-indexed
+pool of GPS fixes (`utc_time` is UTC ISO-8601). `settings` holds user defaults (creator, copyright, default_offset,
+match_window_s).
+
 ## 6. Naming (D-004, D-005)
 
 - **File stem:** the template `M{num:04d}_{date}-{time}-{subsec}_{body}_{ident}`, with derivative suffixes kept.

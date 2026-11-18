@@ -9,10 +9,12 @@ import pytest
 
 from photovault.catalog import db, migrations
 
-# The ten tables of system-design section 5 (the task text said 11; the schema is authoritative).
+# The ten tables of system-design section 5 (the task text said 11; the schema is authoritative), plus the
+# four added by migration 2 (system-design section 5b).
 EXPECTED_TABLES = {
     "volumes", "bodies", "shoots", "sequences", "capture_groups",
     "assets", "instances", "sidecars", "jobs", "job_items",
+    "group_meta", "geo_points", "settings",
 }
 
 
@@ -52,15 +54,14 @@ def test_connect_creates_parent_dirs_and_pragmas(tmp_path: Path) -> None:
 
 def test_fresh_db_migrates_to_1_with_all_tables(conn: sqlite3.Connection) -> None:
     assert conn.execute("PRAGMA user_version").fetchone()[0] == 0
-    assert db.migrate(conn) == 1
-    assert len(migrations.MIGRATIONS) == 1
+    assert db.migrate(conn) == len(migrations.MIGRATIONS) == 2
     assert _tables(conn) == EXPECTED_TABLES
 
 
 def test_second_migrate_is_noop(conn: sqlite3.Connection) -> None:
-    assert db.migrate(conn) == 1
+    assert db.migrate(conn) == len(migrations.MIGRATIONS)
     _add_volume(conn)
-    assert db.migrate(conn) == 1
+    assert db.migrate(conn) == len(migrations.MIGRATIONS)
     assert conn.execute("SELECT COUNT(*) FROM volumes").fetchone()[0] == 1
 
 
@@ -109,7 +110,7 @@ def test_snapshot_opens_with_same_tables(conn: sqlite3.Connection, tmp_path: Pat
     snap.row_factory = sqlite3.Row
     try:
         assert _tables(snap) == EXPECTED_TABLES
-        assert snap.execute("PRAGMA user_version").fetchone()[0] == 1
+        assert snap.execute("PRAGMA user_version").fetchone()[0] == len(migrations.MIGRATIONS)
         assert snap.execute("SELECT COUNT(*) FROM volumes").fetchone()[0] == 1
     finally:
         snap.close()
