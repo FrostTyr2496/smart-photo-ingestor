@@ -3,7 +3,7 @@ import { Icon, Logo } from '../components/bits';
 import { ProgressBar } from '../components/ProgressBar';
 import { extVM, taskVM } from '../components/TaskCard';
 import { springs } from '../lib/motion';
-import { CLASSIC, type Route } from '../lib/route';
+import { type Route } from '../lib/route';
 import { useStore } from '../lib/store';
 import { worstTier } from '../lib/tiers';
 
@@ -90,7 +90,7 @@ export function Header({ route }: { route: Route }) {
           aria-label="Main"
         >
           <NavItem label="Tasks" href="#/" active={route.view === 'home'} />
-          <NavItem label="Photos" href={CLASSIC} active={false} external title="Opens in the classic UI (not ported yet)" />
+          <NavItem label="Photos" href="#/photos" active={route.view === 'photos'} title="Photos (being rebuilt)" />
           <NavItem
             label="Cards"
             href="#/cards"

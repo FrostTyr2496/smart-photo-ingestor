@@ -74,9 +74,13 @@ Rules for every task:
   - `#/settings`: creator, copyright, default time zone, GPS match window, Mac folder; Save only when changed.
     "Add GPS reference folder…" (Settings and the sidebar) starts `meta_refs` on a folder.
   - Result (2026-11-18): `npm test` 16 passed; Settings loaded the saved values in a browser.
-- [ ] 6. Make the new UI the default at `/`; delete the classic UI; update the user guides
+- [x] 6. Make the new UI the default at `/`; delete the classic UI; update the user guides (visual check pending, user)
   - ID: rv-6 (after rv-2..5). The user asked for it on 2026-11-18 without Photos, which "does not work on the old UI
     anyway"; the Photos nav item shows the rv-7 placeholder until then.
+  - `/` (and `/next`, kept for bookmarks) serve the build; `static/index.html`, `app.js` and `app.css` are deleted
+    (git history has them, rv-7 starts from there). Photos shows a "being rebuilt" page. README has a Web UI section.
+  - Result (2026-11-18): `uv run pytest -q` 490 passed, 4 skipped (`/` serves the build, `/static/app.js` is 404);
+    `npm test` 16 passed; the built page loaded with no console errors on every route.
 
 - [ ] 7. Photos: the grid and the metadata editor, rebuilt and made to work [stronger]
   - ID: rv-7 (after rv-6; its own task, worked on separately)

@@ -1024,9 +1024,7 @@ class _Handler(BaseHTTPRequestHandler):
             path = unquote(url.path)
             if method == "GET" and path == "/api/events":
                 return self._events()
-            if method == "GET" and path == "/":
-                return self._static("index.html")
-            if method == "GET" and path in ("/next", "/next/"):  # the revamped UI (D-059), built from web/
+            if method == "GET" and path in ("/", "/next", "/next/"):  # the UI (D-059), a Vite build of web/
                 return self._static("next/index.html")
             if method == "GET" and path.startswith("/static/"):
                 return self._static(path[len("/static/"):])

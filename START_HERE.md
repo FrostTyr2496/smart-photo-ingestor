@@ -44,9 +44,9 @@ Reference docs:
   lists (ui-10: Show · Copies · Camera, "x / N files", drives always named). Tasks also shows runs started in a
   terminal, plus jobs left `running` with no process (ui-11, D-053). ui-7..11 and card-3 not seen in a browser yet.
   The Mac folder (`mac_folder`, default `~/Sandbox`) is a drive (D-047).
-- **UI revamp (D-059, spec `docs/specs/revamp`):** rv-1 at `127.0.0.1:8765/next`: React + Tailwind + framer-motion
-  like Argus, ambient glow, dev palette picker with contrast grades. Source `web/`, build committed under
-  `photovault/web/static/next/` (`cd web && npm install && npm run build`). Cards ported (rv-2); photos, settings, file lists, setup still classic.
+- **Web UI (D-059, D-062, spec `docs/specs/revamp`):** `uv run photovault serve` → `127.0.0.1:8765` is the React UI
+  (rv-1..rv-6): tasks, drives with file lists, cards, new-drive setup, settings, dev palette picker. Build committed
+  under `photovault/web/static/next/`; the classic UI is deleted. Photos is rv-7, its own task (it did not work).
 - Hooks: `guard_volumes.py` blocks agent writes and engine runs on `/Volumes`; live tests read mounts only under
   `-m live` (D-028, D-031). Old v0 code: local branch `archive/v0-cli-2026-11-11`. The repo is public: real-drive
   facts and photos stay in `docs/private/` and `testdata/` (gitignored).
@@ -64,7 +64,7 @@ task's commit:
 ```
 
 ## Next
-0. **[user] visual check of `/next` (rv-1)**, then rv-2..rv-5 (spec `docs/specs/revamp`). Also the older
+0. **[user] visual check of the new UI (rv-1..rv-6)**: restart `serve` (`/` now serves it). Then **rv-7 Photos [stronger]**. Also the older
    **[user] visual check (ui-5..15, card-3):** restart `uv run photovault serve` (it picks up ui-11..15), try the
    Tasks home page, the sidebar groups, drives, cards, a step's Run button (e.g. Hash) and the editor (Photos).
 1. **ing-13 [stronger]** (D-042): stops a double card read at import (ing-12 is done). Then:
@@ -94,11 +94,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-062 (user, rv-6): the new UI is the only UI; Photos is its own task rv-7; slices go to Haiku/Sonnet agents.
 - D-061 (agent, rv-2): a hash shows the drive's progress (files hashed before the run count); pace stays the run's.
 - D-060 (agent, rv-1): `/next` beside classic; dev palette picker on by default with contrast grades; calmer task cards.
 - D-059 (user, rv-1): UI rebuilt in Vite + React + TS + Tailwind + framer-motion at `/next`; build committed; palette engine vendored.
 - D-058 (agent, ui-15): NTFS drives walk via `lstat` and can only be LEGACY (read-only on macOS); Windows/Synology system folders skipped.
-- D-057 (user ask, ui-14): the home page is tasks by drive; photos behind a Photos button; sidebar grouped by connection.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

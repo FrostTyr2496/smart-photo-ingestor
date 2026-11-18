@@ -52,6 +52,3 @@ export function useRoute(): Route {
   }, []);
   return route;
 }
-
-/** Screens not ported yet open in the classic UI (D-059, until rv-6). */
-export const CLASSIC = '/';

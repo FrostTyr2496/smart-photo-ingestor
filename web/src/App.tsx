@@ -10,6 +10,7 @@ import { DriveView } from './views/DriveView';
 import { Header } from './views/Header';
 import { Home } from './views/Home';
 import { SetupView } from './views/SetupView';
+import { Photos } from './views/Photos';
 import { Settings } from './views/Settings';
 import { Sidebar } from './views/Sidebar';
 
@@ -39,6 +40,8 @@ function Shell() {
                   <Cards id={route.id} />
                 ) : route.view === 'setup' ? (
                   <SetupView driveKey={route.key} />
+                ) : route.view === 'photos' ? (
+                  <Photos />
                 ) : route.view === 'settings' ? (
                   <Settings />
                 ) : (

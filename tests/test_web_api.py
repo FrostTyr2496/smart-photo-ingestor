@@ -155,8 +155,10 @@ def test_static_files_stay_inside_static_dir(srv: Client) -> None:
 
 
 def test_next_ui_is_served_with_its_assets(srv: Client) -> None:
-    """The revamped UI (D-059) is a committed Vite build: /next serves it, and every file it loads is there."""
-    for path in ("/next", "/next/"):
+    """The UI (D-059) is a committed Vite build: / serves it (and /next, its address before rv-6), and every file it
+    loads is there. The classic plain-JS UI is gone."""
+    assert srv.call("GET", "/static/app.js")[0] == 404
+    for path in ("/", "/next", "/next/"):
         status, body = srv.call("GET", path)
         assert status == 200 and b'<div id="root">' in body
     refs = re.findall(rb'(?:src|href)="(/static/next/[^"]+)"', body)

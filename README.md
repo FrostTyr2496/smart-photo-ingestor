@@ -23,6 +23,16 @@ Details:
 - [`docs/steering/system-design.md`](docs/steering/system-design.md): the contract.
 - [`docs/phase-roadmap.md`](docs/phase-roadmap.md): the plan.
 
+## Web UI
+
+```bash
+uv run photovault serve   # then open http://127.0.0.1:8765
+```
+
+Drives, tasks, cards and settings, bound to 127.0.0.1 only. The page is a React build of [`web/`](web/) that is
+committed under `photovault/web/static/next/`, so serving it needs no Node. To change it: `cd web && npm install`,
+edit, then `npm test && npm run build`.
+
 ## Development
 
 ```bash

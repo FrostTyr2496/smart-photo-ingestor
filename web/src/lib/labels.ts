@@ -1,4 +1,4 @@
-// What people read about drives and tasks. Ported from the classic UI (photovault/web/static/app.js) so both
+// What people read about drives and tasks. Ported from the classic UI (removed in rv-6; see git history) so both
 // say the same thing; the API keeps its own values.
 import { fmtBytes, fmtDate, fmtElapsed, fmtInt, fmtLeft, plural, relTime } from './format';
 import type { Drive, ExtRun, Progress, Run, StaleJob, StepInfo, TaskRec } from './types';
