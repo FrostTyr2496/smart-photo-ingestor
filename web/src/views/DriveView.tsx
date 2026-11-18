@@ -1,6 +1,7 @@
 import { motion, useReducedMotion } from 'framer-motion';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { CountUp, Disclosure, Icon, RolePill } from '../components/bits';
+import { cameraOptions, CopiesCell, copyOptions, FileTable, FilterBar, Pager, type Column } from '../components/FileList';
 import { ProgressBar } from '../components/ProgressBar';
 import { extVM, taskVM } from '../components/TaskCard';
 import { api } from '../lib/api';
@@ -29,6 +30,43 @@ const TILES = [
   { key: 'mismatch', label: 'Unreadable', tone: 'text-err', ring: 'hover:border-err/30' },
   { key: 'missing', label: 'Missing', tone: 'text-maybe', ring: 'hover:border-maybe/30' },
 ] as const;
+
+const FILE_PAGE = 200;
+
+const STATE_TONE: Record<string, string> = {
+  verified: 'border-go/30 bg-go/10 text-go',
+  indexed: 'border-accent/30 bg-accent/10 text-accent',
+  mismatch: 'border-err/30 bg-err/10 text-err',
+  missing: 'border-maybe/30 bg-maybe/10 text-maybe',
+};
+
+interface FileFilter {
+  state: string;
+  copies: string;
+  other: string;
+  camera: string;
+  offset: number;
+}
+const NO_FILTER: FileFilter = { state: '', copies: '', other: '', camera: '', offset: 0 };
+
+interface DriveFile {
+  rel_path: string;
+  size: number;
+  kind: string;
+  state: string;
+  asset_id: number | null;
+  copies: number | null;
+  dup_here: number;
+  camera: string;
+  camera_name: string;
+  copy_drives?: Array<{ label: string; role: string }>;
+}
+interface FilePage {
+  files: DriveFile[];
+  total: number;
+  limit: number;
+  offset: number;
+}
 
 // ---------------------------------------------------------------- pieces
 
@@ -138,14 +176,49 @@ function Timeline({ d, steps, summary }: { d: Drive; steps: WorkflowStep[]; summ
   );
 }
 
-function Tile({ label, files, bytes, tone, className = '' }: { label: string; files: number; bytes: number; tone: string; className?: string }) {
-  return (
-    <motion.div whileHover={{ y: -2 }} transition={springs.snappy} className={`rounded-xl border border-line bg-raised/40 p-4 ${className}`}>
+function Tile({
+  label,
+  files,
+  bytes,
+  tone,
+  className = '',
+  onClick,
+  active = false,
+}: {
+  label: string;
+  files: number;
+  bytes: number;
+  tone: string;
+  className?: string;
+  onClick?: () => void;
+  active?: boolean;
+}) {
+  const body = (
+    <>
       <p className={`text-sm ${tone}`}>{label}</p>
       <p className="mt-1 text-2xl font-semibold tracking-tight">
         <CountUp value={files} />
       </p>
       <p className="mt-0.5 font-mono text-2xs text-muted">{fmtBytes(bytes)}</p>
+    </>
+  );
+  if (onClick) {
+    return (
+      <motion.button
+        type="button"
+        whileHover={{ y: -2 }}
+        transition={springs.snappy}
+        aria-pressed={active}
+        onClick={onClick}
+        className={`rounded-xl border p-4 text-left ${active ? 'border-accent/50 bg-accent/[0.07]' : `border-line bg-raised/40 ${className}`}`}
+      >
+        {body}
+      </motion.button>
+    );
+  }
+  return (
+    <motion.div whileHover={{ y: -2 }} transition={springs.snappy} className={`rounded-xl border border-line bg-raised/40 p-4 ${className}`}>
+      {body}
     </motion.div>
   );
 }
@@ -157,6 +230,11 @@ export function DriveView({ id }: { id: string }) {
   const [summary, setSummary] = useState<DriveSummary | null>(null);
   const [error, setError] = useState('');
   const [runsOpen, setRunsOpen] = useState(false);
+  const [filter, setFilter] = useState<FileFilter>(NO_FILTER);
+  const [files, setFiles] = useState<FilePage | null>(null);
+  const [filesLoading, setFilesLoading] = useState(true);
+  const [filesError, setFilesError] = useState('');
+  const filesRef = useRef<HTMLElement>(null);
   const drive = drives.find((x) => x.volume_id === id) ?? summary?.drive ?? null;
   const live = drive ? liveStep(drive, tasks, elsewhere) : null;
 
@@ -172,10 +250,38 @@ export function DriveView({ id }: { id: string }) {
 
   useEffect(() => {
     setSummary(null);
+    setFilter((f) => (f === NO_FILTER ? f : NO_FILTER));
+    setFiles(null);
   }, [id]);
   useEffect(() => {
     void load();
   }, [load, epoch]);
+
+  // The file list loads on its own: the summary is slow, and the list pages through many files.
+  const patchFilter = (patch: Partial<FileFilter>) => setFilter((f) => ({ ...f, ...patch, offset: 0 }));
+  const pickState = (key: string) => {
+    patchFilter({ state: filter.state === key ? '' : key });
+    filesRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+  const loadFiles = useCallback(async () => {
+    const p = new URLSearchParams({ limit: String(FILE_PAGE), offset: String(filter.offset) });
+    if (filter.state) p.set('state', filter.state);
+    if (filter.copies) p.set('copies', filter.copies);
+    if (filter.other) p.set('other', filter.other);
+    if (filter.camera) p.set('camera', filter.camera);
+    setFilesLoading(true);
+    try {
+      setFiles(await api<FilePage>('GET', `/api/volumes/${encodeURIComponent(id)}/files?${p}`));
+      setFilesError('');
+    } catch (err) {
+      setFilesError((err as Error).message);
+    } finally {
+      setFilesLoading(false);
+    }
+  }, [id, filter]);
+  useEffect(() => {
+    void loadFiles();
+  }, [loadFiles, epoch]);
   // While something runs here, the counts move: reload every few seconds.
   useEffect(() => {
     if (!live) return undefined;
@@ -217,6 +323,42 @@ export function DriveView({ id }: { id: string }) {
   const maxOther = copies ? Math.max(1, ...copies.by_volume.map((v) => v.files)) : 1;
   const reveal = () =>
     api('POST', `/api/volumes/${encodeURIComponent(id)}/reveal`, {}).catch((err: Error) => toast(err.message, 'err'));
+  const revealFile = (relPath: string) =>
+    api('POST', `/api/volumes/${encodeURIComponent(id)}/reveal`, { rel_path: relPath }).catch((err: Error) => toast(err.message, 'err'));
+
+  const columns: Array<Column<DriveFile>> = [
+    { head: 'Path', cell: (f) => <p className="min-w-[16rem] break-all font-mono text-xs">{f.rel_path}</p> },
+    { head: 'Size', num: true, cell: (f) => fmtBytes(f.size) },
+    { head: 'Kind', cell: (f) => <span className="text-xs text-muted">{f.kind}</span> },
+    { head: 'Camera', cell: (f) => <span className="text-xs text-muted">{f.camera_name}</span> },
+    {
+      head: 'State',
+      cell: (f) => <span className={`chip ${STATE_TONE[f.state] ?? 'border-line text-muted'}`}>{TILES.find((t) => t.key === f.state)?.label ?? f.state}</span>,
+    },
+    {
+      head: 'Copies',
+      cell: (f, open, toggle) => (
+        <CopiesCell
+          hashed={f.state === 'verified' && f.copies != null}
+          drives={f.copy_drives ?? []}
+          dupHere={f.dup_here}
+          here="this drive"
+          open={open}
+          onToggle={toggle}
+        />
+      ),
+    },
+  ];
+  if (drive.mounted) {
+    columns.push({
+      head: '',
+      cell: (f) => (
+        <button type="button" className="btn-ghost h-6 px-2 text-2xs" onClick={() => revealFile(f.rel_path)}>
+          <Icon name="folder" size={11} /> Show in Finder
+        </button>
+      ),
+    });
+  }
 
   return (
     <motion.div key={id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={springs.snappy} className="flex flex-col gap-5">
@@ -249,11 +391,15 @@ export function DriveView({ id }: { id: string }) {
                 <Icon name="play" size={11} /> Run workflow
               </button>
             )}
-            {drive.mounted && (
-              <button type="button" className="btn" onClick={reveal}>
-                <Icon name="folder" /> Show in Finder
-              </button>
-            )}
+            <button
+              type="button"
+              className="btn"
+              onClick={reveal}
+              disabled={!drive.mounted}
+              title={drive.mounted ? undefined : 'Connect this drive to show it in Finder'}
+            >
+              <Icon name="folder" /> Show in Finder
+            </button>
             <a href="#/" className="btn">
               <Icon name="back" /> Tasks
             </a>
@@ -267,6 +413,15 @@ export function DriveView({ id }: { id: string }) {
         )}
       </section>
 
+      {s.files === 0 && (
+        <section className="card flex flex-col items-center gap-1 px-6 py-10 text-center">
+          <h2 className="text-lg font-semibold">Nothing indexed on this drive yet</h2>
+          <p className="text-sm text-muted">Press Run workflow to list its files, verify them and read their metadata.</p>
+        </section>
+      )}
+
+      {s.files > 0 && (
+        <>
       {/* Files */}
       <section className="card p-5">
         <div className="flex flex-wrap items-center gap-x-8 gap-y-3">
@@ -300,7 +455,18 @@ export function DriveView({ id }: { id: string }) {
         <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
           {TILES.map((t) => {
             const x = s.states[t.key];
-            return <Tile key={t.key} label={t.label} files={x.files} bytes={x.bytes} tone={t.tone} className={t.ring} />;
+            return (
+              <Tile
+                key={t.key}
+                label={t.label}
+                files={x.files}
+                bytes={x.bytes}
+                tone={t.tone}
+                className={t.ring}
+                active={filter.state === t.key}
+                onClick={() => pickState(t.key)}
+              />
+            );
           })}
         </div>
       </section>
@@ -341,6 +507,37 @@ export function DriveView({ id }: { id: string }) {
             </p>
           )}
         </section>
+      )}
+
+      {/* Files list */}
+      <section ref={filesRef} className="card flex flex-col gap-3 p-5">
+        <h2 className="text-lg font-semibold">Files</h2>
+        <FilterBar
+          show={{
+            value: filter.state,
+            options: [{ value: '', text: 'All files' }, ...TILES.map((t) => ({ value: t.key, text: t.label }))],
+            onChange: (state) => patchFilter({ state }),
+          }}
+          copies={{
+            value: filter.other ? `on:${filter.other}` : filter.copies,
+            options: copyOptions('this drive', s.copies?.by_volume ?? []),
+            onChange: (v) => patchFilter(v.startsWith('on:') ? { copies: '', other: v.slice(3) } : { copies: v, other: '' }),
+          }}
+          camera={{ value: filter.camera, options: cameraOptions(s.cameras ?? []), onChange: (camera) => patchFilter({ camera }) }}
+          shown={files?.total ?? 0}
+          total={s.files}
+        />
+        {filesError && <p className="text-sm text-err">Could not list files: {filesError}</p>}
+        <FileTable rows={files?.files ?? []} columns={columns} volumeId={id} loading={filesLoading} />
+        <Pager
+          offset={filter.offset}
+          count={files?.files.length ?? 0}
+          total={files?.total ?? 0}
+          page={FILE_PAGE}
+          onPage={(offset) => setFilter((f) => ({ ...f, offset }))}
+        />
+      </section>
+        </>
       )}
 
       {/* Runs */}
