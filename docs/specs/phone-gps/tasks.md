@@ -124,7 +124,7 @@ reference folder read into `geo_points`) and `geo.suggest` (time-matched suggest
     850 skipped as `other_device`, 0 for every other reason; 2.5 s, 1.44 GB peak. `not_iphone` is not reported (it is
     `other_device`). Schema V6 (`local_offset`, `kind`) is `system-design.md` §5f; cu-0 is now V7.
 
-- [ ] 3. Place names from the phone in the inspector
+- [x] 3. Place names from the phone in the inspector
   - ID: sp-3 (after sp-2). _Design:_ D-066.
   - Suggestions show the place ("Harbourton, Westshire · +3 min"); Use sets the location, place name, city, state and
     country. With the search box focused and empty, a list "Near this time, from your iPhone" offers the distinct
@@ -132,6 +132,7 @@ reference folder read into `geo_points`) and `geo.suggest` (time-matched suggest
     Nominatim results fill city/state/country from `addressdetails`. City, state and country are editable under Place
     name.
   - Verify: `cd web && npm test`; **[user]** visual check.
+  - Result (2026-11-18): `uv run pytest tests/test_web_api.py tests/test_geo.py -q` and `cd web && npm run typecheck && npm test && npm run build` → 76 passed; typecheck clean, 47 passed, build committed. New `GET /api/groups/<id>/places?window_s=3600` feeds the near-this-time list. Visual check is the user's.
 
 - [ ] 4. **[stronger]** Suggested shoots across cameras and the phone
   - ID: sp-4 (after sp-2). The `shoots` table is empty today; seq-2 (sequences inside a shoot) is unaffected.

@@ -513,6 +513,12 @@ def test_suggestions_and_unknown_group(srv: Client) -> None:
     assert srv.call("GET", "/api/groups/999/suggestions")[0] == 404
 
 
+def test_places_endpoint(srv: Client) -> None:
+    status, body = srv.call("GET", f"/api/groups/{srv.ids['a']}/places?window_s=3600")
+    assert status == 200 and body == {"places": []}  # the fixture's phone point has no place name
+    assert srv.call("GET", "/api/groups/999/places")[0] == 404
+
+
 # --------------------------------------------------------------------------- settings
 
 def test_settings_defaults_and_updates(srv: Client) -> None:

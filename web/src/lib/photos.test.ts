@@ -12,6 +12,9 @@ import {
   relatedWindowFor,
   buildFields,
   commonValue,
+  nominatimPlace,
+  placeEdits,
+  placeLabel,
   copyName,
   hasEdits,
   keywordChips,
@@ -42,6 +45,9 @@ const g = (id: number, over: Partial<PhotoGroup> = {}): PhotoGroup => ({
   alt: null,
   gps_source: null,
   place_name: null,
+  city: null,
+  state: null,
+  country: null,
   time_shift_s: 0,
   creator: null,
   copyright: null,
@@ -297,5 +303,35 @@ describe('copy filename (rv-10)', () => {
     expect(copyName({ rel_path: 'DSC_0042.NEF', canonical_stem: 'DSC_0042' })).toBe('DSC_0042.NEF');
     expect(copyName({ rel_path: null, canonical_stem: 'DSC_0042' })).toBe('DSC_0042');
     expect(copyName({ rel_path: null, canonical_stem: null })).toBe('');
+  });
+});
+
+describe('place names (sp-3)', () => {
+  it('splits city, state and country into the Place scope', () => {
+    const p = { ...NO_EDITS, city: ' Harbourton ', state: 'Westshire', country: '' };
+    const by = buildFieldsByScope(p);
+    expect(by.place).toEqual({ city: 'Harbourton', state: 'Westshire', country: null });
+    expect(by.credit).toEqual({});
+    expect(hasEdits(p)).toBe(true);
+    expect(hasEdits(NO_EDITS)).toBe(false);
+    const plan = planSaves(p, [1], { place: [2], description: [], credit: [], clock: [] });
+    expect(plan).toEqual([{ ids: [1, 2], fields: { city: 'Harbourton', state: 'Westshire', country: null } }]);
+  });
+  it('labels a point and builds edits from it', () => {
+    const f = { place_name: 'Harbourton Quay', city: 'Harbourton', state: 'Westshire', country: 'Freedonia' };
+    expect(placeLabel(f)).toBe('Harbourton, Westshire');
+    expect(placeLabel({ place_name: 'Quay', city: null, state: null, country: null })).toBe('Quay');
+    expect(placeLabel({ place_name: null, city: null, state: null, country: null })).toBe('');
+    expect(placeEdits(f)).toEqual({ place: 'Harbourton Quay', city: 'Harbourton', state: 'Westshire', country: 'Freedonia' });
+    expect(placeEdits({ place_name: null, city: 'Harbourton', state: null, country: null }).place).toBeNull();
+  });
+  it('reads city, state and country from a Nominatim address', () => {
+    expect(nominatimPlace('Northland Falls', { town: 'Northland', county: 'Westshire', country: 'Freedonia' })).toEqual({
+      place_name: 'Northland Falls',
+      city: 'Northland',
+      state: 'Westshire',
+      country: 'Freedonia',
+    });
+    expect(nominatimPlace('', undefined)).toEqual({ place_name: null, city: null, state: null, country: null });
   });
 });

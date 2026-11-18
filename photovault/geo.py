@@ -118,3 +118,22 @@ def suggest(conn: sqlite3.Connection, group_id: int, *, window_s: int = 1800, li
     for p in points:
         del p["_gap"]
     return (interpolated + points)[:limit]
+
+
+def places_near(conn: sqlite3.Connection, group_id: int, *, window_s: int = 3600) -> list[dict]:
+    """Distinct named places of phone points within ``±window_s`` of a group (sp-3), nearest in time first.
+
+    Only points that carry a place name, city, state or country count. Each dict: place_name, city, state,
+    country, a representative lat/lon/alt (the point nearest in time) and that point's delta_s.
+    """
+    found = suggest(conn, group_id, window_s=window_s, limit=10**6)
+    out: dict[tuple, dict] = {}
+    for p in found:  # already nearest first
+        if p["source"] == "interpolated":
+            continue
+        key = (p["place_name"], p["city"], p["state"], p["country"])
+        if not any(key) or key in out:
+            continue
+        out[key] = {"place_name": p["place_name"], "city": p["city"], "state": p["state"], "country": p["country"],
+                    "lat": p["lat"], "lon": p["lon"], "alt": p["alt"], "delta_s": p["delta_s"]}
+    return list(out.values())

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from photovault.catalog import db, repo
 from photovault.config import load_config
-from photovault.geo import group_utc, suggest, utc_text
+from photovault.geo import group_utc, places_near, suggest, utc_text
 
 
 def row(**kw) -> dict:
@@ -141,3 +141,15 @@ def test_suggest_limit_and_unknown_group(conn) -> None:
     assert len(suggest(conn, gid, limit=2)) == 2
     with pytest.raises(ValueError):
         suggest(conn, 999)
+
+
+def test_places_near_distinct_nearest_first(conn) -> None:
+    gid = make_group(conn)
+    for ref, secs, name, city in [("a", 600, "Harbourton Quay", "Harbourton"), ("b", -120, "Harbourton Quay", "Harbourton"),
+                                  ("c", -1800, None, "Northland Falls"), ("d", 9000, "Far Place", "Elsewhere")]:
+        repo.upsert_geo_point(conn, utc_time=utc_text(T0 + timedelta(seconds=secs)), lat=1.0, lon=2.0, alt=None,
+                              source="iphone", source_ref=ref, place_name=name, city=city, state="Westshire")
+    point(conn, 30, "gpx", "g1")  # no place fields: not offered
+    out = places_near(conn, gid, window_s=3600)
+    assert [(p["place_name"], p["city"]) for p in out] == [("Harbourton Quay", "Harbourton"), (None, "Northland Falls")]
+    assert out[0]["delta_s"] == -120 and out[0]["state"] == "Westshire"

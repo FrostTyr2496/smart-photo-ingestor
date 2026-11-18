@@ -32,7 +32,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from photovault import activity, cards, preview, usage, volumes
 from photovault.catalog import db, repo
 from photovault.drives import DEFAULT_MAC_FOLDER, VOLUMES_ROOT, scan_mounts
-from photovault.geo import group_utc, offset_tz, suggest, utc_text
+from photovault.geo import group_utc, offset_tz, places_near, suggest, utc_text
 from photovault.protocol import EXIT_PAUSED, human_bytes
 
 logger = logging.getLogger(__name__)
@@ -655,6 +655,16 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
             return 405, {"error": "method not allowed"}
         since = _int_param(query, "since", -1, -1, 2**62)
         return 200, app.runner.get(task_id).detail(since)
+
+    m = re.fullmatch(r"/api/groups/(\d+)/places", path)
+    if m:
+        if method != "GET":
+            return 405, {"error": "method not allowed"}
+        window = _int_param(query, "window_s", 3600, 60, 86400)
+        try:
+            return 200, {"places": places_near(conn, int(m.group(1)), window_s=window)}
+        except ValueError as exc:
+            raise NotFound(str(exc)) from exc
 
     m = re.fullmatch(r"/api/groups/(\d+)/(suggestions|thumb)", path)
     if m:

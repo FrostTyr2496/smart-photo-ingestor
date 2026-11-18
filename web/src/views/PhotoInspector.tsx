@@ -16,6 +16,10 @@ import {
   gapLabel,
   GPS_LABEL,
   hasEdits,
+  nominatimPlace,
+  placeEdits,
+  placeLabel,
+  type PlaceFields,
   keywordChips,
   LADDER,
   nearestWithLocation,
@@ -50,6 +54,18 @@ interface Suggestion {
   source: string;
   delta_s: number;
   confidence: string;
+  place_name?: string | null;
+  city?: string | null;
+  state?: string | null;
+  country?: string | null;
+}
+
+/** One row of GET /api/groups/<id>/places: a distinct phone place near the photo's time (sp-3). */
+interface NearPlace extends PlaceFields {
+  lat: number;
+  lon: number;
+  alt: number | null;
+  delta_s: number;
 }
 
 interface Place {
@@ -57,9 +73,10 @@ interface Place {
   lon: string;
   name?: string;
   display_name?: string;
+  address?: Record<string, string>;
 }
 
-const NOMINATIM = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&q=';
+const NOMINATIM = 'https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&limit=5&q=';
 const SEARCH_GAP_MS = 1100; // Nominatim's policy: at most one request a second
 
 /**
@@ -218,11 +235,12 @@ export function PhotoInspector({
                 : `${fmtInt(located.length)} of ${fmtInt(n)} have a location.`}
           </p>
           <MapPicker points={points} pin={pin} focus={focus} onPick={(p) => setLoc({ lat: p.lat, lon: p.lon, alt: null, source: 'map' })} />
-          {first && <Suggestions key={first.group_id} first={first} pool={pool} selected={selected} windowS={windowS} onUse={(l) => setLoc(l, true)} />}
+          {first && <Suggestions key={first.group_id} first={first} pool={pool} selected={selected} windowS={windowS} onUse={(l, f) => { setLoc(l, true); if (f) setPend((p) => ({ ...p, ...placeEdits(f) })); }} />}
           <PlaceSearch
-            onPick={(lat, lon, name) => {
-              setLoc({ lat, lon, alt: null, source: 'search' }, true);
-              set('place', name);
+            groupId={first?.group_id ?? null}
+            onPick={(loc, f) => {
+              setLoc(loc, true);
+              setPend((p) => ({ ...p, ...placeEdits(f) }));
             }}
           />
           <TextField
@@ -232,6 +250,11 @@ export function PhotoInspector({
             onChange={(v) => set('place', v)}
             placeholder="e.g. a beach or a town"
           />
+          <div className="grid grid-cols-3 gap-2">
+            <TextField label="City" shared={commonValue(selected, 'city')} value={pend.city} onChange={(v) => set('city', v)} />
+            <TextField label="State" shared={commonValue(selected, 'state')} value={pend.state} onChange={(v) => set('state', v)} />
+            <TextField label="Country" shared={commonValue(selected, 'country')} value={pend.country} onChange={(v) => set('country', v)} />
+          </div>
           {(located.length > 0 || pend.loc) && (
             <div className="flex gap-2">
               {pend.loc && (
@@ -383,7 +406,7 @@ function TextField({
   );
 }
 
-function Suggestions({ first, pool, selected, windowS, onUse }: { first: PhotoGroup; pool: PhotoGroup[]; selected: PhotoGroup[]; windowS: number; onUse: (l: PendingLoc) => void }) {
+function Suggestions({ first, pool, selected, windowS, onUse }: { first: PhotoGroup; pool: PhotoGroup[]; selected: PhotoGroup[]; windowS: number; onUse: (l: PendingLoc, f?: PlaceFields) => void }) {
   const [list, setList] = useState<Suggestion[] | null>(null);
   const [err, setErr] = useState('');
   useEffect(() => {
@@ -398,11 +421,15 @@ function Suggestions({ first, pool, selected, windowS, onUse }: { first: PhotoGr
   const ids = useMemo(() => new Set(selected.map((g) => g.group_id)), [selected]);
   const near = nearestWithLocation(first, pool, ids, windowS);
 
-  const rows: Array<{ key: string; text: string; sub: string; loc: PendingLoc }> = [];
+  const rows: Array<{ key: string; text: string; sub: string; loc: PendingLoc; fields?: PlaceFields }> = [];
   for (const [i, s] of (list ?? []).entries()) {
+    const fields: PlaceFields = { place_name: s.place_name ?? null, city: s.city ?? null, state: s.state ?? null, country: s.country ?? null };
+    const label = placeLabel(fields);
+    const when = s.delta_s === 0 ? 'between two fixes' : fmtDelta(s.delta_s);
     rows.push({
       key: `s${i}`,
-      text: `${GPS_LABEL[s.source] ?? s.source} · ${s.delta_s === 0 ? 'between two fixes' : fmtDelta(s.delta_s)}`,
+      text: label ? `${label} · ${when}` : `${GPS_LABEL[s.source] ?? s.source} · ${when}`,
+      fields,
       sub: `${fmtCoord(s.lat, s.lon)} · ${s.confidence} confidence`,
       loc: { lat: s.lat, lon: s.lon, alt: s.alt ?? null, source: 'match' },
     });
@@ -426,7 +453,7 @@ function Suggestions({ first, pool, selected, windowS, onUse }: { first: PhotoGr
             <p className="truncate text-xs">{r.text}</p>
             <p className="truncate font-mono text-2xs text-faint">{r.sub}</p>
           </div>
-          <button type="button" className="btn h-7 px-2 text-xs" onClick={() => onUse(r.loc)}>
+          <button type="button" className="btn h-7 px-2 text-xs" onClick={() => onUse(r.loc, r.fields)}>
             Use
           </button>
         </div>
@@ -436,11 +463,24 @@ function Suggestions({ first, pool, selected, windowS, onUse }: { first: PhotoGr
 }
 
 /** Place search runs only on Enter (or the button), at most once a second, and sends only the typed text. */
-function PlaceSearch({ onPick }: { onPick: (lat: number, lon: number, name: string) => void }) {
+function PlaceSearch({ groupId, onPick }: { groupId: number | null; onPick: (loc: PendingLoc, f: PlaceFields) => void }) {
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<Place[] | null>(null);
   const [msg, setMsg] = useState('');
   const last = useRef(0);
+  const [focused, setFocused] = useState(false);
+  const [near, setNear] = useState<NearPlace[]>([]);
+  useEffect(() => {
+    setNear([]);
+    if (groupId === null) return;
+    let alive = true;
+    api<{ places: NearPlace[] }>('GET', `/api/groups/${groupId}/places?window_s=3600`)
+      .then((d) => alive && setNear(d.places))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [groupId]);
 
   const run = async () => {
     const text = q.trim();
@@ -470,11 +510,30 @@ function PlaceSearch({ onPick }: { onPick: (lat: number, lon: number, name: stri
   return (
     <div className="flex flex-col gap-1">
       <div className="flex gap-1.5">
-        <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} placeholder="Search a place, press Enter" className="h-9 min-w-0 flex-1" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} placeholder="Search a place, press Enter" onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} className="h-9 min-w-0 flex-1" />
         <button type="button" className="btn h-9" onClick={() => void run()} disabled={!q.trim()} aria-label="Search place">
           <Icon name="search" />
         </button>
       </div>
+      {focused && !q.trim() && near.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <p className="text-xs text-muted">Near this time, from your phone:</p>
+          <ul className="flex flex-col overflow-hidden rounded-lg border border-line">
+            {near.map((p, i) => (
+              <li key={i}>
+                <button
+                  type="button"
+                  className="w-full truncate px-2.5 py-1.5 text-left text-xs hover:bg-ink/5"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => onPick({ lat: p.lat, lon: p.lon, alt: p.alt, source: 'match' }, p)}
+                >
+                  {[p.place_name, placeLabel({ ...p, place_name: null }) || null].filter(Boolean).join(', ')} · {fmtDelta(p.delta_s)}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {msg && <p className="text-xs text-faint">{msg}</p>}
       {hits && hits.length > 0 && (
         <ul className="flex flex-col overflow-hidden rounded-lg border border-line">
@@ -485,7 +544,7 @@ function PlaceSearch({ onPick }: { onPick: (lat: number, lon: number, name: stri
                 className="w-full truncate px-2.5 py-1.5 text-left text-xs hover:bg-ink/5"
                 title={h.display_name}
                 onClick={() => {
-                  onPick(Number(h.lat), Number(h.lon), h.name || h.display_name || '');
+                  onPick({ lat: Number(h.lat), lon: Number(h.lon), alt: null, source: 'search' }, nominatimPlace(h.name || h.display_name || '', h.address));
                   setHits(null);
                 }}
               >

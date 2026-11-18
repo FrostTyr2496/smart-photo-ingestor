@@ -14,6 +14,9 @@ export interface PhotoGroup {
   alt: number | null;
   gps_source: string | null;
   place_name: string | null;
+  city: string | null;
+  state: string | null;
+  country: string | null;
   time_shift_s: number | null;
   creator: string | null;
   copyright: string | null;
@@ -148,7 +151,7 @@ export function rangeIds(order: number[], from: number | null, to: number): numb
 }
 
 /** The value every group shares, '' when all are empty, or null when they differ. */
-export function commonValue(groups: PhotoGroup[], key: 'creator' | 'copyright' | 'title' | 'place_name'): string | null {
+export function commonValue(groups: PhotoGroup[], key: 'creator' | 'copyright' | 'title' | 'place_name' | 'city' | 'state' | 'country'): string | null {
   const values = new Set(groups.map((g) => g[key] ?? ''));
   return values.size === 1 ? [...values][0]! : null;
 }
@@ -195,6 +198,9 @@ export interface PendingLoc {
 export interface Pending {
   loc: PendingLoc | null;
   place: string | null;
+  city: string | null;
+  state: string | null;
+  country: string | null;
   creator: string | null;
   copyright: string | null;
   title: string | null;
@@ -203,7 +209,7 @@ export interface Pending {
   shift: number | null;
 }
 
-export const NO_EDITS: Pending = { loc: null, place: null, creator: null, copyright: null, title: null, kwAdd: [], kwRemove: [], shift: null };
+export const NO_EDITS: Pending = { loc: null, place: null, city: null, state: null, country: null, creator: null, copyright: null, title: null, kwAdd: [], kwRemove: [], shift: null };
 
 export function hasEdits(p: Pending): boolean {
   return Object.keys(buildFields(p)).length > 0;
@@ -219,6 +225,7 @@ export function buildFieldsByScope(p: Pending): Record<ScopeName, Record<string,
   const clock: Record<string, unknown> = {};
   if (p.loc) Object.assign(place, { lat: p.loc.lat, lon: p.loc.lon, alt: p.loc.alt, gps_source: p.loc.source });
   if (p.place !== null) place.place_name = p.place.trim() || null;
+  for (const k of ['city', 'state', 'country'] as const) if (p[k] !== null) place[k] = p[k]!.trim() || null;
   for (const k of ['creator', 'copyright'] as const) if (p[k] !== null) credit[k] = p[k]!.trim() || null;
   if (p.title !== null) description.title = p.title.trim() || null;
   if (p.kwAdd.length) description.keywords_add = [...p.kwAdd];
@@ -264,7 +271,7 @@ export function applyFields(g: PhotoGroup, f: Record<string, unknown>): PhotoGro
     const ms = Date.parse(g.utc_time) + (f.time_shift_s - (g.time_shift_s ?? 0)) * 1000;
     if (!Number.isNaN(ms)) out.utc_time = `${new Date(ms).toISOString().slice(0, 19)}+00:00`;
   }
-  for (const k of ['lat', 'lon', 'alt', 'gps_source', 'place_name', 'creator', 'copyright', 'title', 'time_shift_s'] as const) {
+  for (const k of ['lat', 'lon', 'alt', 'gps_source', 'place_name', 'city', 'state', 'country', 'creator', 'copyright', 'title', 'time_shift_s'] as const) {
     if (k in f) (out as unknown as Record<string, unknown>)[k] = f[k];
   }
   if (Array.isArray(f.keywords_add)) out.keywords = out.keywords.concat(f.keywords_add as string[]);
@@ -521,4 +528,35 @@ export function clockPhotos(reach: ClockReach, candidates: PhotoGroup[], selecte
   const bodies = new Set(selected.map((g) => g.body_id).filter((b): b is number => b !== null));
   const pool = relatedSession(candidates, selected, reach === 'day' ? 'day' : sessionGap);
   return pool.filter((g) => g.body_id !== null && bodies.has(g.body_id));
+}
+
+// ---------------------------------------------------------------- place names (sp-3)
+
+/** The place fields a phone point, a "near this time" row or a Nominatim result can carry. */
+export interface PlaceFields {
+  place_name: string | null;
+  city: string | null;
+  state: string | null;
+  country: string | null;
+}
+
+/** "Harbourton, Westshire" from a point's place fields (city, else the place name; then the state); '' when none. */
+export function placeLabel(f: PlaceFields): string {
+  return [f.city || f.place_name, f.state].filter(Boolean).join(', ');
+}
+
+/** The pending place edits for choosing a place. Empty fields stay null, so they are left untouched. */
+export function placeEdits(f: PlaceFields): Pick<Pending, 'place' | 'city' | 'state' | 'country'> {
+  return { place: f.place_name || null, city: f.city || null, state: f.state || null, country: f.country || null };
+}
+
+/** City, state and country from a Nominatim `address` object (addressdetails=1). */
+export function nominatimPlace(name: string, address: Record<string, string> | undefined): PlaceFields {
+  const a = address ?? {};
+  return {
+    place_name: name || null,
+    city: a.city || a.town || a.village || a.municipality || a.hamlet || a.suburb || null,
+    state: a.state || a.region || a.county || null,
+    country: a.country || null,
+  };
 }
