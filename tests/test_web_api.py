@@ -940,3 +940,26 @@ def test_label_renames_a_drive_in_the_catalog_only(srv: Client) -> None:
     assert srv.call("GET", "/api/volumes/vol-work/label")[0] == 405
     _, body = srv.call("GET", "/api/volumes/vol-work")
     assert body["drive"]["label"] == "Field SSD"
+
+
+def test_clock_suggestions_endpoint(srv: Client) -> None:
+    from tests.test_clock import frames, phone
+
+    assert srv.call("GET", "/api/clock-suggestions") == (200, {"suggestions": []})
+    conn = db.connect(srv.app.catalog_path)
+    try:
+        phone(conn)
+        _, ids = frames(conn, "Zed", off_h=8)
+        conn.commit()
+    finally:
+        conn.close()
+    status, body = srv.call("GET", "/api/clock-suggestions")
+    assert status == 200 and len(body["suggestions"]) == 1
+    s = body["suggestions"][0]
+    assert s["body"] == "Zed" and s["delta_s"] == -8 * 3600
+    group = s["groups"][0]
+    assert group["time_shift_s"] == -8 * 3600 and set(group["group_ids"]) <= set(ids)
+    # applying goes through the existing meta save
+    assert srv.call("POST", "/api/groups/meta", {"group_ids": group["group_ids"],
+                                                 "fields": {"time_shift_s": group["time_shift_s"]}})[0] == 200
+    assert srv.call("GET", "/api/clock-suggestions") == (200, {"suggestions": []})

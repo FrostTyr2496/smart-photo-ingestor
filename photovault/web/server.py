@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from photovault import activity, cards, preview, usage, volumes
+from photovault import activity, cards, clock, preview, usage, volumes
 from photovault.catalog import db, repo
 from photovault.drives import DEFAULT_MAC_FOLDER, VOLUMES_ROOT, scan_mounts
 from photovault.geo import group_utc, offset_tz, places_near, suggest, utc_text
@@ -713,6 +713,7 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
         ("GET", "/api/groups"): lambda: _groups(conn, query),
         ("GET", "/api/photo-days"): lambda: _photo_days(conn, query),
         ("POST", "/api/groups/meta"): lambda: _groups_meta(conn, body),
+        ("GET", "/api/clock-suggestions"): lambda: {"suggestions": clock.suggest_offsets(conn)},
         ("GET", "/api/settings"): lambda: {"settings": _settings(conn)},
         ("POST", "/api/settings"): lambda: _post_settings(conn, body),
     }

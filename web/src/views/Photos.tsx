@@ -21,6 +21,7 @@ import {
 } from '../lib/photos';
 import { usePref } from '../lib/prefs';
 import { useStore } from '../lib/store';
+import { ClockBanner } from './ClockBanner';
 import { PhotoInspector } from './PhotoInspector';
 
 const PAGE = 300; // photos fetched per request within a day
@@ -213,6 +214,7 @@ export function Photos() {
 
   return (
     <div className="flex flex-col gap-4">
+      <ClockBanner onApplied={() => setReload((r) => r + 1)} />
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold tracking-tight">Photos</h1>

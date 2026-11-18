@@ -171,7 +171,7 @@ reference folder read into `geo_points`) and `geo.suggest` (time-matched suggest
   - Verify: `uv run pytest tests/test_web_api.py -q -k geo_follow`; `cd web && npm test` (bridge, split and
     fallback cases); **[user]** visual check.
 
-- [ ] 7. **[stronger]** Time-zone suggestions per camera from the phone timeline
+- [x] 7. **[stronger]** Time-zone suggestions per camera from the phone timeline
   - ID: sp-7 (after sp-2). _Design:_ D-070. Metadata only (rule 9).
   - `photovault/clock.py` `suggest_offsets(conn, *, min_matches=20)`: split the phone timeline into runs where
     `local_offset` stays the same (trips). For each camera body and each run, try shifts from −14 h to +14 h in 15-min
@@ -183,3 +183,4 @@ reference folder read into `geo_points`) and `geo.suggest` (time-matched suggest
     1,240 photos"). Apply sets `time_shift_s` on that body's frames in the range through the existing meta save.
   - Verify: `uv run pytest tests/test_clock.py -q` (synthetic camera frames 8 h off against a phone track; a no-signal
     case gives no suggestion).
+  - Result (2026-11-18): `uv run pytest tests/test_clock.py tests/test_web_api.py -q` → 68 passed; web typecheck, 43 tests and build pass.
