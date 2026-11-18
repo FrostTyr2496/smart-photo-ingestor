@@ -80,15 +80,16 @@ task's commit:
    ("If a drive shows I/O errors" in `docs/user/INDEX_WORKFLOW.md`). idx-5 is done except `lrcat mark`.
 4. **Curation (spec `docs/specs/curation`, D-069):** wave 1 is approved and ready: ing-13, idx-9, idx-10, idx-14,
    seq-1b (then seq-2), rv-11; then lr-0, set-1; cu-0 / dd-0 / ro-0 are proposals first. **Phone + related
-   (D-070..D-072):** rv-16 and sp-2 done; next sp-3 + rv-10 (city/state/country join the Place scope), sp-6
-   (phone-track sessions, Follow the track), sp-7 (time-zone hints), sp-4 (shoots); dv-0 is a proposal.
+   (D-070..D-072):** rv-16, sp-2, sp-3, rv-10, sp-7, rv-17 done; next sp-6 (phone-track sessions, Follow the
+   track), then sp-4 (shoots); dv-0 is a proposal.
 5. **Card backup (spec `docs/specs/backup`, D-050..D-052):** bk-1 drive health, bk-3 backup job (after ing-13),
    vn-1 volume name on hover, then bk-2, bk-4, vn-2, vn-3. bk-5 [user]: plug in and assign the 12 TB. Metrics:
    met-2 (web view); met-4 after bk-1.
 
 ## Waiting on user
 - **[user] phone import (sp-2):** `uv run photovault --json meta phone "$HOME/Library/Application Support/PhotoVault/phone/photos-20261118.json"`
-  (migrates the catalog to V6, about 18,995 points), then restart `serve` and check rv-16's "Applies to" block in Photos.
+  (migrates the catalog to V6, about 18,995 points), then restart `serve` and check in Photos: the "Applies to" block (rv-16), phone place names and "Near this time"
+  (sp-3), Copy filename (rv-10), the clock banner (sp-7), coordinates opening Google Maps (rv-17).
 - **Push the archive branch?** Run `git push -u origin archive/v0-cli-2026-11-11` if you want it on GitHub.
   (`main` is pushed.)
 - **Corpus gaps (fnd-7):** the wish list still lacks a Z6II pair, a night run, a GoPro set and an iPhone
@@ -102,11 +103,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-073 (agent, sp-3/sp-7): `/api/groups/<id>/places`; Nominatim addressdetails; clock runner-up ignores ±1 h; rv-17 Maps links.
 - D-072 (agent, sp-2/rv-16): skip order and `bad_date`; Same day = local capture date; Auto ignores Same day; clock shift by `body_id`.
 - D-071 (user): phone import also takes iPad + Meta glasses (DJI later); proposal dv-0 links EXIF-less astro TIFFs to originals.
 - D-070 (user): field scopes for related photos, gap ladder + Auto; osxphotos as an external tool; Follow the track; V6 `geo_points` offset + kind.
 - D-069 (user): roadmap approvals: ing-13, idx-9, idx-10, eval-1 (3 of 4), rv-11 from metadata; spec `curation`.
-- D-068 (agent, rv-12..15): rename = catalog label only; `diskutil` probes run in parallel and are cached per mount.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.
