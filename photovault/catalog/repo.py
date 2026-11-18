@@ -789,15 +789,26 @@ def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
 UNDATED = "undated"  # the ``day`` of groups with no capture time
 
 
+_TIME_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
+
+
 def _group_filter_sql(
-    *, volume_id: str | None, shoot_id: int | None, missing: str | None, day: str | None = None
+    *, volume_id: str | None, shoot_id: int | None, missing: str | None, day: str | None = None,
+    after: str | None = None, before: str | None = None,
 ) -> tuple[str, list]:
     """WHERE clause (without the keyword) for group listings and counts. ``g`` is capture_groups, ``m`` group_meta.
 
-    ``day`` is ``YYYY-MM-DD`` of the camera's capture time (before any time shift), or ``UNDATED``.
+    ``day`` is ``YYYY-MM-DD`` of the camera's capture time (before any time shift), or ``UNDATED``. ``after`` and
+    ``before`` (``YYYY-MM-DDTHH:MM:SS``, inclusive) bound the capture time; undated groups never match them.
     """
     clauses: list[str] = []
     params: list = []
+    for value, op in ((after, ">="), (before, "<=")):
+        if value is not None:
+            if not _TIME_RE.fullmatch(value):
+                raise ValueError(f"after/before must be YYYY-MM-DDTHH:MM:SS, not {value!r}")
+            clauses.append(f"substr(g.capture_time, 1, 19) {op} ?")
+            params.append(value)
     if day is not None:
         if day == UNDATED:
             clauses.append("g.capture_time IS NULL")
@@ -842,6 +853,8 @@ def list_groups(
     shoot_id: int | None = None,
     missing: str | None = None,
     day: str | None = None,
+    after: str | None = None,
+    before: str | None = None,
     limit: int = 200,
     offset: int = 0,
 ) -> list[Row]:
@@ -851,7 +864,8 @@ def list_groups(
     when given, else on a WORKING volume, else any; NULL when the primary has no indexed instance yet. ``missing``
     is one of ``gps``, ``creator``, ``keywords``, ``any`` (see ``_group_filter_sql``).
     """
-    where, params = _group_filter_sql(volume_id=volume_id, shoot_id=shoot_id, missing=missing, day=day)
+    where, params = _group_filter_sql(volume_id=volume_id, shoot_id=shoot_id, missing=missing, day=day, after=after,
+                                      before=before)
     if volume_id is not None:
         preference, pref_params = "(i.volume_id = ?) DESC, (v.role = 'WORKING') DESC, i.instance_id", [volume_id]
     else:

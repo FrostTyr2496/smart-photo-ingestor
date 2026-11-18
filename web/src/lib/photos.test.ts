@@ -10,6 +10,8 @@ import {
   nearestWithLocation,
   NO_EDITS,
   rangeIds,
+  relatedSession,
+  relatedWindow,
   removeKeyword,
   shiftedTime,
   shiftSeconds,
@@ -127,5 +129,46 @@ describe('month rail', () => {
       { year: '2026', months: [{ month: 10, day: '2026-10-27', groups: 7 }, { month: 3, day: '2026-03-01', groups: 1 }] },
       { year: '2021', months: [{ month: 1, day: '2021-01-15', groups: 4 }] },
     ]);
+  });
+});
+
+describe('related photos', () => {
+  const at = (id: number, t: string | null) => g(id, { capture_time: t });
+  const ids = (l: PhotoGroup[]) => l.map((x) => x.group_id);
+
+  it('stops at the first gap that is too long, in both directions', () => {
+    const pool = [
+      at(1, '2021-01-15T08:00:00'),
+      at(2, '2021-01-15T09:30:00'),
+      at(3, '2021-01-15T09:50:00'),
+      at(4, '2021-01-15T10:00:00'),
+      at(5, '2021-01-15T10:20:00'),
+      at(6, '2021-01-15T12:00:00'),
+    ];
+    expect(ids(relatedSession(pool, [pool[3]!], 1800))).toEqual([2, 3, 5]);
+    expect(ids(relatedSession(pool, [pool[3]!], 7200))).toEqual([1, 2, 3, 5, 6]);
+  });
+
+  it('dedupes, ignores untimed candidates and includes photos between selected ones', () => {
+    const a = at(1, '2021-01-15T10:00:00');
+    const b = at(2, '2021-01-15T10:10:00');
+    const c = at(3, '2021-01-15T11:00:00');
+    const out = relatedSession([c, c, at(9, null), b, a], [a, c], 60);
+    expect(ids(out)).toEqual([2]);
+  });
+
+  it('takes the whole day in day mode', () => {
+    const pool = [at(1, '2021-01-14T23:59:00'), at(2, '2021-01-15T01:00:00'), at(3, '2021-01-15T23:00:00'), at(4, '2021-01-16T00:00:00')];
+    expect(ids(relatedSession(pool, [pool[1]!], 'day'))).toEqual([3]);
+  });
+
+  it('returns nothing when the selection has no capture time', () => {
+    expect(relatedSession([at(1, '2021-01-15T10:00:00')], [at(2, null)], 3600)).toEqual([]);
+  });
+
+  it('builds a window across midnight and for days', () => {
+    const sel = [at(1, '2021-01-15T23:30:00')];
+    expect(relatedWindow(sel, 3600)).toEqual({ after: '2021-01-15T11:30:00', before: '2021-01-16T11:30:00' });
+    expect(relatedWindow(sel, 'day')).toEqual({ after: '2021-01-15T00:00:00', before: '2021-01-15T23:59:59' });
   });
 });

@@ -286,3 +286,51 @@ export function nearestWithLocation(target: PhotoGroup, pool: PhotoGroup[], sele
 }
 
 export const fmtCoord = (lat: number, lon: number): string => `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+
+// ---------------------------------------------------------------- related photos (rv-9)
+
+const naiveMs = (t: string): number => Date.parse(`${t.slice(0, 19)}Z`);
+const fmtNaive = (ms: number): string => new Date(ms).toISOString().slice(0, 19);
+
+/**
+ * Photos in the same session as the selection: walking outwards from the selection's earliest and latest capture
+ * time, each next photo joins while it is within `gapS` seconds of the previous one. 'day' takes every candidate
+ * from a selected photo's day. The selected photos themselves are not returned.
+ */
+export function relatedSession(candidates: PhotoGroup[], selected: PhotoGroup[], gapS: number | 'day'): PhotoGroup[] {
+  const sel = new Set(selected.map((g) => g.group_id));
+  const timedSel = selected.filter((g) => g.capture_time);
+  if (!timedSel.length) return [];
+  const seen = new Set<number>();
+  const all: PhotoGroup[] = [];
+  for (const g of [...candidates, ...timedSel]) {
+    if (!g.capture_time || seen.has(g.group_id)) continue;
+    seen.add(g.group_id);
+    all.push(g);
+  }
+  all.sort((a, b) => naiveMs(a.capture_time!) - naiveMs(b.capture_time!));
+  if (gapS === 'day') {
+    const days = new Set(timedSel.map((g) => g.capture_time!.slice(0, 10)));
+    return all.filter((g) => !sel.has(g.group_id) && days.has(g.capture_time!.slice(0, 10)));
+  }
+  let lo = all.findIndex((g) => sel.has(g.group_id));
+  let hi = all.length - 1;
+  while (hi > lo && !sel.has(all[hi]!.group_id)) hi -= 1;
+  const gap = (i: number, j: number) => Math.abs(naiveMs(all[j]!.capture_time!) - naiveMs(all[i]!.capture_time!)) / 1000;
+  while (lo > 0 && gap(lo - 1, lo) <= gapS) lo -= 1;
+  while (hi < all.length - 1 && gap(hi, hi + 1) <= gapS) hi += 1;
+  return all.slice(lo, hi + 1).filter((g) => !sel.has(g.group_id));
+}
+
+/** The capture-time range to fetch around the selection: 12 h either side, or the selected days for 'day'. */
+export function relatedWindow(selected: PhotoGroup[], gapS: number | 'day'): { after: string; before: string } {
+  const times = selected.filter((g) => g.capture_time).map((g) => naiveMs(g.capture_time!));
+  if (!times.length) return { after: '', before: '' };
+  const min = Math.min(...times);
+  const max = Math.max(...times);
+  if (gapS === 'day') {
+    const dayStart = (ms: number) => ms - (((ms % 86400000) + 86400000) % 86400000);
+    return { after: fmtNaive(dayStart(min)), before: fmtNaive(dayStart(max) + 86400000 - 1000) };
+  }
+  return { after: fmtNaive(min - 12 * 3600000), before: fmtNaive(max + 12 * 3600000) };
+}

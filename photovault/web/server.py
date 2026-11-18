@@ -934,10 +934,13 @@ def _groups(conn, query: dict) -> dict:
         raise BadRequest("shoot_id must be an integer") from exc
     missing = _opt_param(query, "missing")
     day = _opt_param(query, "day")
+    after = _opt_param(query, "after")
+    before = _opt_param(query, "before")
     limit = _int_param(query, "limit", 200, 1, 1000)
     offset = _int_param(query, "offset", 0, 0, 2**62)
     try:
-        rows = repo.list_groups(conn, volume_id=volume_id, shoot_id=shoot_id, missing=missing, day=day, limit=limit,
+        rows = repo.list_groups(conn, volume_id=volume_id, shoot_id=shoot_id, missing=missing, day=day, after=after,
+                                before=before, limit=limit,
                                 offset=offset)
         counts = repo.missing_counts(conn, volume_id=volume_id)
     except ValueError as exc:

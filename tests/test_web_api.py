@@ -484,6 +484,7 @@ def test_groups_meta_validation(srv: Client) -> None:
     assert post({"group_ids": [a], "fields": {"lat": "51"}}) == 400
     assert srv.call("GET", "/api/groups?missing=bogus")[0] == 400
     assert srv.call("GET", "/api/groups?day=bogus")[0] == 400
+    assert srv.call("GET", "/api/groups?after=yesterday")[0] == 400
     assert srv.call("GET", "/api/photo-days?missing=bogus")[0] == 400
     assert srv.call("GET", "/api/groups?limit=abc")[0] == 400
 

@@ -49,7 +49,8 @@ Reference docs:
   (rv-1..rv-6): tasks, drives with file lists, cards, new-drive setup, settings, dev palette picker. Build committed
   under `photovault/web/static/next/`; the classic UI is deleted (rv-8 cleaned up leftovers). **Photos (rv-7, D-064):** a
   timeline by day with an inspector (map, GPS suggestions, place search, credit, keywords, clock shift); schema V4
-  adds the `assets(group_id)` index that the old grid lacked. Leaflet added to `web/`.
+  adds the `assets(group_id)` index that the old grid lacked. Leaflet added to `web/`. rv-9: edits apply to related
+  photos (the selection's session). Spike sp-1 (spec `phone-gps`): phone GPS + place names from the Photos library.
 - Hooks: `guard_volumes.py` blocks agent writes and engine runs on `/Volumes`; live tests read mounts only under
   `-m live` (D-028, D-031). Old v0 code: local branch `archive/v0-cli-2026-11-11`. The repo is public: real-drive
   facts and photos stay in `docs/private/` and `testdata/` (gitignored).
@@ -83,6 +84,9 @@ task's commit:
    met-2 (web view); met-4 after bk-1.
 
 ## Waiting on user
+- **sp-1 (phone locations), 6 questions in `docs/specs/phone-gps/tasks.md`:** which terminal gets Full Disk Access;
+  one-off or ongoing sync; osxphotos as an external fallback; store place names (schema change); quit Photos while
+  copying its database; exclude shared albums and screenshots.
 - **Push the archive branch?** Run `git push -u origin archive/v0-cli-2026-11-11` if you want it on GitHub.
   (`main` is pushed.)
 - **Corpus gaps (fnd-7):** the wish list still lacks a Z6II pair, a night run, a GoPro set and an iPhone
@@ -99,11 +103,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-065 (user, rv-9/sp-1): related photos = the selection's capture session; phone GPS spec `phone-gps`, spike recommends reading the Photos DB copy.
 - D-064 (user, rv-7): Photos rebuilt as a day timeline + inspector; V4 `assets(group_id)` index; Leaflet, OSM tiles, search on Enter.
 - D-063 (user, idx-13): non-photo files counted per drive in `volume_usage` (V3); videos split by camera signals.
 - D-062 (user, rv-6): the new UI is the only UI; Photos is its own task rv-7; slices go to Haiku/Sonnet agents.
 - D-061 (agent, rv-2): a hash shows the drive's progress (files hashed before the run count); pace stays the run's.
-- D-060 (agent, rv-1): `/next` beside classic; dev palette picker on by default with contrast grades; calmer task cards.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

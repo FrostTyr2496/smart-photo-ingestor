@@ -51,6 +51,8 @@ export function Photos() {
   const [settings, setSettings] = useState<PhotoSettings>({ creator: '', copyright: '', default_offset: '+00:00' });
   const [windowS, setWindowS] = useState(1800);
   const [reload, setReload] = useState(0);
+  const [savedEpoch, setSavedEpoch] = useState(0);
+  const [relatedIds, setRelatedIds] = useState<Set<number>>(() => new Set());
   const anchor = useRef<number | null>(null);
   const filterKey = `${volume}|${missing}`;
   const filterRef = useRef(filterKey);
@@ -188,9 +190,15 @@ export function Photos() {
     return () => window.removeEventListener('keydown', onKey);
   }, [clear]);
 
-  const onSaved = async (fields: Record<string, unknown>) => {
-    const ids = new Set(sel.keys());
-    setSel((prev) => new Map([...prev].map(([id, g]) => [id, applyFields(g, fields)])));
+  const onRelated = useCallback((ids: number[]) => setRelatedIds(new Set(ids)), []);
+  useEffect(() => {
+    if (!sel.size) setRelatedIds((r) => (r.size ? new Set() : r));
+  }, [sel.size]);
+
+  const onSaved = async (fields: Record<string, unknown>, savedIds: number[]) => {
+    const ids = new Set(savedIds);
+    setSel((prev) => new Map([...prev].map(([id, g]) => [id, ids.has(id) ? applyFields(g, fields) : g])));
+    setSavedEpoch((e) => e + 1);
     setLoaded((l) => {
       const out: Record<string, DayState> = {};
       for (const [day, s] of Object.entries(l)) out[day] = { ...s, groups: s.groups.map((g) => (ids.has(g.group_id) ? applyFields(g, fields) : g)) };
@@ -255,6 +263,7 @@ export function Photos() {
                   state={loaded[d.day]}
                   need={loadDay}
                   selected={sel}
+                  related={relatedIds}
                   allSelected={(loaded[d.day]?.groups.length ?? 0) >= d.groups && (loaded[d.day]?.groups ?? []).every((g) => sel.has(g.group_id))}
                   onTile={onTile}
                   onSelectDay={() => void selectDay(d)}
@@ -275,7 +284,7 @@ export function Photos() {
               transition={{ type: 'spring', stiffness: 420, damping: 36 }}
               className="fixed bottom-2 right-2 top-16 z-20 w-[min(380px,calc(100vw-1rem))] xl:static xl:w-auto"
             >
-              <PhotoInspector selected={selected} pool={pool} settings={settings} windowS={windowS} onClear={clear} onSaved={onSaved} />
+              <PhotoInspector selected={selected} pool={pool} settings={settings} windowS={windowS} onClear={clear} onSaved={onSaved} onRelated={onRelated} savedEpoch={savedEpoch} />
             </motion.div>
           )}
         </AnimatePresence>
@@ -321,6 +330,7 @@ function DaySection({
   state,
   need,
   selected,
+  related,
   allSelected,
   onTile,
   onSelectDay,
@@ -330,6 +340,7 @@ function DaySection({
   state: DayState | undefined;
   need: (day: string, more?: boolean) => Promise<void>;
   selected: Map<number, PhotoGroup>;
+  related: Set<number>;
   allSelected: boolean;
   onTile: (g: PhotoGroup, e: MouseEvent) => void;
   onSelectDay: () => void;
@@ -363,7 +374,7 @@ function DaySection({
       {state && groups.length > 0 ? (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(112px,1fr))] gap-1.5 pb-3">
           {groups.map((g) => (
-            <Tile key={g.group_id} g={g} on={selected.has(g.group_id)} connected={connected(g.volume_id)} onTile={onTile} />
+            <Tile key={g.group_id} g={g} on={selected.has(g.group_id)} related={related.has(g.group_id)} connected={connected(g.volume_id)} onTile={onTile} />
           ))}
         </div>
       ) : (
@@ -394,7 +405,7 @@ function DaySection({
   );
 }
 
-const Tile = memo(function Tile({ g, on, connected, onTile }: { g: PhotoGroup; on: boolean; connected: boolean; onTile: (g: PhotoGroup, e: MouseEvent) => void }) {
+const Tile = memo(function Tile({ g, on, related, connected, onTile }: { g: PhotoGroup; on: boolean; related: boolean; connected: boolean; onTile: (g: PhotoGroup, e: MouseEvent) => void }) {
   const [failed, setFailed] = useState(false);
   const name = g.canonical_stem || `Photo ${g.group_id}`;
   return (
@@ -403,7 +414,7 @@ const Tile = memo(function Tile({ g, on, connected, onTile }: { g: PhotoGroup; o
       aria-pressed={on}
       title={`${name}${g.capture_time ? ` · ${g.capture_time.replace('T', ' ')}` : ''}${g.place_name ? ` · ${g.place_name}` : ''}`}
       onClick={(e) => onTile(g, e)}
-      className={`group relative aspect-square overflow-hidden rounded-lg bg-ink/5 outline-none ring-offset-2 ring-offset-bg transition-shadow focus-visible:ring-2 focus-visible:ring-accent/60 ${on ? 'ring-[3px] ring-accent' : ''}`}
+      className={`group relative aspect-square overflow-hidden rounded-lg bg-ink/5 ${related && !on ? '' : 'outline-none'} ring-offset-2 ring-offset-bg transition-shadow focus-visible:ring-2 focus-visible:ring-accent/60 ${on ? 'ring-[3px] ring-accent' : related ? 'outline-dashed outline-2 outline-accent/70 outline-offset-[-2px]' : ''}`}
     >
       {failed || !g.volume_id ? (
         <span className="flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center text-2xs text-faint">

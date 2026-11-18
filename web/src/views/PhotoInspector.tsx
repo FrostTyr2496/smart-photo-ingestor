@@ -15,7 +15,10 @@ import {
   keywordChips,
   nearestWithLocation,
   NO_EDITS,
+  relatedSession,
+  relatedWindow,
   removeKeyword,
+  secondsBetween,
   shiftedTime,
   shiftSeconds,
   splitShift,
@@ -24,6 +27,7 @@ import {
   type PhotoGroup,
   type PhotoSettings,
 } from '../lib/photos';
+import { usePref } from '../lib/prefs';
 import { useStore } from '../lib/store';
 
 interface Suggestion {
@@ -56,13 +60,17 @@ export function PhotoInspector({
   windowS,
   onClear,
   onSaved,
+  onRelated,
+  savedEpoch,
 }: {
   selected: PhotoGroup[];
   pool: PhotoGroup[];
   settings: PhotoSettings;
   windowS: number;
   onClear: () => void;
-  onSaved: (fields: Record<string, unknown>) => Promise<void>;
+  onSaved: (fields: Record<string, unknown>, ids: number[]) => Promise<void>;
+  onRelated: (ids: number[]) => void;
+  savedEpoch: number;
 }) {
   const { toast } = useStore();
   const [pend, setPend] = useState<Pending>(NO_EDITS);
@@ -71,6 +79,20 @@ export function PhotoInspector({
   const n = selected.length;
   const selKey = selected.map((g) => g.group_id).join(',');
   const edited = hasEdits(pend);
+
+  // Related photos (rv-9): the eligible ones are all ticked unless excluded; Save also goes to the ticked ones.
+  const [gap, setGap] = usePref<number | 'day'>('photos.relatedGap', 3600);
+  const [onlyNoLoc, setOnlyNoLoc] = useState(true);
+  const [excluded, setExcluded] = useState<Set<number>>(() => new Set());
+  const rel = useRelated(selected, selKey, gap, onlyNoLoc, savedEpoch);
+  useEffect(() => setExcluded(new Set()), [selKey]);
+  const relIds = useMemo(() => rel.eligible.filter((g) => !excluded.has(g.group_id)).map((g) => g.group_id), [rel.eligible, excluded]);
+  const relKey = relIds.join(',');
+  useEffect(() => {
+    onRelated(relIds);
+  }, [relKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => onRelated([]), []); // eslint-disable-line react-hooks/exhaustive-deps
+  const total = n + relIds.length;
 
   // The map refits when the selection changes; a pin from a search or suggestion flies there too.
   const [focus, setFocus] = useState(0);
@@ -87,10 +109,11 @@ export function PhotoInspector({
     if (!Object.keys(fields).length) return;
     setSaving(true);
     try {
-      await api('POST', '/api/groups/meta', { group_ids: selected.map((g) => g.group_id), fields });
-      await onSaved(fields);
+      const ids = [...selected.map((g) => g.group_id), ...relIds];
+      await api('POST', '/api/groups/meta', { group_ids: ids, fields });
+      await onSaved(fields, ids);
       setPend(NO_EDITS);
-      toast(`Saved to ${plural(n, 'photo')}.`);
+      toast(`Saved to ${plural(ids.length, 'photo')}.`);
     } catch (err) {
       toast((err as Error).message, 'err');
     } finally {
@@ -172,6 +195,19 @@ export function PhotoInspector({
           <Keywords selected={selected} pend={pend} setPend={setPend} />
         </Section>
 
+        <Section title="Related photos">
+          <Related
+            selected={selected}
+            gap={gap}
+            setGap={setGap}
+            onlyNoLoc={onlyNoLoc}
+            setOnlyNoLoc={setOnlyNoLoc}
+            rel={rel}
+            excluded={excluded}
+            setExcluded={setExcluded}
+          />
+        </Section>
+
         <Section title="Clock">
           <ClockShift first={first} n={n} pend={pend} set={(v) => set('shift', v)} defaultOffset={settings.default_offset} />
         </Section>
@@ -190,7 +226,7 @@ export function PhotoInspector({
                 Discard
               </button>
               <button type="button" className="btn-primary" onClick={save} disabled={saving}>
-                {saving ? 'Saving…' : n === 1 ? 'Save' : `Save to ${fmtInt(n)} photos`}
+                {saving ? 'Saving…' : relIds.length ? `Save to ${fmtInt(n)} + ${fmtInt(relIds.length)} related` : total === 1 ? 'Save' : `Save to ${fmtInt(total)} photos`}
               </button>
             </div>
           </motion.div>
@@ -467,5 +503,180 @@ function ClockShift({ first, n, pend, set, defaultOffset }: { first: PhotoGroup 
       )}
       {n > 1 && pend.shift === null && <p className="text-2xs text-faint">Each photo keeps its own shift unless you change it here.</p>}
     </div>
+  );
+}
+
+const REL_LIMIT = 1000;
+const REL_SHOWN = 200;
+const GAPS: Array<{ label: string; value: number | 'day' }> = [
+  { label: '15 min', value: 900 },
+  { label: '1 h', value: 3600 },
+  { label: '3 h', value: 10800 },
+  { label: 'Same day', value: 'day' },
+];
+
+interface RelatedState {
+  eligible: PhotoGroup[];
+  session: number; // photos in the session before the location filter
+  fetched: number;
+  loading: boolean;
+  error: string;
+}
+
+/** Fetch photos around the selection and pick the session; refetches on a new selection, a new gap or a save. */
+function useRelated(selected: PhotoGroup[], selKey: string, gap: number | 'day', onlyNoLoc: boolean, savedEpoch: number): RelatedState {
+  const [data, setData] = useState<{ key: string; rows: PhotoGroup[] } | null>(null);
+  const [error, setError] = useState('');
+  const sel = useRef(selected);
+  sel.current = selected;
+  const key = `${selKey}|${gap}`;
+  useEffect(() => {
+    const { after, before } = relatedWindow(sel.current, gap);
+    if (!after) {
+      setData({ key, rows: [] });
+      return undefined;
+    }
+    let alive = true;
+    setError('');
+    api<{ groups: PhotoGroup[] }>('GET', `/api/groups?${new URLSearchParams({ after, before, limit: String(REL_LIMIT) })}`)
+      .then((d) => alive && setData({ key, rows: d.groups }))
+      .catch((e: Error) => {
+        if (!alive) return;
+        setError(e.message);
+        setData({ key, rows: [] });
+      });
+    return () => {
+      alive = false;
+    };
+  }, [key, savedEpoch]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return useMemo(() => {
+    if (!data || data.key !== key) return { eligible: [], session: 0, fetched: 0, loading: true, error: '' };
+    const session = relatedSession(data.rows, selected, gap);
+    return {
+      eligible: onlyNoLoc ? session.filter((g) => g.lat === null) : session,
+      session: session.length,
+      fetched: data.rows.length,
+      loading: false,
+      error,
+    };
+  }, [data, key, selected, gap, onlyNoLoc, error]);
+}
+
+function Related({
+  selected,
+  gap,
+  setGap,
+  onlyNoLoc,
+  setOnlyNoLoc,
+  rel,
+  excluded,
+  setExcluded,
+}: {
+  selected: PhotoGroup[];
+  gap: number | 'day';
+  setGap: (g: number | 'day') => void;
+  onlyNoLoc: boolean;
+  setOnlyNoLoc: (v: boolean) => void;
+  rel: RelatedState;
+  excluded: Set<number>;
+  setExcluded: (s: Set<number>) => void;
+}) {
+  const gapLabel = gap === 'day' ? 'the same day' : `within ${GAPS.find((x) => x.value === gap)?.label ?? ''} of each other`;
+  const toggle = (id: number) => {
+    const next = new Set(excluded);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setExcluded(next);
+  };
+  const shown = rel.eligible.slice(0, REL_SHOWN);
+  const ticked = rel.eligible.filter((g) => !excluded.has(g.group_id)).length;
+  const hasTime = selected.some((g) => g.capture_time);
+  const delta = (g: PhotoGroup): string => {
+    let best: number | null = null;
+    for (const s of selected) {
+      const d = secondsBetween(s.capture_time, g.capture_time);
+      if (d !== null && (best === null || Math.abs(d) < Math.abs(best))) best = d;
+    }
+    return best === null ? '' : ` · ${fmtDelta(best)}`;
+  };
+
+  let summary: string;
+  if (!hasTime) summary = 'No related photos: the selection has no capture time.';
+  else if (rel.loading) summary = 'Looking for related photos…';
+  else if (rel.error) summary = `Could not load related photos: ${rel.error}`;
+  else if (rel.eligible.length) summary = `${plural(rel.eligible.length, 'related photo')} (taken ${gapLabel})`;
+  else if (rel.session > 0) summary = `No related photos: ${plural(rel.session, 'photo')} nearby already ${rel.session === 1 ? 'has' : 'have'} a location.`;
+  else summary = `No related photos taken ${gapLabel}.`;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap gap-1.5" role="group" aria-label="How close in time">
+        {GAPS.map((o) => (
+          <button
+            key={o.label}
+            type="button"
+            aria-pressed={gap === o.value}
+            className={`btn h-7 px-2 text-xs ${gap === o.value ? 'border-accent/50 bg-accent/10 text-accent' : ''}`}
+            onClick={() => setGap(o.value)}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+      <label className="flex items-center gap-2 text-xs text-muted">
+        <input type="checkbox" checked={onlyNoLoc} onChange={(e) => setOnlyNoLoc(e.target.checked)} />
+        Only without a location
+      </label>
+      <p className="text-xs text-muted">{summary}</p>
+      {rel.fetched >= REL_LIMIT && <p className="text-xs text-faint">The list may be cut short: only the first {fmtInt(REL_LIMIT)} photos nearby were checked.</p>}
+      {rel.eligible.length > 0 && (
+        <>
+          <div className="flex items-center justify-between text-xs text-muted">
+            <span>{fmtInt(ticked)} ticked</span>
+            <span className="flex gap-2">
+              <button type="button" className="text-accent hover:underline" onClick={() => setExcluded(new Set())}>
+                All
+              </button>
+              <button type="button" className="text-accent hover:underline" onClick={() => setExcluded(new Set(rel.eligible.map((g) => g.group_id)))}>
+                None
+              </button>
+            </span>
+          </div>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(52px,1fr))] gap-1">
+            {shown.map((g) => (
+              <RelatedThumb key={g.group_id} g={g} on={!excluded.has(g.group_id)} title={`${g.canonical_stem || `Photo ${g.group_id}`} · ${g.capture_time?.replace('T', ' ') ?? ''}${delta(g)}`} onToggle={() => toggle(g.group_id)} />
+            ))}
+          </div>
+          {rel.eligible.length > shown.length && (
+            <p className="text-xs text-faint">+{fmtInt(rel.eligible.length - shown.length)} more (all ticked unless you chose None)</p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function RelatedThumb({ g, on, title, onToggle }: { g: PhotoGroup; on: boolean; title: string; onToggle: () => void }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-pressed={on}
+      title={title}
+      onClick={onToggle}
+      className={`relative aspect-square overflow-hidden rounded-md bg-ink/5 outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${on ? 'ring-2 ring-accent' : 'opacity-60'}`}
+    >
+      {failed || !g.volume_id ? (
+        <span className="flex h-full w-full items-center justify-center p-0.5 text-center font-mono text-[9px] leading-tight text-faint">{g.canonical_stem || g.group_id}</span>
+      ) : (
+        <img src={`/api/groups/${g.group_id}/thumb`} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} className="h-full w-full object-cover" />
+      )}
+      {on && (
+        <span className="absolute left-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-accent text-on-accent shadow">
+          <Icon name="check" size={10} />
+        </span>
+      )}
+    </button>
   );
 }

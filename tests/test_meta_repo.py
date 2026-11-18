@@ -245,6 +245,17 @@ def test_unhashed_groups_are_found_through_their_index_job(conn, seeded) -> None
     assert repo.indexed_primary_files(conn, [g5]) == {}
 
 
+def test_list_groups_time_range(conn, seeded) -> None:
+    assert _ids(repo.list_groups(conn, after="2026-05-01T09:30:00", before="2026-06-01T08:00:00")) == [
+        seeded["g2"], seeded["g3"]]
+    assert _ids(repo.list_groups(conn, after="2026-06-01T08:00:01")) == [seeded["g4"]]
+    _group(conn, "DSC_9", None)
+    assert seeded["g4"] in _ids(repo.list_groups(conn, after="2000-01-01T00:00:00"))
+    assert len(repo.list_groups(conn, after="2000-01-01T00:00:00")) == 4  # undated never matches a range
+    with pytest.raises(ValueError):
+        repo.list_groups(conn, after="2026-06-01")
+
+
 def test_list_photo_days(conn, seeded) -> None:
     _group(conn, "DSC_9", None)
     assert repo.list_photo_days(conn) == [

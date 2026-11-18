@@ -116,3 +116,19 @@ Rules for every task:
   - Verify: `uv run pytest -q`; `cd web && npm run typecheck && npm test && npm run build`; the built page loads
     with no console errors on every route.
   - Result (2026-11-18): `uv run pytest -q` 490 passed, 4 skipped; typecheck, `npm test` (16 passed) and build clean. Only comments and docs changed (stale "classic UI" wording); server and routes had no classic-only code.
+
+- [x] 9. Photos: apply edits to related photos (visual check pending, user)
+  - ID: rv-9 (after rv-7; asked for by the user on 2026-11-18). UI built by a Sonnet agent from a brief; reviewed.
+  - `GET /api/groups` gains `after=` / `before=` (capture time `YYYY-MM-DDTHH:MM:SS`, inclusive). The inspector gets a
+    "Related photos" section: photos taken in the same session as the selection (each within a gap of the next:
+    15 min, 1 h or 3 h, or the same day), fetched around the selection; "Only without a location" (on by default)
+    hides photos that already have one. Eligible photos show as small thumbnails, all ticked; click toggles.
+    They are outlined in the main grid too. Save applies the touched fields to the selection plus the ticked
+    related photos ("Save to 1 + 8 related").
+  - Verify: `uv run pytest tests/test_meta_repo.py tests/test_web_api.py -q`; `cd web && npm test && npm run build`;
+    a browser check that saving with related photos ticked updates them.
+  - Result (2026-11-18): `uv run pytest -q` 529 passed, 4 skipped; `npm test` 31 passed; build clean (built in a clean
+    worktree, so another session's uncommitted progress-bar work stays out of it). Headless Chrome on a catalog copy:
+    one photo selected → "774 related photos (taken within 1 h of each other)", 299 loaded tiles outlined, "Save to
+    1 + 774 related" saved a keyword to all 775 (checked through the API). Note: at 1 h a busy day chains into one
+    session; the user picks 15 min for tighter groups. Selected photos missing from the fetch still anchor the session.
