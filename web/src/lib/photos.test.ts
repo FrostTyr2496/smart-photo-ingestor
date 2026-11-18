@@ -3,6 +3,7 @@ import {
   addKeywords,
   applyFields,
   autoStep,
+  mapsUrl,
   buildFieldsByScope,
   clockPhotos,
   namedFolder,
@@ -333,5 +334,11 @@ describe('place names (sp-3)', () => {
       country: 'Freedonia',
     });
     expect(nominatimPlace('', undefined)).toEqual({ place_name: null, city: null, state: null, country: null });
+  });
+});
+
+describe('mapsUrl', () => {
+  it('opens Google Maps at the coordinates only', () => {
+    expect(mapsUrl(12.5, -45.25)).toBe('https://www.google.com/maps/search/?api=1&query=12.500000,-45.250000');
   });
 });

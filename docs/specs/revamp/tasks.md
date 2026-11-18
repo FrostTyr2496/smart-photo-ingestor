@@ -176,3 +176,11 @@ Rules for every task:
     A toast confirms. Uses the Clipboard API, with a fallback when it is unavailable.
   - Verify: `cd web && npm test`; **[user]** visual check.
   - Result (2026-11-18): `cd web && npm run typecheck && npm test && npm run build` → typecheck clean, 44 tests passed (`copyName` covered), build committed. Visual check is the user's.
+
+- [x] 17. Coordinates open in Google Maps
+  - ID: rv-17 (user ask, 2026-11-18)
+  - Every coordinate pair in the inspector (current location, a pending new location, suggestion rows) is a link to
+    `https://www.google.com/maps/search/?api=1&query=<lat>,<lon>` (Google's documented Maps URLs), opened in a new
+    tab with `noopener noreferrer`. Only the coordinates are sent; nothing is fetched until the user clicks.
+  - Verify: `cd web && npm test` (photos.test.ts `mapsUrl`).
+  - Result (2026-11-18): `cd web && npm run typecheck && npm test` → clean, 48 passed; build committed.

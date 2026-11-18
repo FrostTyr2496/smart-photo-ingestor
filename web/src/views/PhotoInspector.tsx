@@ -12,6 +12,7 @@ import {
   copyName,
   copyText,
   fmtCoord,
+  mapsUrl,
   fmtDelta,
   gapLabel,
   GPS_LABEL,
@@ -227,10 +228,10 @@ export function PhotoInspector({
             {pend.loc
               ? pend.loc.lat === null
                 ? 'Will remove the location.'
-                : `New: ${fmtCoord(pend.loc.lat, pend.loc.lon!)} · ${GPS_LABEL[pend.loc.source ?? ''] ?? ''}`
+                : <>New: <Coord lat={pend.loc.lat} lon={pend.loc.lon!} /> · {GPS_LABEL[pend.loc.source ?? ''] ?? ''}</>
               : n === 1 && first
                 ? first.lat !== null && first.lon !== null
-                  ? `${fmtCoord(first.lat, first.lon)} · ${GPS_LABEL[first.gps_source ?? 'camera'] ?? first.gps_source}`
+                  ? <><Coord lat={first.lat} lon={first.lon} /> · {GPS_LABEL[first.gps_source ?? 'camera'] ?? first.gps_source}</>
                   : 'No location yet. Click the map, search a place or use a suggestion.'
                 : `${fmtInt(located.length)} of ${fmtInt(n)} have a location.`}
           </p>
@@ -421,7 +422,7 @@ function Suggestions({ first, pool, selected, windowS, onUse }: { first: PhotoGr
   const ids = useMemo(() => new Set(selected.map((g) => g.group_id)), [selected]);
   const near = nearestWithLocation(first, pool, ids, windowS);
 
-  const rows: Array<{ key: string; text: string; sub: string; loc: PendingLoc; fields?: PlaceFields }> = [];
+  const rows: Array<{ key: string; text: string; sub: ReactNode; loc: PendingLoc; fields?: PlaceFields }> = [];
   for (const [i, s] of (list ?? []).entries()) {
     const fields: PlaceFields = { place_name: s.place_name ?? null, city: s.city ?? null, state: s.state ?? null, country: s.country ?? null };
     const label = placeLabel(fields);
@@ -430,7 +431,7 @@ function Suggestions({ first, pool, selected, windowS, onUse }: { first: PhotoGr
       key: `s${i}`,
       text: label ? `${label} · ${when}` : `${GPS_LABEL[s.source] ?? s.source} · ${when}`,
       fields,
-      sub: `${fmtCoord(s.lat, s.lon)} · ${s.confidence} confidence`,
+      sub: <><Coord lat={s.lat} lon={s.lon} /> · {s.confidence} confidence</>,
       loc: { lat: s.lat, lon: s.lon, alt: s.alt ?? null, source: 'match' },
     });
   }
@@ -438,7 +439,7 @@ function Suggestions({ first, pool, selected, windowS, onUse }: { first: PhotoGr
     rows.push({
       key: 'near',
       text: `From ${near.group.canonical_stem ?? 'a nearby photo'} · ${fmtDelta(near.delta)}`,
-      sub: fmtCoord(near.group.lat!, near.group.lon!),
+      sub: <Coord lat={near.group.lat!} lon={near.group.lon!} />,
       loc: { lat: near.group.lat, lon: near.group.lon, alt: near.group.alt, source: 'neighbour' },
     });
   }
@@ -459,6 +460,22 @@ function Suggestions({ first, pool, selected, windowS, onUse }: { first: PhotoGr
         </div>
       ))}
     </div>
+  );
+}
+
+/** Coordinates as a link that opens the spot in Google Maps in a new tab. */
+function Coord({ lat, lon }: { lat: number; lon: number }) {
+  return (
+    <a
+      href={mapsUrl(lat, lon)}
+      target="_blank"
+      rel="noopener noreferrer"
+      title="Open in Google Maps"
+      className="font-mono underline decoration-dotted underline-offset-2 hover:text-accent"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {fmtCoord(lat, lon)}
+    </a>
   );
 }
 

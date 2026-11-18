@@ -370,6 +370,10 @@ export function nearestWithLocation(target: PhotoGroup, pool: PhotoGroup[], sele
 
 export const fmtCoord = (lat: number, lon: number): string => `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
 
+/** Google Maps at that spot (the documented Maps URLs format); only the coordinates leave the app. */
+export const mapsUrl = (lat: number, lon: number): string =>
+  `https://www.google.com/maps/search/?api=1&query=${lat.toFixed(6)},${lon.toFixed(6)}`;
+
 // ---------------------------------------------------------------- related photos (rv-9, rv-16)
 
 const naiveMs = (t: string): number => Date.parse(`${t.slice(0, 19)}Z`);
