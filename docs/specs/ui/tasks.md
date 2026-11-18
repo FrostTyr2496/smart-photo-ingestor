@@ -112,7 +112,7 @@ still naive, apply the `settings` value `default_offset` (default "+00:00"). The
     foreign file; second write with the right expected hash succeeds.
   - Verify: `uv run pytest tests/test_xmp.py -q`.
 
-- [ ] 3. Geo suggestions and the `meta` CLI group
+- [x] 3. Geo suggestions and the `meta` CLI group
   - ID: ui-3 (after ui-1 and ui-2)
   - Files: `photovault/geo.py`, `photovault/meta.py`, `photovault/cli.py` (add the `meta` group only),
     `tests/test_geo.py`, `tests/test_meta_cli.py`.
@@ -146,6 +146,7 @@ still naive, apply the `settings` value `default_offset` (default "+00:00"). The
     --keyword-add K... --time-shift S]` for scripting. Resolve a mount to a volume_id the same way `index`
     does.
   - Verify: `uv run pytest tests/test_geo.py tests/test_meta_cli.py -q`, then `uv run pytest -q`.
+  - Known gap: a later `time_shift_s` does not move that group's own `catalog` geo point until `meta scan --rescan`.
 
 - [ ] 4. Local web server and JSON API
   - ID: ui-4 (after ui-3)

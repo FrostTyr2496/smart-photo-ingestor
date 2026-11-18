@@ -10,7 +10,7 @@ import sys
 import uuid
 from pathlib import Path
 
-from photovault import report, volumes
+from photovault import meta, report, volumes
 from photovault.catalog import db, repo
 from photovault.config import ConfigError, load_config
 from photovault.index import baseline_hash, index_volume, registered_volume
@@ -238,6 +238,59 @@ def cmd_jobs(args, cfg, emit) -> int:
     return EXIT_OK
 
 
+def cmd_meta_scan(args, cfg, emit) -> int:
+    conn = _open(cfg)
+    row = registered_volume(conn, Path(args.volume))
+    counts = meta.scan_volume(conn, cfg, Path(args.volume), row["volume_id"], emit, rescan=args.rescan)
+    emit.emit("result", volume=row["label"], **counts)
+    return EXIT_OK
+
+
+def cmd_meta_refs(args, cfg, emit) -> int:
+    conn = _open(cfg)
+    counts = meta.scan_refs(conn, cfg, Path(args.folder), args.label, emit)
+    emit.emit("result", label=args.label, **counts)
+    return EXIT_OK
+
+
+def cmd_meta_sidecars(args, cfg, emit) -> int:
+    conn = _open(cfg)
+    row = registered_volume(conn, Path(args.volume))
+    counts = meta.write_sidecars(conn, cfg, Path(args.volume), row["volume_id"], emit, dry_run=args.dry_run)
+    emit.emit("result", volume=row["label"], dry_run=args.dry_run, **counts)
+    return EXIT_OK
+
+
+def cmd_meta_missing(args, cfg, emit) -> int:
+    conn = _open(cfg)
+    volume_id = registered_volume(conn, Path(args.volume))["volume_id"] if args.volume else None
+    emit.emit("result", **repo.missing_counts(conn, volume_id=volume_id))
+    return EXIT_OK
+
+
+def cmd_meta_set(args, cfg, emit) -> int:
+    fields: dict = {}
+    if (args.lat is None) != (args.lon is None):
+        emit.emit("error", code="usage", message="--lat and --lon must be given together")
+        return EXIT_USAGE
+    if args.lat is not None:
+        fields.update(lat=args.lat, lon=args.lon, alt=None, gps_source="map")
+    for key, value in (("place_name", args.place), ("creator", args.creator), ("copyright", args.copyright),
+                       ("title", args.title), ("time_shift_s", args.time_shift)):
+        if value is not None:
+            fields[key] = value
+    if args.keyword_add:
+        fields["keywords_add"] = args.keyword_add
+    if not fields:
+        emit.emit("error", code="usage", message="nothing to set; pass at least one field option")
+        return EXIT_USAGE
+    conn = _open(cfg)
+    with repo.transaction(conn):
+        updated = repo.update_group_meta(conn, args.group, fields=fields)
+    emit.emit("result", updated=updated, fields=sorted(fields))
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="photovault", description="Verified card imports and a multi-drive catalog.")
     p.add_argument("--json", action="store_true", help="emit JSON lines (protocol v1)")
@@ -301,6 +354,35 @@ def build_parser() -> argparse.ArgumentParser:
     rd.add_argument("--volume", help="only clusters with a copy on this registered drive")
     rd.add_argument("--out", help="Markdown file to write (default: <home>/reports/duplicates-<time>.md)")
     rd.set_defaults(func=cmd_report_duplicates)
+
+    mt = sub.add_parser("meta", help="geotags, creator and keywords for frames (catalog; sidecars on WORKING)")
+    ms = mt.add_subparsers(dest="sub", required=True)
+    m_scan = ms.add_parser("scan", help="read camera GPS and capture time of each frame on a drive (read-only)")
+    m_scan.add_argument("--volume", required=True, metavar="MOUNT")
+    m_scan.add_argument("--rescan", action="store_true", help="also re-read frames that already have metadata rows")
+    m_scan.set_defaults(func=cmd_meta_scan)
+    m_refs = ms.add_parser("refs", help="store GPS fixes of a reference folder (phone export, drone card)")
+    m_refs.add_argument("--folder", required=True)
+    m_refs.add_argument("--label", required=True, help="source name for these fixes, e.g. phone or drone")
+    m_refs.set_defaults(func=cmd_meta_refs)
+    m_side = ms.add_parser("sidecars", help="write XMP sidecars for changed frames on a WORKING drive")
+    m_side.add_argument("--volume", required=True, metavar="MOUNT")
+    m_side.add_argument("--dry-run", action="store_true", help="count what would be written, write nothing")
+    m_side.set_defaults(func=cmd_meta_sidecars)
+    m_miss = ms.add_parser("missing", help="frames lacking a geotag, creator or keywords")
+    m_miss.add_argument("--volume", metavar="MOUNT", help="only frames with a copy on this registered drive")
+    m_miss.set_defaults(func=cmd_meta_missing)
+    m_set = ms.add_parser("set", help="edit frames by group id (for scripting)")
+    m_set.add_argument("--group", required=True, type=int, nargs="+", metavar="ID")
+    m_set.add_argument("--lat", type=float, help="manual geotag latitude (needs --lon; source 'map')")
+    m_set.add_argument("--lon", type=float)
+    m_set.add_argument("--place", help="place name")
+    m_set.add_argument("--creator")
+    m_set.add_argument("--copyright")
+    m_set.add_argument("--title")
+    m_set.add_argument("--keyword-add", action="append", metavar="WORD", help="repeatable")
+    m_set.add_argument("--time-shift", type=int, metavar="SECONDS", help="correct a body's clock by this many seconds")
+    m_set.set_defaults(func=cmd_meta_set)
 
     j = sub.add_parser("jobs", help="recent jobs")
     j.add_argument("--limit", type=int, default=20)
