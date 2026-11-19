@@ -134,6 +134,17 @@ Rules for every task:
     newest plan, or `PHOTOVAULT_DEV_PLAN=<path>`); decisions are kept in the browser per `plan_id` (`TODO(sh-2)`); Apply is
     disabled until sh-4. Reducer in `web/src/lib/review.ts`, views in `web/src/views/review/`. Not seen in a browser yet.
 
+- [x] 4b. Review sorted by connected drives
+  - ID: sh-3b (after sh-3). Shoots whose frames sit on a connected drive can show previews, so review lists them first.
+    - Trips with any frame on a connected drive come first, then the rest; inside a trip shoots stay in time order.
+      Shoots without a trip: connected first, then time order.
+    - Each shoot card shows its drives as chips (connected or not, like rv-21), from the plan's `volumes`.
+    - A toggle "Connected first" (on by default, kept per browser) restores plain time order.
+    - Split keeps the drives; merge adds their frame counts.
+  - Verify: `cd web && npm run typecheck && npm test`.
+  - Result (2026-11-18): `reviewSections` and `connectedFrames` in `web/src/lib/review.ts`; drive chips on each card; the
+    toggle sits above the decision list. The fixture plan gained invented `volumes`. Web 113 tests. Browser check [user].
+
 - [ ] 5. Apply and undo
   - ID: sh-4 (after sh-2, sh-3).
   - `POST /api/shoots/apply` runs as a job, in one transaction:

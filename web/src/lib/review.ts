@@ -35,6 +35,13 @@ export interface PlanShoot {
   gaps: Gap[];
   flags: string[];
   locked: boolean;
+  /** The drives holding the frames, most frames first (sh-1). Older plans lack it. */
+  volumes?: PlanVolume[];
+}
+export interface PlanVolume {
+  volume_id: string;
+  label: string;
+  frames: number;
 }
 export interface PlanTrip {
   proposal_id: string;
@@ -152,6 +159,15 @@ const gapSeconds = (a: EffShoot, b: EffShoot): number | null => {
   return Number.isFinite(e) && Number.isFinite(st) && st >= e ? Math.round((st - e) / 1000) : null;
 };
 
+function mergeVolumes(a: PlanVolume[], b: PlanVolume[]): PlanVolume[] {
+  const out = new Map<string, PlanVolume>();
+  for (const v of [...a, ...b]) {
+    const cur = out.get(v.volume_id);
+    out.set(v.volume_id, cur ? { ...cur, frames: cur.frames + v.frames } : { ...v });
+  }
+  return [...out.values()].sort((x, y) => y.frames - x.frames);
+}
+
 /** Join two neighbouring shoots (a before b). The earlier one's name, trip and date win. */
 export function mergeShoots(a: EffShoot, b: EffShoot): EffShoot {
   const bridge = gapSeconds(a, b);
@@ -168,6 +184,7 @@ export function mergeShoots(a: EffShoot, b: EffShoot): EffShoot {
     end_instant: b.end_instant || a.end_instant,
     wall: { start: a.wall.start ?? b.wall.start, end: b.wall.end ?? a.wall.end },
     flags: [...new Set([...a.flags, ...b.flags])],
+    volumes: mergeVolumes(a.volumes ?? [], b.volumes ?? []),
     state: 'undecided',
     derived: true,
     renamed: a.renamed,
@@ -321,7 +338,39 @@ export function describeAll(plan: Plan, decisions: Decision[]): { seq: number; t
   });
 }
 
-export type ReviewFilter = 'all' | 'flagged' | 'undecided' | 'accepted';
+// ---- display order (sh-3b) ----
+
+/** Frames of a shoot that sit on a connected drive (so its previews can load). */
+export const connectedFrames = (s: Pick<PlanShoot, 'volumes'>, mounted: ReadonlySet<string>): number =>
+  (s.volumes ?? []).reduce((n, v) => n + (mounted.has(v.volume_id) ? v.frames : 0), 0);
+
+export interface ReviewSection {
+  /** null: the shoots without a trip. */
+  trip: EffTrip | null;
+  shoots: EffShoot[];
+  connected: boolean;
+}
+
+/** The sections the page renders: one per trip with shoots, then the shoots without a trip. With `connectedFirst`,
+ *  trips holding any frame on a connected drive come first, and loose shoots on a connected drive lead the trip-less
+ *  section. The sort is stable, so time order holds within each group, and shoots inside a trip stay in time order. */
+export function reviewSections(p: EffPlan, mounted: ReadonlySet<string>, connectedFirst: boolean): ReviewSection[] {
+  const on = (s: EffShoot) => connectedFrames(s, mounted) > 0;
+  const trips: ReviewSection[] = p.trips
+    .map((t) => {
+      const shoots = p.shoots.filter((s) => s.trip_id === t.proposal_id);
+      return { trip: t, shoots, connected: shoots.some(on) };
+    })
+    .filter((x) => x.shoots.length > 0);
+  const loose = p.shoots.filter((s) => s.trip_id === null);
+  if (!connectedFirst) return loose.length ? [...trips, { trip: null, shoots: loose, connected: loose.some(on) }] : trips;
+  const rank = (b: boolean) => (b ? 0 : 1);
+  const sortedTrips = [...trips].sort((a, b) => rank(a.connected) - rank(b.connected));
+  const sortedLoose = [...loose].sort((a, b) => rank(on(a)) - rank(on(b)));
+  return sortedLoose.length ? [...sortedTrips, { trip: null, shoots: sortedLoose, connected: sortedLoose.some(on) }] : sortedTrips;
+}
+
+export type ReviewFilter ='all' | 'flagged' | 'undecided' | 'accepted';
 
 export const matchesFilter = (s: EffShoot, f: ReviewFilter): boolean =>
   f === 'all' ? true : f === 'flagged' ? s.flags.length > 0 : f === 'undecided' ? s.state === 'undecided' && !s.locked : s.state === 'accepted' || s.locked;

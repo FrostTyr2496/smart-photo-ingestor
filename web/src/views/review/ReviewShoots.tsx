@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../lib/api';
 import { usePref } from '../../lib/prefs';
+import { useStore } from '../../lib/store';
 import {
   addDecision,
   describeAll,
   effectivePlan,
   matchesFilter,
+  reviewSections,
   tally,
   undoDecision,
   type Decision,
@@ -96,8 +98,11 @@ function Review({ plan }: { plan: Plan }) {
   const lines = useMemo(() => describeAll(plan, decisions), [plan, decisions]);
   const counts = tally(eff);
   const decide = (d: NewDecision) => setDecisions((ds) => addDecision(ds, d));
-  const shown = (ids: string[]) => eff.shoots.filter((s) => ids.includes(s.proposal_id) && matchesFilter(s, filter));
-  const tripless = eff.shoots.filter((s) => s.trip_id === null && matchesFilter(s, filter));
+  const [connectedFirst, setConnectedFirst] = usePref<boolean>('review.shoots.connectedFirst', true);
+  const { drives } = useStore();
+  const mountedKey = drives.filter((d) => d.mounted && d.volume_id).map((d) => d.volume_id).sort().join('|');
+  const mounted = useMemo(() => new Set(mountedKey ? mountedKey.split('|') : []), [mountedKey]);
+  const sections = useMemo(() => reviewSections(eff, mounted, connectedFirst), [eff, mounted, connectedFirst]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -115,18 +120,20 @@ function Review({ plan }: { plan: Plan }) {
       </div>
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="flex min-w-0 flex-col gap-6">
-          {eff.trips.map((t) => {
-            const list = shown(t.shoot_ids);
-            return t.shoot_ids.length === 0 || list.length === 0 ? null : <TripSection key={t.proposal_id} trip={t} shoots={list} eff={eff} decide={decide} />;
+          {sections.map((sec) => {
+            const list = sec.shoots.filter((s) => matchesFilter(s, filter));
+            if (list.length === 0) return null;
+            return sec.trip ? (
+              <TripSection key={sec.trip.proposal_id} trip={sec.trip} shoots={list} eff={eff} decide={decide} mounted={mounted} />
+            ) : (
+              <section key="no-trip" className="flex flex-col gap-3">
+                <h2 className="text-lg font-semibold">Not in a trip</h2>
+                {list.map((s) => (
+                  <ShootCard key={s.proposal_id} s={s} plan={eff} onDecide={decide} mounted={mounted} />
+                ))}
+              </section>
+            );
           })}
-          {tripless.length > 0 && (
-            <section className="flex flex-col gap-3">
-              <h2 className="text-lg font-semibold">Not in a trip</h2>
-              {tripless.map((s) => (
-                <ShootCard key={s.proposal_id} s={s} plan={eff} onDecide={decide} />
-              ))}
-            </section>
-          )}
           {eff.shoots.every((s) => !matchesFilter(s, filter)) && <p className="text-sm text-muted">Nothing matches this filter.</p>}
         </div>
         <aside className="flex flex-col gap-4 rounded-2xl border border-maybe/30 bg-surface/70 p-4 lg:sticky lg:top-32" aria-label="Decisions">
@@ -137,6 +144,10 @@ function Review({ plan }: { plan: Plan }) {
               </button>
             ))}
           </div>
+          <label className="flex items-center gap-2 text-xs text-muted" title="Shoots whose photos sit on a connected drive can show previews">
+            <input type="checkbox" checked={connectedFirst} onChange={(e) => setConnectedFirst(e.target.checked)} />
+            Connected drives first{mounted.size === 0 ? ' (none connected)' : ''}
+          </label>
           <div>
             <h2 className="text-sm font-semibold">Pending decisions ({decisions.length})</h2>
             {lines.length === 0 ? (
@@ -161,7 +172,7 @@ function Review({ plan }: { plan: Plan }) {
   );
 }
 
-function TripSection({ trip, shoots, eff, decide }: { trip: EffTrip; shoots: ReturnType<typeof effectivePlan>['shoots']; eff: ReturnType<typeof effectivePlan>; decide: (d: NewDecision) => void }) {
+function TripSection({ trip, shoots, eff, decide, mounted }: { trip: EffTrip; shoots: ReturnType<typeof effectivePlan>['shoots']; eff: ReturnType<typeof effectivePlan>; decide: (d: NewDecision) => void; mounted: ReadonlySet<string> }) {
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(trip.name.value);
   const all = eff.shoots.filter((s) => s.trip_id === trip.proposal_id);
@@ -208,7 +219,7 @@ function TripSection({ trip, shoots, eff, decide }: { trip: EffTrip; shoots: Ret
         </div>
       </header>
       {shoots.map((s) => (
-        <ShootCard key={s.proposal_id} s={s} plan={eff} onDecide={decide} />
+        <ShootCard key={s.proposal_id} s={s} plan={eff} onDecide={decide} mounted={mounted} />
       ))}
     </section>
   );

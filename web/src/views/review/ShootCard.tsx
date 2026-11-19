@@ -61,6 +61,26 @@ function Counts({ s }: { s: EffShoot }) {
   );
 }
 
+/** The drives holding the shoot's photos (sh-3b), connected ones marked, like the Actions chips. */
+function Drives({ s, mounted }: { s: EffShoot; mounted: ReadonlySet<string> }) {
+  const vols = s.volumes ?? [];
+  if (vols.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5" aria-label="Drives">
+      {vols.map((v) => {
+        const on = mounted.has(v.volume_id);
+        return (
+          <span key={v.volume_id} className="chip border-line-strong bg-raised/60 text-ink/90" title={`${v.frames.toLocaleString()} ${v.frames === 1 ? 'frame' : 'frames'} on ${v.label} · ${on ? 'connected' : 'not connected'}`}>
+            <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${on ? 'bg-go' : 'border border-faint'}`} />
+            {v.label} <span className="text-faint">{v.frames.toLocaleString()}</span>
+            <span className="sr-only">{on ? ' (connected)' : ' (not connected)'}</span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 /** A compact preview row for the result of a split or merge. */
 function PreviewRow({ s }: { s: EffShoot }) {
   return (
@@ -106,7 +126,7 @@ function GapStrip({ s, pick, active }: { s: EffShoot; pick: (g: number) => void;
   );
 }
 
-export function ShootCard({ s, plan, onDecide }: { s: EffShoot; plan: EffPlan; onDecide: (d: NewDecision) => void }) {
+export function ShootCard({ s, plan, onDecide, mounted }: { s: EffShoot; plan: EffPlan; onDecide: (d: NewDecision) => void; mounted: ReadonlySet<string> }) {
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(s.name.value);
   const [splitting, setSplitting] = useState(false);
@@ -185,6 +205,7 @@ export function ShootCard({ s, plan, onDecide }: { s: EffShoot; plan: EffPlan; o
         )}
       </div>
       <Counts s={s} />
+      <Drives s={s} mounted={mounted} />
 
       <div className="grid gap-3 sm:grid-cols-[1fr_200px]">
         <Thumbs ids={s.sample_group_ids} />

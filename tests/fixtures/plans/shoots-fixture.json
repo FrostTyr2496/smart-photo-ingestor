@@ -190,7 +190,14 @@
    "flags": [
     "tz_change"
    ],
-   "locked": false
+   "locked": false,
+   "volumes": [
+    {
+     "volume_id": "vol-fixture-archive",
+     "label": "Archive HDD",
+     "frames": 312
+    }
+   ]
   },
   {
    "proposal_id": "s:c55a245a8a59",
@@ -345,7 +352,14 @@
     "multi_place",
     "weak_name"
    ],
-   "locked": false
+   "locked": false,
+   "volumes": [
+    {
+     "volume_id": "vol-fixture-archive",
+     "label": "Archive HDD",
+     "frames": 540
+    }
+   ]
   },
   {
    "proposal_id": "s:ccb87fd54398",
@@ -499,7 +513,14 @@
    "flags": [
     "body_clock_mismatch"
    ],
-   "locked": false
+   "locked": false,
+   "volumes": [
+    {
+     "volume_id": "vol-fixture-archive",
+     "label": "Archive HDD",
+     "frames": 420
+    }
+   ]
   },
   {
    "proposal_id": "s:defd0c85f0c2",
@@ -633,7 +654,19 @@
     "huge_timelapse",
     "tz_change"
    ],
-   "locked": false
+   "locked": false,
+   "volumes": [
+    {
+     "volume_id": "vol-fixture-working",
+     "label": "Working SSD",
+     "frames": 4000
+    },
+    {
+     "volume_id": "vol-fixture-archive",
+     "label": "Archive HDD",
+     "frames": 200
+    }
+   ]
   },
   {
    "proposal_id": "s:37c223666b3d",
@@ -769,7 +802,14 @@
     }
    ],
    "flags": [],
-   "locked": false
+   "locked": false,
+   "volumes": [
+    {
+     "volume_id": "vol-fixture-working",
+     "label": "Working SSD",
+     "frames": 260
+    }
+   ]
   },
   {
    "proposal_id": "s:8d6be35b569d",
@@ -898,7 +938,14 @@
    "flags": [
     "multi_place"
    ],
-   "locked": false
+   "locked": false,
+   "volumes": [
+    {
+     "volume_id": "vol-fixture-working",
+     "label": "Working SSD",
+     "frames": 70
+    }
+   ]
   }
  ]
 }

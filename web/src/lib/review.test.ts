@@ -4,6 +4,8 @@ import {
   describeAll,
   effectivePlan,
   matchesFilter,
+  connectedFrames,
+  reviewSections,
   tally,
   undoDecision,
   type Decision,
@@ -205,5 +207,45 @@ describe('undo and bookkeeping', () => {
     expect(p.shoots.filter((s) => matchesFilter(s, 'accepted')).map((s) => s.proposal_id)).toEqual(['s:a']);
     expect(p.shoots.filter((s) => matchesFilter(s, 'undecided'))).toHaveLength(2);
     expect(tally(p)).toMatchObject({ shoots: 3, trips: 2, accepted: 1, undecided: 2, flagged: 1 });
+  });
+});
+
+describe('review order (sh-3b)', () => {
+  const vol = (volume_id: string, frames: number) => ({ volume_id, label: volume_id, frames });
+  const p2: Plan = {
+    ...plan,
+    shoots: [
+      { ...plan.shoots[0]!, volumes: [vol('arch', 40)] },
+      { ...plan.shoots[1]!, volumes: [vol('arch', 50), vol('work', 10)] },
+      { ...plan.shoots[2]!, volumes: [vol('arch', 20)] },
+      shoot('s:d', null, [20, 21], { start_instant: '2026-03-06T10:00:00+00:00', volumes: [vol('arch', 20)] }),
+      shoot('s:e', null, [22, 23], { start_instant: '2026-03-07T10:00:00+00:00', volumes: [vol('work', 20)] }),
+    ],
+  };
+  const ids = (m: string[], on: boolean) => reviewSections(effectivePlan(p2, []), new Set(m), on).map((x) => [x.trip?.proposal_id ?? null, x.shoots.map((s) => s.proposal_id)]);
+
+  it('counts frames on connected drives', () => {
+    expect(connectedFrames(p2.shoots[1]!, new Set(['work']))).toBe(10);
+    expect(connectedFrames(plan.shoots[0]!, new Set(['work']))).toBe(0);
+  });
+
+  it('keeps time order when off or when nothing is connected', () => {
+    const plain = [['t:1', ['s:a', 's:b']], ['t:2', ['s:c']], [null, ['s:d', 's:e']]];
+    expect(ids(['work'], false)).toEqual(plain);
+    expect(ids([], true)).toEqual(plain);
+  });
+
+  it('puts trips and loose shoots on a connected drive first, shoots inside a trip in time order', () => {
+    expect(ids(['work'], true)).toEqual([['t:1', ['s:a', 's:b']], ['t:2', ['s:c']], [null, ['s:e', 's:d']]]);
+    // only trip 2 (and loose s:d) on the connected drive
+    const q: Plan = { ...p2, shoots: p2.shoots.map((s) => (s.proposal_id === 's:c' ? { ...s, volumes: [vol('work', 20)] } : { ...s, volumes: s.proposal_id === 's:d' ? [vol('work', 20)] : [vol('arch', 1)] })) };
+    expect(reviewSections(effectivePlan(q, []), new Set(['work']), true).map((x) => x.trip?.proposal_id ?? null)).toEqual(['t:2', 't:1', null]);
+  });
+
+  it('split keeps the drives and merge adds them up', () => {
+    const merged = effectivePlan(p2, run({ kind: 'merge', id: 's:a', with: 'next' })).shoots[0]!;
+    expect(merged.volumes).toEqual([vol('arch', 90), vol('work', 10)]);
+    const halves = effectivePlan(p2, run({ kind: 'split', id: 's:b', after_group_id: 6 })).shoots.filter((s) => s.proposal_id.startsWith('s:b/'));
+    expect(halves.map((h) => h.volumes)).toEqual([p2.shoots[1]!.volumes, p2.shoots[1]!.volumes]);
   });
 });
