@@ -171,8 +171,9 @@ export function ImportDialog({ card, minimized, onClose, onMinimize, onStatus }:
     });
     if (!ok) return;
     const id = await startTask('ingest', { ...importArgs(inputs), dry_run: false });
-    if (id) setPhase('applied'); // the dialog stays open so each target folder can be shown in Finder (im-7)
-    else onClose();
+    // The import runs in the background now: close the dialog (D-116). The trailing copy below is started by this
+    // promise, which keeps going after the dialog unmounts (it only uses the store and the API).
+    onClose();
     if (!id || !inputs.second || !card.volume_id) return;
     // The trailing copy follows the import job, whose id the import's plan reports first.
     for (let i = 0; i < 600; i++) {

@@ -8,7 +8,7 @@ import { Icon } from './bits';
 export function Toasts() {
   const { toasts, dismissToast } = useStore();
   return (
-    <div className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-[min(380px,calc(100vw-32px))] flex-col gap-2" aria-live="polite">
+    <div className="pointer-events-none fixed bottom-4 right-4 z-[310] flex w-[min(380px,calc(100vw-32px))] flex-col gap-2" aria-live="polite">
       <AnimatePresence initial={false}>
         {toasts.map((t) => (
           <motion.div
@@ -63,7 +63,7 @@ export function ConfirmDialog() {
     <AnimatePresence>
       {confirm && (
         <motion.div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-[300] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}

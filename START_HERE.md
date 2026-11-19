@@ -122,11 +122,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-116 (user+agent): a dialog's final button closes it once the work starts; confirm/toasts/popups sit above dialogs.
 - D-116 (user+agent): rv-33 a drive plugged in glows as New until opened, used or dismissed; sidebar Sort (recent, type, format, size, free) and Type/Format filter.
 - D-115 (user+agent): rv-32 Minimize for the Clear/Import/Make green dialogs (dock bottom right); popup + browser notification when a 20 s+ task ends; Settings switch.
 - D-114 (user+agent): cc-2 card clear re-reads every copy before deleting (default on, `--no-verify-all-copies` bypasses); baseline checks stay.
 - D-113 (agent): the UI polls `/api/generation` instead of holding `/api/events` open (six-connection limit froze loading).
-- D-112 (agent): rv-31 Tasks groups running work by run (card -> target once; follow copy nested), not by drive.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

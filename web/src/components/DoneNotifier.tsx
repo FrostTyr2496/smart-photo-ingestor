@@ -97,7 +97,7 @@ export function DoneNotifier() {
   }, [endedElsewhere, show]);
 
   return (
-    <div className="pointer-events-none fixed right-4 top-16 z-50 flex w-[min(380px,calc(100vw-32px))] flex-col gap-2" aria-live="polite">
+    <div className="pointer-events-none fixed right-4 top-16 z-[310] flex w-[min(380px,calc(100vw-32px))] flex-col gap-2" aria-live="polite">
       <AnimatePresence initial={false}>
         {popups.map((p) => (
           <motion.div
