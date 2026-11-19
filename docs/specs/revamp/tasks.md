@@ -184,3 +184,36 @@ Rules for every task:
     tab with `noopener noreferrer`. Only the coordinates are sent; nothing is fetched until the user clicks.
   - Verify: `cd web && npm test` (photos.test.ts `mapsUrl`).
   - Result (2026-11-18): `cd web && npm run typecheck && npm test` → clean, 48 passed; build committed.
+
+- [ ] 18. Copy the PhotoVault name, not only the camera's
+  - ID: rv-18 (user ask, 2026-11-18; amends rv-10)
+  - "Copy name" copies the D-005 name (`system-design.md` §6: `M{num}_{date}-{time}-{subsec}_{body}_{ident}` plus the
+    primary file's extension, with the shutter count as `ident`). It is the name the file has, or would get, on
+    WORKING. Compute it with the same code path that ing-12 uses for frames already seen on a legacy drive (no second
+    implementation). Expose it as `vault_name` on `GET /api/groups` rows, or on a per-group endpoint if computing it for
+    every row is too slow. A second action, "Copy camera name", copies the original filename (rv-10's behaviour).
+    If a field the name needs (for example subsec) is not in the catalog, use what ingest would use, and note it.
+  - Verify: `uv run pytest tests/test_web_api.py tests/test_naming.py -q`; `cd web && npm test`.
+
+- [ ] 19. "Show in All Photos" brings the selection back into view
+  - ID: rv-19 (user ask, 2026-11-18)
+  - The inspector header has "Show in All Photos". It clears the drive and "missing" filters to All photos (keeping
+    the selection), loads the selected photo's day, scrolls the grid until that tile is centred, and briefly flashes its
+    ring. With several photos selected, it uses the first in time order. It works when the photo's day is far
+    off-screen or not loaded yet.
+  - Verify: `cd web && npm run typecheck && npm test`; **[user]** check in the browser.
+
+- [ ] 20. Full-screen viewer (lightbox), modelled on the user's website
+  - ID: rv-20 (user ask, 2026-11-18). Reference: the user's `Lightbox.js` and `ZoomView.js` (a copy is given to the
+    agent; never commit them, and port the behaviour rather than the code).
+  - Open from a tile (double-click or Space), and from the inspector's preview (click). It shows the photo uncropped
+    (`object-contain`) on a black scrim, portalled to `document.body`, with a Framer Motion fade.
+  - Keys: ←/→ step through the current day's loaded photos in grid order, wrapping; Esc closes; `I` toggles an info
+    overlay (camera, time, location with the rv-17 Maps link, place, keywords); `F` uses the browser's
+    `requestFullscreen` (exit on Esc or `F`). Swipe steps on touch. Click zooms to 100% and drag pans (ZoomView);
+    click again fits.
+  - Focus returns to the tile on close. Stepping changes the selection, so the inspector follows.
+  - Image: `/api/groups/<id>/preview` returns the largest embedded JPEG (`JpgFromRaw` first, then `PreviewImage`),
+    cached under `<home>/previews/`. The thumbnail shows until it loads.
+  - Verify: `uv run pytest tests/test_web_api.py -q -k preview`; `cd web && npm run typecheck && npm test`; **[user]**
+    browser check.

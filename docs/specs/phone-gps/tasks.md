@@ -184,3 +184,26 @@ reference folder read into `geo_points`) and `geo.suggest` (time-matched suggest
   - Verify: `uv run pytest tests/test_clock.py -q` (synthetic camera frames 8 h off against a phone track; a no-signal
     case gives no suggestion).
   - Result (2026-11-18): `uv run pytest tests/test_clock.py tests/test_web_api.py -q` → 68 passed; web typecheck, 43 tests and build pass.
+
+- [ ] 8. **[stronger]** Suggestions that reach further: through the session, a farther tier, and last known place
+  - ID: sp-8 (user spot check, 2026-11-18, D-074). Before sp-6; sp-6 reuses its session helper.
+  - Found on the real catalog: only ±`match_window_s` (default 1800) is searched. That missed (a) a 22-min burst whose
+    nearest phone photo was 1 h 46 min away; (b) a day when the phone took no photos for about 23 h either side; and
+    (c) a night session 42 min from a phone photo, while the session just before it matched to the minute.
+  - `photovault/geo.py`:
+    - `session_of(conn, group_id, gap_s=900)` returns the photo's session: frames of any body, chained by corrected
+      UTC gaps of ≤ `gap_s`, the same rule as rv-16 without folder or shoot breaks. Cap it at ±12 h.
+    - `suggest(...)` keeps its current rows, then adds, in this order:
+      - **Via session:** for each phone point within the window of *any* frame in the session (not the photo itself),
+        the best one per distinct place. Source `session`; `delta_s` is measured to the photo; `via` names the nearest
+        frame's stem and its own delta. Confidence is that frame's delta tier.
+      - **Farther:** when no row is within the window, the nearest phone point before and the nearest after within
+        `reach_s` (default 6 h, new setting `match_reach_s`), with confidence `far`. When both exist, are less than 1 km
+        apart, and have the same place, add an `interpolated` row ("you were at Harbourton at both ends") with
+        confidence `far`.
+      - **Last / next known:** when nothing is within reach, the nearest point before and after within 48 h, with
+        confidence `hint`. The UI shows them as "Last known: Harbourton · 23 h earlier"; Use still works.
+  - UI (`PhotoInspector.tsx` Suggestions): labels for each confidence tier; a `via` row reads "via DSC_2301 · phone +3 min";
+    `far` and `hint` rows are visually quieter. Settings gets "Reach for farther suggestions" (`match_reach_s`).
+  - Verify: `uv run pytest tests/test_geo.py tests/test_web_api.py -q`; `cd web && npm test`; **[user]** recheck the
+    four photos from the spot check (`docs/private/` notes).
