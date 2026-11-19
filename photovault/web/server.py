@@ -29,8 +29,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from photovault import activity, cards, clock, preview, usage, volumes
+from photovault import activity, cards, clock, naming, preview, usage, volumes
 from photovault.catalog import db, repo
+from photovault.config import ConfigError, load_config
 from photovault.drives import DEFAULT_MAC_FOLDER, VOLUMES_ROOT, scan_mounts
 from photovault.geo import group_utc, offset_tz, places_near, suggest, utc_text
 from photovault.protocol import EXIT_PAUSED, human_bytes
@@ -569,14 +570,16 @@ def _is_same_volume(mount: Path, row) -> bool:
     return False
 
 
-def _thumb(app: WebApp, conn, group_id: int) -> Raw:
+def _thumb(app: WebApp, conn, group_id: int, *, large: bool = False) -> Raw:
+    """The embedded JPEG: the small thumbnail, or with ``large`` the biggest one for the viewer (rv-20)."""
     src = _thumb_source(conn, group_id)
     if src is None:
         raise NotFound("drive not mounted or no file for this group")
-    cache = app.home / "thumbs" / f"{group_id}.jpg"
+    cache = app.home / ("previews" if large else "thumbs") / f"{group_id}.jpg"
     if cache.is_file():
         return Raw(200, "image/jpeg", cache.read_bytes())
-    data = preview.extract_preview(src)
+    data = (preview.extract_preview(src, tags=preview.LARGE_PREVIEW_TAGS) if large
+            else preview.extract_preview(src))
     if data is None:
         raise NotFound("no embedded preview")
     try:
@@ -667,13 +670,13 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
         except ValueError as exc:
             raise NotFound(str(exc)) from exc
 
-    m = re.fullmatch(r"/api/groups/(\d+)/(suggestions|thumb)", path)
+    m = re.fullmatch(r"/api/groups/(\d+)/(suggestions|thumb|preview)", path)
     if m:
         if method != "GET":
             return 405, {"error": "method not allowed"}
         group_id = int(m.group(1))
-        if m.group(2) == "thumb":
-            return 200, _thumb(app, conn, group_id)
+        if m.group(2) in ("thumb", "preview"):
+            return 200, _thumb(app, conn, group_id, large=m.group(2) == "preview")
         try:
             window = int(repo.get_setting(conn, "match_window_s", SETTING_DEFAULTS["match_window_s"]))
             reach = int(repo.get_setting(conn, "match_reach_s", SETTING_DEFAULTS["match_reach_s"]))
@@ -1000,6 +1003,12 @@ def _groups(conn, query: dict) -> dict:
                 if volume_id is not None:
                     loc = next((f for f in found[g["group_id"]] if f["volume_id"] == volume_id), loc)
                 g["rel_path"], g["volume_id"] = loc["rel_path"], loc["volume_id"]
+    try:
+        cfg = load_config()
+    except ConfigError:
+        cfg = None
+    for g in groups:  # the D-005 name, from catalog fields only (rv-18)
+        g["vault_name"] = naming.vault_name(cfg, g) if cfg is not None else None
     return {"groups": groups, "missing_counts": counts}
 
 

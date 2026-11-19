@@ -897,6 +897,7 @@ def list_groups(
         f"""
         SELECT g.group_id, g.canonical_stem, g.capture_time, g.capture_offset, g.shoot_id,
                g.body_id AS body_id, g.sequence_id AS sequence_id,
+               g.shutter_count, g.original_stem, g.original_num,
                b.nickname AS body_nickname, s.name AS shoot_name, s.shoot_date AS shoot_date,
                {_GROUP_META_COLUMNS},
                loc.rel_path AS rel_path, loc.volume_id AS volume_id

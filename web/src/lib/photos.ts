@@ -25,6 +25,8 @@ export interface PhotoGroup {
   dirty: boolean | null;
   rel_path: string | null;
   volume_id: string | null;
+  /** The D-005 file name the photo has or would get on WORKING (rv-18); null without an indexed file. */
+  vault_name?: string | null;
   /** Corrected UTC (clock shift applied), ISO; null without a capture time (rv-16). */
   utc_time: string | null;
   body_id: number | null;
@@ -111,6 +113,11 @@ export function clockTime(iso: string | null): string {
 export function copyName(g: Pick<PhotoGroup, 'rel_path' | 'canonical_stem'>): string {
   if (g.rel_path) return g.rel_path.split('/').filter(Boolean).pop() ?? g.canonical_stem ?? '';
   return g.canonical_stem ?? '';
+}
+
+/** The PhotoVault name to copy (rv-18): `vault_name` from the API, else the camera's name as before. */
+export function vaultCopyName(g: Pick<PhotoGroup, 'rel_path' | 'canonical_stem' | 'vault_name'>): string {
+  return g.vault_name || copyName(g);
 }
 
 /** Copy text with the Clipboard API, falling back to a hidden textarea and execCommand. */

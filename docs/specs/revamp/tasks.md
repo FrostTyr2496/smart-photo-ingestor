@@ -185,7 +185,7 @@ Rules for every task:
   - Verify: `cd web && npm test` (photos.test.ts `mapsUrl`).
   - Result (2026-11-18): `cd web && npm run typecheck && npm test` → clean, 48 passed; build committed.
 
-- [ ] 18. Copy the PhotoVault name, not only the camera's
+- [x] 18. Copy the PhotoVault name, not only the camera's
   - ID: rv-18 (user ask, 2026-11-18; amends rv-10)
   - "Copy name" copies the D-005 name (`system-design.md` §6: `M{num}_{date}-{time}-{subsec}_{body}_{ident}` plus the
     primary file's extension, with the shutter count as `ident`). It is the name the file has, or would get, on
@@ -194,6 +194,7 @@ Rules for every task:
     every row is too slow. A second action, "Copy camera name", copies the original filename (rv-10's behaviour).
     If a field the name needs (for example subsec) is not in the catalog, use what ingest would use, and note it.
   - Verify: `uv run pytest tests/test_web_api.py tests/test_naming.py -q`; `cd web && npm test`.
+  - Result (2026-11-18): `naming.vault_name` (the stored stem once the group has a shoot, else `canonical_stem` + `member_filename`, the code ing-12 calls) feeds `vault_name` on `GET /api/groups` rows (catalog fields only, no file reads). The catalog has no sub-second, so it is `00` until import. Header: "Copy name" (vault) and a small "Camera name". web/api tests pass.
 
 - [ ] 19. "Show in All Photos" brings the selection back into view
   - ID: rv-19 (user ask, 2026-11-18)

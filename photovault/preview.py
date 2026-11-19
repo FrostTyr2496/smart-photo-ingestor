@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 THUMB_SIZE = 64  # longest side of the thumbnail the luminance is measured on
 PREVIEW_TAGS = ("PreviewImage", "JpgFromRaw")  # tried in this order
+LARGE_PREVIEW_TAGS = ("JpgFromRaw", "PreviewImage")  # the viewer wants the biggest embedded JPEG first (rv-20)
 EXIFTOOL_TIMEOUT_S = 30
 JPEG_MAGIC = b"\xff\xd8"
 
@@ -70,7 +71,7 @@ def is_flat(luma: float, stddev: float) -> bool:
     return luma > FLAT_LUMA_MIN and stddev < FLAT_STDDEV_MAX
 
 
-def extract_preview(path: Path) -> bytes | None:
+def extract_preview(path: Path, tags: tuple[str, ...] = PREVIEW_TAGS) -> bytes | None:
     """Return the embedded JPEG preview of `path`, or None when there is none.
 
     Runs `exiftool -b -PreviewImage`, then `-JpgFromRaw` if the first gave nothing usable. Read-only. A missing
@@ -81,7 +82,7 @@ def extract_preview(path: Path) -> bytes | None:
         logger.debug("exiftool not found; no preview for %s", path)
         return None
     target = str(Path(path).resolve())  # absolute, so a name can never be read as an option
-    for tag in PREVIEW_TAGS:
+    for tag in tags:
         try:
             proc = subprocess.run(
                 [executable, "-b", f"-{tag}", target],

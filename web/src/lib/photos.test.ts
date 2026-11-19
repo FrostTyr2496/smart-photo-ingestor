@@ -19,6 +19,7 @@ import {
   placeEdits,
   placeLabel,
   copyName,
+  vaultCopyName,
   hasEdits,
   keywordChips,
   monthRail,
@@ -354,5 +355,12 @@ describe('fmtApart / fmtGapShort (sp-8)', () => {
   it('shortens a signed gap', () => {
     expect(fmtGapShort(-67 * 60)).toBe('−1 h 07');
     expect(fmtGapShort(88 * 60)).toBe('+1 h 28');
+  });
+});
+
+describe('vaultCopyName (rv-18)', () => {
+  it('prefers the PhotoVault name, else the camera name', () => {
+    expect(vaultCopyName({ rel_path: 'a/DSC_1.NEF', canonical_stem: 'M1', vault_name: 'M0001_X.NEF' })).toBe('M0001_X.NEF');
+    expect(vaultCopyName({ rel_path: 'a/DSC_1.NEF', canonical_stem: 'M1', vault_name: null })).toBe('DSC_1.NEF');
   });
 });

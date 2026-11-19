@@ -968,3 +968,38 @@ def test_clock_suggestions_endpoint(srv: Client) -> None:
     assert srv.call("POST", "/api/groups/meta", {"group_ids": group["group_ids"],
                                                  "fields": {"time_shift_s": group["time_shift_s"]}})[0] == 200
     assert srv.call("GET", "/api/clock-suggestions") == (200, {"suggestions": []})
+
+
+# --------------------------------------------------------------------------- vault name and viewer preview (rv-18, rv-20)
+
+def test_groups_carry_the_vault_name(srv: Client) -> None:
+    rows = {g["group_id"]: g for g in srv.call("GET", "/api/groups")[1]["groups"]}
+    # not yet imported (no shoot): the D-005 name ingest would give; no sub-second in the catalog, so "00"
+    assert rows[srv.ids["a"]]["vault_name"] == "M0001_20261110-210000-00_UNKNOWN_0000001.JPG"
+    assert rows[srv.ids["b"]]["vault_name"] is None  # no file located
+
+
+def test_vault_name_uses_the_stored_stem_once_imported(srv: Client) -> None:
+    from photovault import naming
+    from photovault.config import load_config
+    row = {"rel_path": "Photos/DSC_0001.nef", "canonical_stem": "M0001_X", "shoot_id": 3}
+    assert naming.vault_name(load_config(), row) == "M0001_X.NEF"
+
+
+def test_preview_prefers_the_large_jpeg_and_caches(srv: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    photo = srv.root / "WORK" / "Photos" / "DSC_0001.JPG"
+    photo.parent.mkdir(parents=True)
+    photo.write_bytes(b"x")
+    seen = []
+
+    def fake_preview(path: Path, tags: tuple = ()) -> bytes:
+        seen.append(tags)
+        return b"\xff\xd8\xff\xd9big"
+
+    monkeypatch.setattr(preview, "extract_preview", fake_preview)
+    gid = srv.ids["a"]
+    assert srv.call("GET", f"/api/groups/{gid}/preview") == (200, b"\xff\xd8\xff\xd9big")
+    assert seen == [("JpgFromRaw", "PreviewImage")]
+    assert (srv.home / "previews" / f"{gid}.jpg").is_file()
+    assert srv.call("GET", f"/api/groups/{gid}/preview")[0] == 200 and len(seen) == 1
+    assert srv.call("GET", f"/api/groups/{srv.ids['c']}/preview")[0] == 404  # drive not mounted

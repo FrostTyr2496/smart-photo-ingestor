@@ -11,6 +11,7 @@ import {
   commonValue,
   copyName,
   copyText,
+  vaultCopyName,
   fmtCoord,
   mapsUrl,
   fmtDelta,
@@ -174,6 +175,11 @@ export function PhotoInspector({
     if (fly) setFocus((f) => f + 1);
   };
 
+  const copyOne = async (name: string) => {
+    if (await copyText(name)) toast(`Copied ${name}`);
+    else toast('Could not copy. Select the name by hand.', 'err');
+  };
+
   const save = async () => {
     if (!plan.length) return;
     setSaving(true);
@@ -205,19 +211,17 @@ export function PhotoInspector({
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          {n === 1 && first && copyName(first) && (
-            <button
-              type="button"
-              className="btn-ghost h-7 px-2 text-xs"
-              title={copyName(first)}
-              onClick={async () => {
-                const name = copyName(first);
-                if (await copyText(name)) toast(`Copied ${name}`);
-                else toast('Could not copy. Select the name by hand.', 'err');
-              }}
-            >
-              Copy filename
-            </button>
+          {n === 1 && first && vaultCopyName(first) && (
+            <>
+              <button type="button" className="btn-ghost h-7 px-2 text-xs" title={vaultCopyName(first)} onClick={() => void copyOne(vaultCopyName(first))}>
+                Copy name
+              </button>
+              {copyName(first) && copyName(first) !== vaultCopyName(first) && (
+                <button type="button" className="btn-ghost h-7 px-1.5 text-2xs text-muted" title={`Camera name: ${copyName(first)}`} onClick={() => void copyOne(copyName(first))}>
+                  Camera name
+                </button>
+              )}
+            </>
           )}
           <button type="button" className="btn-ghost h-7 px-2" onClick={onClear} aria-label="Clear selection">
             <Icon name="x" />
