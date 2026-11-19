@@ -12,7 +12,8 @@ export interface SeenState {
   mounts: string[];
   /** Drives plugged in since, not yet interacted with: key -> when it arrived (ms). */
   fresh: Record<string, number>;
-  /** Last interaction with each drive (opened, ran something on it, plugged in): key -> ms. */
+  /** Last device-level use of each drive: plugged in, or read or written by a task. Key -> ms. Viewing a drive in the
+   * UI (opening its page, clicking its row, dismissing "New") is not use (rv-41). */
   touched: Record<string, number>;
 }
 
@@ -55,13 +56,22 @@ export function driveHref(d: Drive): string {
   return d.volume_id ? hrefFor({ view: 'drive', id: d.volume_id }) : hrefFor({ view: 'setup', key: d.key });
 }
 
-/** The user interacted with a drive: it is no longer new, and it moves up in "Recently used". */
+/** A task read or wrote the drive: it is no longer new, and it moves up in "Recently used". */
 export function touchDrive(s: SeenState, key: string, now: number): SeenState {
   const { [key]: _gone, ...fresh } = s.fresh;
   return { ...s, fresh, touched: { ...s.touched, [key]: now } };
 }
 
-/** When a drive was last used: the latest of an interaction this browser saw and a step run on it (index, hash…). */
+/** The user saw the drive (opened its page, dismissed "New"): it is no longer new, but its place in "Recently used"
+ * does not change (rv-41). Returns `s` itself when it was not new, so nothing re-renders. */
+export function seeDrive(s: SeenState, key: string): SeenState {
+  if (s.fresh[key] === undefined) return s;
+  const { [key]: _gone, ...fresh } = s.fresh;
+  return { ...s, fresh };
+}
+
+/** When a drive was last used: the latest device-level use this browser saw (plug-in, a task on it) and a step run on it
+ * (index, hash…, from the catalog). */
 export function lastActivity(d: Drive, touched: Record<string, number>): number {
   let best = touched[d.key] ?? 0;
   for (const s of Object.values(d.steps || {})) {

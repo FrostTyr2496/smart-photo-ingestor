@@ -1,20 +1,21 @@
 // Tracks newly plugged-in drives and when each drive was last used (rv-33). Lives in the shell, not the sidebar, so
 // it keeps watching while the sidebar is hidden. Stored per browser (localStorage), like other conveniences.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { busyDriveKeys, driveForRoute, driveHref, touchDrive, trackArrivals, unplugged, type SeenState } from './driveList';
+import { busyDriveKeys, driveForRoute, driveHref, seeDrive, touchDrive, trackArrivals, unplugged, type SeenState } from './driveList';
 import { driveName } from './labels';
 import { readPref, writePref } from './prefs';
 import type { Route } from './route';
 import { useStore } from './store';
 
-const KEY = 'pv:driveSeen';
+// v2 (rv-41): v1 counted page opens as use, so its "touched" times are dropped rather than trusted.
+const KEY = 'pv:driveSeen2';
 /** A running task re-marks its drives as used at most this often, so a long run doesn't write every poll. */
 const BUSY_TOUCH_MS = 60_000;
 
 interface DriveActivity {
   fresh: Record<string, number>;
   touched: Record<string, number>;
-  /** Mark a drive as interacted with (clears its "New" highlight). */
+  /** Mark a drive as seen (clears its "New" highlight; does not reorder "Recently used"). */
   touch: (key: string) => void;
   /** Drives unplugged while this page was open: key -> when (ms). Cleared when a drive comes back (rv-38). */
   left: Record<string, number>;
@@ -68,15 +69,16 @@ export function DriveActivityProvider({ route, children }: { route: Route; child
     }
   }, [drives, loaded, toast]);
 
-  // Opening a drive's page (drive, card or setup) is an interaction; so is staying on it while it is plugged back in.
+  // Opening a drive's page (drive, card or setup), or staying on it while it is plugged back in, clears "New". It is
+  // not use: it does not move the drive in "Recently used" (rv-41).
   const routeDrive = driveForRoute(route, drives);
   const routeKey = routeDrive?.key;
   const routeFresh = routeKey !== undefined && seen?.fresh[routeKey] !== undefined;
   useEffect(() => {
-    if (routeKey !== undefined) update((s) => (s ? touchDrive(s, routeKey, Date.now()) : s));
+    if (routeKey !== undefined) update((s) => (s ? seeDrive(s, routeKey) : s));
   }, [routeKey, routeFresh, update]);
 
-  // Running something on a drive (import, backup, index, check, clear…) is an interaction.
+  // Running something on a drive (import, backup, index, check, clear…) is device-level use: it moves the drive up.
   const busy = busyDriveKeys(tasks, elsewhere, drives).join('\n');
   busyRef.current = busy ? busy.split('\n') : [];
   useEffect(() => {
@@ -92,7 +94,8 @@ export function DriveActivityProvider({ route, children }: { route: Route; child
     });
   }, [busy, update]);
 
-  const touch = useCallback((key: string) => update((s) => (s ? touchDrive(s, key, Date.now()) : s)), [update]);
+  // Dismissing "New" or opening the drive: seen, not used (rv-41).
+  const touch = useCallback((key: string) => update((s) => (s ? seeDrive(s, key) : s)), [update]);
   const value = useMemo(() => ({ fresh: seen?.fresh ?? {}, touched: seen?.touched ?? {}, touch, left }), [seen, touch, left]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

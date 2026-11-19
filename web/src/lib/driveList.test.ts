@@ -9,6 +9,7 @@ import {
   lastActivity,
   sortDrives,
   touchDrive,
+  seeDrive,
   trackArrivals,
   typeKey,
   type SeenState,
@@ -166,5 +167,25 @@ describe('unplugged (rv-38)', () => {
     expect(driveHref(card)).toBe('#/cards/v-card');
     expect(driveHref(work)).toBe('#/drive/v-work');
     expect(driveHref(drive({ volume_id: null, key: 'k-new' }))).toBe('#/setup/k-new');
+  });
+});
+
+describe('seeing is not using (rv-41)', () => {
+  it('clears New but keeps the drive\'s place in Recently used', () => {
+    const s: SeenState = { keys: ['a', 'b'], mounts: ['/a', '/b'], fresh: { a: 1 }, touched: { a: 1, b: 5 } };
+    const seen = seeDrive(s, 'a');
+    expect(seen.fresh).toEqual({});
+    expect(seen.touched).toEqual({ a: 1, b: 5 });
+    expect(seeDrive(seen, 'b')).toBe(seen); // not new: nothing changes
+  });
+  it('a plug-in and a task move it; opening it does not', () => {
+    const da = drive({ key: 'a', volume_id: 'a', mount: '/a' });
+    const db = drive({ key: 'b', volume_id: 'b', mount: '/b' });
+    const order = (t: Record<string, number>) => sortDrives([da, db], 'recent', { fresh: {}, touched: t }).map((d) => d.key);
+    let s: SeenState = { keys: ['a', 'b'], mounts: ['/a', '/b'], fresh: {}, touched: { a: 1, b: 5 } };
+    s = seeDrive(s, 'a');
+    expect(order(s.touched)).toEqual(['b', 'a']);
+    s = touchDrive(s, 'a', 9);
+    expect(order(s.touched)).toEqual(['a', 'b']);
   });
 });

@@ -539,3 +539,13 @@ Rules for every task:
     (`POST /api/volumes/<id>/label`, catalog nickname only; the volume on disk is not renamed).
   - Verify: `cd web && npm run typecheck && npm test && npm run build`.
   - Result (2026-11-19): typecheck clean; 232 web tests pass (2 new); build committed. Not seen in a browser.
+
+- [x] 41. "Recently used" counts device use only
+  - ID: rv-41 (user report, 2026-11-19; D-124, revises D-116)
+  - Opening a drive's page, clicking its row, renaming it or dismissing "New" used to count as use and jump the drive
+    to the top of "Recently used". Now those only mark it seen (`seeDrive`: clears "New", order unchanged). What
+    moves a drive: being plugged in, a task reading or writing it (`touchDrive`, at most once a minute per running
+    task), and a step run on it from the catalog (`steps.at`). The per-browser store moved to `pv:driveSeen2`, so
+    times recorded under the old rule are dropped.
+  - Verify: `cd web && npm run typecheck && npm test && npm run build`.
+  - Result (2026-11-19): typecheck clean; 234 web tests pass (2 new); build committed. Not seen in a browser.
