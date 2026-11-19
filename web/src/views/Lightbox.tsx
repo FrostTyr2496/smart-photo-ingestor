@@ -1,10 +1,21 @@
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { Icon } from '../components/bits';
-import { fmtCoord, fitBox, mapsUrl, placeLabel, wrapIndex, type PhotoGroup } from '../lib/photos';
+import { fmtCoord, fitBox, mapsUrl, needsParts, placeLabel, sizeBadge, suggestDrives, wrapIndex, type Need, type PhotoGroup } from '../lib/photos';
 import { ZoomView } from './ZoomView';
 
-const preview = (id: number): string => `/api/groups/${id}/preview`;
+const fullUrl = (id: number): string => `/api/groups/${id}/preview?full=1`;
+const headerNum = (v: string | null): number | null => (v && Number(v) > 0 ? Number(v) : null);
+
+/** How often the mounts are rechecked while the "plug in a drive" card is open (rv-23). */
+const RECHECK_MS = 5000;
+
+interface FullImage {
+  url: string;
+  w: number | null;
+  h: number | null;
+  full: boolean;
+}
 const iconBtn = 'flex h-10 w-10 items-center justify-center rounded-full text-white/80 transition-colors hover:bg-white/10 hover:text-white';
 const kbd = 'rounded border border-white/15 px-1 font-mono text-2xs text-white/60';
 
@@ -49,12 +60,60 @@ export function Lightbox({
   const [natural, setNatural] = useState(0);
   const [zoomAt, setZoomAt] = useState<{ x: number; y: number } | null>(null);
   const [info, setInfo] = useState(false);
+  const [img, setImg] = useState<FullImage | null>(null);
+  const [needs, setNeeds] = useState<Need[] | null>(null);
+  const [dismissed, setDismissed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const gid = g.group_id;
+  const cardOpen = needs !== null && !dismissed && img === null && !failed;
 
   useEffect(() => {
     setLoaded(false);
     setFailed(false);
     setZoomAt(null);
-  }, [g.group_id]);
+    setImg(null);
+    setNeeds(null);
+    setDismissed(false);
+    setAttempt(0);
+  }, [gid]);
+
+  // The full-size image, fetched so its size headers and a 409 (no drive connected) can be read (rv-23).
+  useEffect(() => {
+    const ctl = new AbortController();
+    fetch(fullUrl(gid), { signal: ctl.signal })
+      .then(async (res) => {
+        if (res.status === 409) {
+          const b = (await res.json()) as { needs?: Need[] };
+          setNeeds(b.needs ?? []);
+          return;
+        }
+        if (!res.ok) {
+          setFailed(true);
+          return;
+        }
+        const blob = await res.blob();
+        setNeeds(null);
+        setImg({ url: URL.createObjectURL(blob), w: headerNum(res.headers.get('X-Image-Width')), h: headerNum(res.headers.get('X-Image-Height')), full: res.headers.get('X-Image-Full') === '1' });
+      })
+      .catch((e: unknown) => {
+        if (!(e instanceof DOMException && e.name === 'AbortError')) setFailed(true);
+      });
+    return () => ctl.abort();
+  }, [gid, attempt]);
+
+  useEffect(() => {
+    const url = img?.url;
+    return () => {
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [img]);
+
+  // While the card is open, look again for a mounted drive; it stops when the card or the viewer closes.
+  useEffect(() => {
+    if (!cardOpen) return undefined;
+    const t = window.setInterval(() => setAttempt((a) => a + 1), RECHECK_MS);
+    return () => window.clearInterval(t);
+  }, [cardOpen]);
 
   const toggleFullscreen = () => {
     const el = dialog.current;
@@ -67,7 +126,8 @@ export function Lightbox({
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (e.key === 'Escape') {
-        if (zoomAt) setZoomAt(null);
+        if (cardOpen) setDismissed(true);
+        else if (zoomAt) setZoomAt(null);
         else onClose();
       } else if (e.key === 'ArrowRight') onStep(1);
       else if (e.key === 'ArrowLeft') onStep(-1);
@@ -87,7 +147,7 @@ export function Lightbox({
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [onClose, onStep, zoomAt]);
+  }, [onClose, onStep, zoomAt, cardOpen]);
 
   // Lock page scroll, move focus in, and leave full screen when the viewer goes.
   useEffect(() => {
@@ -105,7 +165,7 @@ export function Lightbox({
     if (!loaded && !failed) return;
     for (const d of [1, -1]) {
       const n = list[wrapIndex(index, d, list.length)];
-      if (n && n.group_id !== g.group_id && n.volume_id) new Image().src = preview(n.group_id);
+      if (n && n.group_id !== g.group_id && n.volume_id) new Image().src = `/api/groups/${n.group_id}/thumb`;
     }
   }, [loaded, failed, index, list, g.group_id]);
 
@@ -190,11 +250,11 @@ export function Lightbox({
             alt=""
             aria-hidden="true"
             draggable={false}
-            className={`pointer-events-none absolute inset-0 h-full w-full select-none object-contain ${loaded ? 'opacity-0' : failed ? 'opacity-100' : 'opacity-100 blur-sm'} transition-opacity duration-200`}
+            className={`pointer-events-none absolute inset-0 h-full w-full select-none object-contain ${loaded ? 'opacity-0' : failed || needs ? 'opacity-100' : 'opacity-100 blur-sm'} transition-opacity duration-200`}
           />
-          {!failed && (
+          {!failed && img && (
             <img
-              src={preview(g.group_id)}
+              src={img.url}
               alt={title}
               draggable={false}
               decoding="async"
@@ -202,7 +262,7 @@ export function Lightbox({
                 const im = e.currentTarget;
                 if (im.naturalWidth && im.naturalHeight) {
                   setRatio(im.naturalWidth / im.naturalHeight);
-                  setNatural(im.naturalWidth);
+                  setNatural(img.w ?? im.naturalWidth);
                 }
                 setLoaded(true);
               }}
@@ -211,6 +271,39 @@ export function Lightbox({
             />
           )}
         </motion.div>
+
+        {loaded && img && (
+          <p className="pointer-events-none absolute right-3 top-2 z-10 rounded-full bg-black/55 px-2.5 py-1 font-mono text-2xs text-white/80" aria-live="polite">
+            {sizeBadge(img.w, img.h, img.full)}
+          </p>
+        )}
+
+        {cardOpen && needs && (
+          <div role="status" className="absolute inset-x-3 bottom-4 z-10 mx-auto flex max-w-md items-start gap-3 rounded-2xl border border-white/10 bg-black/75 p-4 backdrop-blur-xl">
+            <div className="min-w-0 flex-1">
+              {needs.length ? (
+                <p className="text-sm">
+                  Full size is on <strong>{needsParts(needs).first}</strong>
+                  {needsParts(needs).rest}. Plug one in to see it.
+                </p>
+              ) : (
+                <p className="text-sm">Full size is not on any known drive.</p>
+              )}
+              <div className="mt-2 flex flex-wrap gap-1">
+                {suggestDrives(needs).map((n) => (
+                  <span key={n.volume_id} className="inline-flex max-w-full items-center gap-1 rounded-full border border-white/20 px-2 py-0.5 font-mono text-2xs text-white/80">
+                    <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full border border-white/50" />
+                    <span className="truncate">{n.label || n.role || 'Drive'}</span>
+                  </span>
+                ))}
+              </div>
+              <p className="mt-2 font-mono text-2xs text-white/50">Looking every few seconds. Showing the thumbnail meanwhile.</p>
+            </div>
+            <button type="button" onClick={() => setDismissed(true)} aria-label="Dismiss" title="Dismiss (Esc)" className={`${iconBtn} -mr-2 -mt-2 h-8 w-8`}>
+              <Icon name="x" size={14} />
+            </button>
+          </div>
+        )}
 
         {failed && (
           <p className="pointer-events-none absolute inset-x-0 bottom-3 text-center font-mono text-2xs text-white/60">
@@ -259,7 +352,7 @@ export function Lightbox({
       </div>
 
       <AnimatePresence>
-        {zoomAt && loaded && <ZoomView key="zoom" src={preview(g.group_id)} ratio={ratio} natural={natural || 2000} at={zoomAt} reduced={reduced} onClose={() => setZoomAt(null)} />}
+        {zoomAt && loaded && img && <ZoomView key="zoom" src={img.url} ratio={ratio} natural={natural || 2000} at={zoomAt} reduced={reduced} onClose={() => setZoomAt(null)} />}
       </AnimatePresence>
 
       <footer className="flex h-11 shrink-0 items-center justify-center gap-4 font-mono text-2xs text-white/40">

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  fullOffline,
+  needsParts,
+  offlineTitle,
+  sizeBadge,
+  suggestDrives,
   addKeywords,
   fmtApart,
   fmtGapShort,
@@ -440,5 +445,32 @@ describe('headers (rv-21)', () => {
     const sel = [at(1, '2023-09-10T21:18:00', { body_nickname: 'Z6', volume_id: 'a' }), at(2, '2023-09-10T23:40:00', { body_nickname: 'Z6II', volume_id: 'b' }), at(3, '2023-09-10T22:00:00', { volume_id: 'a' })];
     expect(selectionLine(sel)).toBe('Z6, Z6II · 21:18–23:40');
     expect(volumeCounts(sel)).toEqual([{ volume_id: 'a', count: 2 }, { volume_id: 'b', count: 1 }]);
+  });
+});
+
+describe('full size and which drive to plug in (rv-23)', () => {
+  const needs = [
+    { volume_id: 'a', label: 'Flats 1', role: 'LEGACY' },
+    { volume_id: 'b', label: 'PP 1', role: 'WORKING' },
+    { volume_id: 'a', label: 'Flats 1', role: 'LEGACY' },
+  ];
+  it('badge text', () => {
+    expect(sizeBadge(6048, 4024, true)).toBe('6048 × 4024 · full size');
+    expect(sizeBadge(1620, 1080, false)).toBe('1620 × 1080 · preview');
+    expect(sizeBadge(null, null, false)).toBe('preview');
+  });
+  it('suggests WORKING first, without repeats', () => {
+    expect(suggestDrives(needs).map((n) => n.volume_id)).toEqual(['b', 'a']);
+    expect(needsParts(needs)).toEqual({ first: 'PP 1', rest: ' (or Flats 1)' });
+    expect(needsParts([])).toEqual({ first: '', rest: '' });
+  });
+  it('tile icon: offline only when no holding drive is connected', () => {
+    const on = (id: string) => id === 'x';
+    expect(fullOffline({ held_volumes: ['x', 'y'] }, on)).toBe(false);
+    expect(fullOffline({ held_volumes: ['y'] }, on)).toBe(true);
+    expect(fullOffline({ held_volumes: [] }, on)).toBe(true);
+    expect(fullOffline({ full_available: true }, on)).toBe(false);
+    expect(offlineTitle(['PP 1'])).toBe('Full size on PP 1 — not connected');
+    expect(offlineTitle([])).toBe('Not on any known drive');
   });
 });

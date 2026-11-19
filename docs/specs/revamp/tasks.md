@@ -258,7 +258,7 @@ Rules for every task:
     handle, `shell.sidebarHidden` pref, spring width/opacity (instant under reduced motion). Sticky offsets are
     viewport-based, so Photos is unchanged. Browser check pending.
 
-- [ ] 23. Full-size photos when the drive is plugged in, and which drive to plug in otherwise
+- [x] 23. Full-size photos when the drive is plugged in, and which drive to plug in otherwise
   - ID: rv-23 (user ask, 2026-11-18, D-077). Builds on rv-20 (viewer) and rv-21 (`/api/groups/<id>/detail`).
   - `GET /api/groups/<id>/preview?full=1`, read-only, nothing ever written to the drive:
     - a JPEG or PNG primary is served as the file itself;
@@ -276,3 +276,11 @@ Rules for every task:
     when mounted.
   - Verify: `uv run pytest tests/test_web_api.py -q -k preview`; `cd web && npm run typecheck && npm test`;
     **[user]** browser check with one drive mounted and one not.
+  - Grid (user ask, same day): each `GET /api/groups` row gains `full_available` (a primary `indexed`/`verified`
+    instance sits on a drive mounted now), `held_on` (up to 3 drive labels) and `held_volumes` (ids, so the UI
+    recomputes from the drives store without refetching). One query for all rows. `Tile` shows a small drive-off
+    icon (bottom-left, dark backdrop) when unavailable; tooltip "Full size on PP 1 — not connected" or "Not on any
+    known drive".
+  - Result (2026-11-18): done. The viewer fetches `?full=1` (headers `X-Image-Width/Height/Full`; 409 body `needs`),
+    rechecks every 5 s while the card is open. Raw full images are cached in `<home>/previews/full/`; JPEG/PNG
+    are streamed from the drive each time (not cached). `uv run pytest -q`, `npm test` green.

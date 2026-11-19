@@ -218,6 +218,12 @@ const PATHS: Record<string, ReactNode> = {
   ),
   moon: <path d="M12.5 9.5A5 5 0 016.5 3.5a5 5 0 106 6z" />,
   folder: <path d="M2 4.5h4l1.5 1.5H14v6.5H2z" />,
+  driveOff: (
+    <>
+      <rect x="2" y="4" width="12" height="8" rx="2" />
+      <path d="M5 9.5h.01M8 9.5h3M2.5 2.5l11 11" />
+    </>
+  ),
   drive: (
     <>
       <rect x="2" y="4" width="12" height="8" rx="2" />

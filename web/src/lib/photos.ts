@@ -32,6 +32,10 @@ export interface PhotoGroup {
   utc_time: string | null;
   body_id: number | null;
   sequence_id: number | null;
+  /** A drive holding the photo is mounted now (rv-23); `held_volumes` lets the UI recompute when drives change. */
+  full_available?: boolean;
+  held_on?: string[];
+  held_volumes?: string[];
 }
 
 export interface PhotoDay {
@@ -709,4 +713,43 @@ export function volumeCounts(sel: Array<Pick<PhotoGroup, 'volume_id'>>): Array<{
   const m = new Map<string, number>();
   for (const g of sel) if (g.volume_id) m.set(g.volume_id, (m.get(g.volume_id) ?? 0) + 1);
   return [...m].map(([volume_id, count]) => ({ volume_id, count }));
+}
+
+/** A drive that holds a photo, as the preview 409 lists it (rv-23). */
+export interface Need {
+  volume_id: string;
+  label: string | null;
+  role: string | null;
+}
+
+/** The viewer's size badge (rv-23): "6048 × 4024 · full size" or "1620 × 1080 · preview". */
+export function sizeBadge(w: number | null, h: number | null, full: boolean): string {
+  const kind = full ? 'full size' : 'preview';
+  return w && h ? `${w} × ${h} · ${kind}` : kind;
+}
+
+/** Which drives to suggest plugging in: WORKING first, then the rest in the server's order (most recently seen), no repeats. */
+export function suggestDrives(needs: Need[]): Need[] {
+  const seen = new Set<string>();
+  const uniq = needs.filter((n) => !seen.has(n.volume_id) && seen.add(n.volume_id));
+  return [...uniq.filter((n) => n.role === 'WORKING'), ...uniq.filter((n) => n.role !== 'WORKING')];
+}
+
+const needName = (n: Need): string => n.label || n.role || 'a drive';
+
+/** "Full size is on PP 1 (or Flats 1). Plug one in to see it." as parts, so the first name can be bold. */
+export function needsParts(needs: Need[]): { first: string; rest: string } {
+  const [a, ...more] = suggestDrives(needs);
+  return { first: a ? needName(a) : '', rest: more.length ? ` (or ${more.map(needName).join(', ')})` : '' };
+}
+
+/** Is a photo's full-size file out of reach: no drive holding it is connected? (rv-23) */
+export function fullOffline(g: Pick<PhotoGroup, 'full_available' | 'held_volumes'>, connected: (volumeId: string) => boolean): boolean {
+  if (g.held_volumes) return !g.held_volumes.some(connected);
+  return g.full_available === false;
+}
+
+/** Tooltip of the tile's unplugged icon. */
+export function offlineTitle(heldOn: string[] | undefined): string {
+  return heldOn && heldOn.length ? `Full size on ${heldOn.join(', ')} — not connected` : 'Not on any known drive';
 }

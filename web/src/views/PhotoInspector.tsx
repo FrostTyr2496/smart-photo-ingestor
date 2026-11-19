@@ -15,6 +15,7 @@ import {
   vaultCopyName,
   fmtCoord,
   fmtExposure,
+  suggestDrives,
   selectionLine,
   volumeCounts,
   type GroupDetail,
@@ -253,7 +254,7 @@ export function PhotoInspector({
       </div>
 
       <div className="flex flex-col gap-5 overflow-y-auto px-4 pb-4 pt-3">
-        {n === 1 && first && <Preview group={first} onOpen={() => onOpenViewer(first)} />}
+        {n === 1 && first && <Preview group={first} plugIn={plugInHint(detail)} onOpen={() => onOpenViewer(first)} />}
 
         <Section title="Location">
           <p className="text-xs text-muted">
@@ -446,7 +447,13 @@ function useDetail(groupId: number | null): GroupDetail | null {
   return d;
 }
 
-function Preview({ group, onOpen }: { group: PhotoGroup; onOpen: () => void }) {
+/** The drive to plug in for full size, or null when one is connected or the photo has no drive (rv-23). */
+function plugInHint(d: GroupDetail | null): string | null {
+  if (!d || !d.instances.length || d.instances.some((i) => i.mounted)) return null;
+  return suggestDrives(d.instances)[0]?.label || null;
+}
+
+function Preview({ group, plugIn, onOpen }: { group: PhotoGroup; plugIn: string | null; onOpen: () => void }) {
   const [failed, setFailed] = useState(false);
   return (
     <div className="flex flex-col gap-1.5">
@@ -467,6 +474,7 @@ function Preview({ group, onOpen }: { group: PhotoGroup; onOpen: () => void }) {
           <img src={`/api/groups/${group.group_id}/thumb`} alt="" className="h-full w-full object-contain" onError={() => setFailed(true)} />
         )}
       </button>
+      {plugIn && <p className="text-2xs text-faint">Thumbnail · plug in {plugIn} for full size</p>}
       {group.rel_path && <p className="truncate font-mono text-2xs text-faint" title={group.rel_path}>{group.rel_path}</p>}
     </div>
   );

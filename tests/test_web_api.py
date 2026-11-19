@@ -1048,3 +1048,71 @@ def test_group_detail_without_a_mounted_drive(srv: Client, monkeypatch: pytest.M
     assert status == 200 and body["preview_from"] is None and body["exif"] is None
     assert [(i["volume_id"], i["mounted"]) for i in body["instances"]] == [("vol-leg", False)]
     assert srv.call("GET", "/api/groups/99999/detail")[0] == 404
+
+
+# --------------------------------------------------------------------------- full size and availability (rv-23)
+
+def _get_full(srv: Client, gid: int):
+    req = urllib.request.Request(f"http://127.0.0.1:{srv.port}/api/groups/{gid}/preview?full=1")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, r.read(), dict(r.headers)
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read()), dict(exc.headers)
+
+
+def _jpeg(w: int, h: int) -> bytes:
+    import io
+
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (w, h)).save(buf, "JPEG")
+    return buf.getvalue()
+
+
+def test_full_preview_serves_a_jpeg_primary_as_the_file(srv: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    photo = srv.root / "WORK" / "Photos" / "DSC_0001.JPG"
+    photo.parent.mkdir(parents=True)
+    photo.write_bytes(_jpeg(60, 40))
+    monkeypatch.setattr(preview, "extract_preview", lambda *a, **k: pytest.fail("must not run exiftool"))
+    status, body, h = _get_full(srv, srv.ids["a"])
+    assert status == 200 and body == photo.read_bytes()
+    assert (h["X-Image-Width"], h["X-Image-Height"], h["X-Image-Full"]) == ("60", "40", "1")
+
+
+def test_full_preview_of_a_raw_uses_jpgfromraw_and_caches(srv: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    photo = srv.root / "WORK" / "Photos" / "DSC_0001.NEF"
+    photo.parent.mkdir(parents=True)
+    photo.write_bytes(b"raw")
+    conn = db.connect(srv.app.catalog_path)
+    with repo.transaction(conn):
+        conn.execute("UPDATE instances SET rel_path = 'Photos/DSC_0001.NEF' WHERE rel_path = 'Photos/DSC_0001.JPG'")
+    conn.close()
+    seen = []
+
+    def fake(path: Path, tags: tuple = ()) -> bytes | None:
+        seen.append(tags)
+        return _jpeg(90, 60) if tags == ("JpgFromRaw",) else None
+
+    monkeypatch.setattr(preview, "extract_preview", fake)
+    status, body, h = _get_full(srv, srv.ids["a"])
+    assert status == 200 and (h["X-Image-Width"], h["X-Image-Full"]) == ("90", "1") and seen == [("JpgFromRaw",)]
+    # the file is no longer reachable: the cached full image still serves
+    photo.unlink()
+    assert _get_full(srv, srv.ids["a"])[0] == 200 and len(seen) == 1
+    # the default size is a separate cache
+    assert not (srv.home / "previews" / f"{srv.ids['a']}.jpg").exists()
+
+
+def test_full_preview_409_lists_the_drives_to_plug_in(srv: Client) -> None:
+    status, body, _ = _get_full(srv, srv.ids["c"])
+    assert status == 409 and [n["volume_id"] for n in body["needs"]] == ["vol-leg"]
+    assert set(body["needs"][0]) == {"volume_id", "label", "role"}
+    assert _get_full(srv, 99999)[0] == 404
+
+
+def test_groups_say_whether_full_size_is_available(srv: Client) -> None:
+    rows = {g["group_id"]: g for g in srv.call("GET", "/api/groups")[1]["groups"]}
+    assert rows[srv.ids["a"]]["full_available"] is True and rows[srv.ids["a"]]["held_on"] == ["WORK"]
+    assert rows[srv.ids["c"]]["full_available"] is False and len(rows[srv.ids["c"]]["held_on"]) == 1
+    assert rows[srv.ids["b"]]["full_available"] is False and rows[srv.ids["b"]]["held_on"] == []

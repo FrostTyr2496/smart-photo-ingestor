@@ -18,6 +18,8 @@ import {
   monthRail,
   MONTHS,
   rangeIds,
+  fullOffline,
+  offlineTitle,
   wrapIndex,
   UNDATED,
   type Missing,
@@ -509,7 +511,7 @@ function DaySection({
       {state && groups.length > 0 ? (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(112px,1fr))] gap-1.5 pb-3">
           {groups.map((g) => (
-            <Tile key={g.group_id} g={g} on={selected.has(g.group_id)} related={related.has(g.group_id)} flash={flash === g.group_id} connected={connected(g.volume_id)} onTile={onTile} onOpen={onOpen} />
+            <Tile key={g.group_id} g={g} on={selected.has(g.group_id)} related={related.has(g.group_id)} flash={flash === g.group_id} connected={connected(g.volume_id)} offline={fullOffline(g, connected)} onTile={onTile} onOpen={onOpen} />
           ))}
         </div>
       ) : (
@@ -540,7 +542,7 @@ function DaySection({
   );
 }
 
-const Tile = memo(function Tile({ g, on, related, flash, connected, onTile, onOpen }: { g: PhotoGroup; on: boolean; related: boolean; flash: boolean; connected: boolean; onTile: (g: PhotoGroup, e: MouseEvent) => void; onOpen: (g: PhotoGroup) => void }) {
+const Tile = memo(function Tile({ g, on, related, flash, connected, offline, onTile, onOpen }: { g: PhotoGroup; on: boolean; related: boolean; flash: boolean; connected: boolean; offline: boolean; onTile: (g: PhotoGroup, e: MouseEvent) => void; onOpen: (g: PhotoGroup) => void }) {
   const [failed, setFailed] = useState(false);
   const name = g.canonical_stem || `Photo ${g.group_id}`;
   return (
@@ -592,6 +594,11 @@ const Tile = memo(function Tile({ g, on, related, flash, connected, onTile, onOp
           </span>
         )}
       </span>
+      {offline && !on && (
+        <span className="pointer-events-none absolute bottom-1 left-1 rounded-full bg-black/55 p-0.5 text-white/90 group-hover:opacity-0" title={offlineTitle(g.held_on)}>
+          <Icon name="driveOff" size={11} />
+        </span>
+      )}
       {on && (
         <span className="absolute left-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-accent text-on-accent shadow">
           <Icon name="check" size={12} />

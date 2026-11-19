@@ -17,6 +17,7 @@ import os
 import re
 import select
 import shutil
+import io
 import signal
 import sqlite3
 import subprocess
@@ -28,6 +29,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
+
+from PIL import Image
 
 from photovault import activity, cards, clock, metadata, naming, preview, usage, volumes
 from photovault.catalog import db, repo
@@ -68,6 +71,7 @@ class Raw:
     status: int
     content_type: str
     body: bytes
+    headers: tuple[tuple[str, str], ...] = ()
 
 
 # --------------------------------------------------------------------------- tasks
@@ -648,6 +652,83 @@ def _thumb(app: WebApp, conn, group_id: int, *, large: bool = False) -> Raw:
     return Raw(200, "image/jpeg", data)
 
 
+PLAIN_IMAGE_EXTS = {".jpg", ".jpeg", ".png"}
+
+
+def _needs(conn, group_id: int) -> list[dict]:
+    """The drives holding the photo's primary file, WORKING first, then the most recently seen (rv-23)."""
+    rows = conn.execute(
+        """SELECT DISTINCT v.volume_id, v.label, v.role, v.last_seen_at FROM assets a
+           JOIN instances i ON i.asset_id = a.asset_id AND i.state IN ('indexed', 'verified')
+           JOIN volumes v ON v.volume_id = i.volume_id
+           WHERE a.group_id = ? AND a.group_role = 'primary'""", (group_id,)).fetchall()
+    found = {r["volume_id"]: dict(r) for r in rows}
+    if not found:
+        for f in repo.indexed_primary_files(conn, [group_id]).get(group_id, []):
+            vol = conn.execute("SELECT volume_id, label, role, last_seen_at FROM volumes WHERE volume_id = ?",
+                               (f["volume_id"],)).fetchone()
+            if vol is not None:
+                found[vol["volume_id"]] = dict(vol)
+    ordered = sorted(found.values(), key=lambda r: r["last_seen_at"] or "", reverse=True)
+    ordered.sort(key=lambda r: r["role"] != "WORKING")
+    return [{"volume_id": r["volume_id"], "label": r["label"], "role": r["role"]} for r in ordered]
+
+
+def _image_size(data: bytes | Path) -> tuple[int, int] | None:
+    try:
+        with Image.open(data if isinstance(data, Path) else io.BytesIO(data)) as im:  # header only
+            return im.size
+    except (OSError, ValueError, Image.DecompressionBombError):
+        return None
+
+
+def _full_reply(data: bytes, ctype: str, full: bool, size: tuple[int, int] | None) -> tuple[int, Raw]:
+    headers = [("X-Image-Full", "1" if full else "0"), ("Access-Control-Expose-Headers", "X-Image-Width, X-Image-Height, X-Image-Full")]
+    if size:
+        headers += [("X-Image-Width", str(size[0])), ("X-Image-Height", str(size[1]))]
+    return 200, Raw(200, ctype, data, tuple(headers))
+
+
+def _full_preview(app: WebApp, conn, group_id: int) -> tuple[int, Any]:
+    """``GET /api/groups/<id>/preview?full=1`` (rv-23, D-077): the biggest picture the file has. A JPEG/PNG primary is
+    the file itself (opened "rb"); a raw gives its ``JpgFromRaw`` (full resolution, ``X-Image-Full: 1``), else
+    ``PreviewImage`` (0); TIFF/PSD their embedded preview (0). Sizes go in ``X-Image-Width/Height``. Embedded JPEGs
+    are cached under ``<home>/previews/full/`` (a cached one serves with the drive away); no drive mounted and
+    nothing cached is a 409 listing the drives to plug in."""
+    if conn.execute("SELECT 1 FROM capture_groups WHERE group_id = ?", (group_id,)).fetchone() is None:
+        raise NotFound("unknown photo")
+    cdir = app.home / "previews" / "full"
+    for flag, name in ((True, f"{group_id}.full.jpg"), (False, f"{group_id}.part.jpg")):
+        cached = cdir / name
+        if cached.is_file():
+            data = cached.read_bytes()
+            return _full_reply(data, "image/jpeg", flag, _image_size(data))
+    src = _thumb_source(conn, group_id)
+    if src is None:
+        needs = _needs(conn, group_id)
+        if not needs:
+            raise NotFound("no file for this photo")
+        return 409, {"error": "no drive holding this photo is connected", "needs": needs}
+    ext = src.suffix.lower()
+    if ext in PLAIN_IMAGE_EXTS:
+        return _full_reply(src.read_bytes(), "image/png" if ext == ".png" else "image/jpeg", True, _image_size(src))
+    attempts = ([(("JpgFromRaw",), True), (("PreviewImage",), False)] if ext not in (".tif", ".tiff", ".psd", ".psb")
+                else [(("PreviewImage", "JpgFromRaw"), False)])
+    for tags, is_full in attempts:
+        data = preview.extract_preview(src, tags=tags)
+        if data is None:
+            continue
+        try:
+            cdir.mkdir(parents=True, exist_ok=True)
+            tmp = cdir / f"{group_id}.tmp"
+            tmp.write_bytes(data)
+            os.replace(tmp, cdir / (f"{group_id}.full.jpg" if is_full else f"{group_id}.part.jpg"))
+        except OSError as exc:
+            logger.warning("could not cache full preview for group %s: %s", group_id, exc)
+        return _full_reply(data, "image/jpeg", is_full, _image_size(data))
+    raise NotFound("no embedded preview")
+
+
 def _settings(conn) -> dict:
     out: dict[str, Any] = {}
     for key, default in SETTING_DEFAULTS.items():
@@ -737,6 +818,8 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
         if method != "GET":
             return 405, {"error": "method not allowed"}
         group_id = int(m.group(1))
+        if m.group(2) == "preview" and query.get("full", [""])[0] == "1":
+            return _full_preview(app, conn, group_id)
         if m.group(2) in ("thumb", "preview"):
             return 200, _thumb(app, conn, group_id, large=m.group(2) == "preview")
         try:
@@ -777,7 +860,7 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
         ("GET", "/api/tasks"): lambda: {"tasks": app.runner.summaries()},
         ("GET", "/api/activity"): lambda: activity.snapshot(conn, app.home, server_pid=os.getpid()),
         ("GET", "/api/shoots"): lambda: {"shoots": [dict(r) for r in repo.list_shoots(conn)]},
-        ("GET", "/api/groups"): lambda: _groups(conn, query),
+        ("GET", "/api/groups"): lambda: _groups(conn, query, app),
         ("GET", "/api/photo-days"): lambda: _photo_days(conn, query),
         ("POST", "/api/groups/meta"): lambda: _groups_meta(conn, body),
         ("GET", "/api/clock-suggestions"): lambda: {"suggestions": clock.suggest_offsets(conn)},
@@ -1028,7 +1111,7 @@ def _run(app: WebApp, body: Any) -> dict:
     return {"task_id": app.runner.start(build_argv(cmd, args))}
 
 
-def _groups(conn, query: dict) -> dict:
+def _groups(conn, query: dict, app: WebApp | None = None) -> dict:
     volume_id = _opt_param(query, "volume_id")
     shoot_raw = _opt_param(query, "shoot_id")
     try:
@@ -1071,7 +1154,40 @@ def _groups(conn, query: dict) -> dict:
         cfg = None
     for g in groups:  # the D-005 name, from catalog fields only (rv-18)
         g["vault_name"] = naming.vault_name(cfg, g) if cfg is not None else None
+    _mark_full_available(app, conn, groups)
     return {"groups": groups, "missing_counts": counts}
+
+
+def _mounted_volume_ids(app: WebApp | None, conn) -> set[str]:
+    if app is None:
+        return set()
+    try:
+        return {m["volume_id"] for m in scan_mounts(conn, app.volumes_root, _NullEmitter()) if m["volume_id"]}
+    except OSError:
+        return set()
+
+
+def _mark_full_available(app: WebApp | None, conn, groups: list[dict]) -> None:
+    """``full_available`` (a primary file sits on a drive mounted now) and ``held_on`` (up to 3 drive labels) on every
+    row, from one query for all rows plus one for files not hashed yet (rv-23)."""
+    ids = [g["group_id"] for g in groups]
+    held: dict[int, set[str]] = {i: set() for i in ids}
+    if ids:
+        marks = ",".join("?" * len(ids))
+        for r in conn.execute(
+            f"""SELECT a.group_id, i.volume_id FROM assets a
+                JOIN instances i ON i.asset_id = a.asset_id AND i.state IN ('indexed', 'verified')
+                WHERE a.group_role = 'primary' AND a.group_id IN ({marks})""", ids):
+            held[r["group_id"]].add(r["volume_id"])
+        for gid, files in repo.indexed_primary_files(conn, [i for i in ids if not held[i]]).items():
+            held[gid].update(f["volume_id"] for f in files)
+    labels = {v["volume_id"]: v["label"] for v in repo.list_volumes(conn)}
+    mounted = _mounted_volume_ids(app, conn)
+    for g in groups:
+        vols = held[g["group_id"]]
+        g["full_available"] = bool(vols & mounted)
+        g["held_on"] = sorted({labels.get(v) or "Drive" for v in vols})[:3]
+        g["held_volumes"] = sorted(vols)  # so the UI recomputes on a mount change without refetching
 
 
 def _photo_days(conn, query: dict) -> dict:
@@ -1192,7 +1308,7 @@ class _Handler(BaseHTTPRequestHandler):
                 query = parse_qs(url.query, keep_blank_values=True)
                 status, payload = route(self.server.app, method, path, query, body)
                 if isinstance(payload, Raw):
-                    return self._send(status, payload.body, payload.content_type)
+                    return self._send(status, payload.body, payload.content_type, payload.headers)
                 return self._send_json(status, payload)
             return self._send_json(404, {"error": "not found"})
         except BadRequest as exc:
@@ -1275,9 +1391,11 @@ class _Handler(BaseHTTPRequestHandler):
     def _send_json(self, status: int, payload: Any) -> None:
         self._send(status, json.dumps(payload, default=str).encode("utf-8"), "application/json")
 
-    def _send(self, status: int, body: bytes, content_type: str) -> None:
+    def _send(self, status: int, body: bytes, content_type: str, extra: tuple = ()) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
+        for k, v in extra:
+            self.send_header(k, v)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
