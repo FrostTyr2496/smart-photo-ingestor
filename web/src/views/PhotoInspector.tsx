@@ -182,6 +182,13 @@ export function PhotoInspector({
   const [focus, setFocus] = useState(0);
   const [big, setBig] = useState(false);
   useEffect(() => setFocus((f) => f + 1), [selKey]);
+  // The top suggestion for a photo with no location: shown faintly on the map, which centres on it.
+  const [hint, setHint] = useState<MapPoint | null>(null);
+  useEffect(() => setHint(null), [selKey]);
+  const onTop = (p: MapPoint | null) => {
+    setHint(p);
+    if (p) setFocus((f) => f + 1);
+  };
 
   const set = <K extends keyof Pending>(k: K, v: Pending[K]) => setPend((p) => ({ ...p, [k]: v }));
   const setLoc = (loc: PendingLoc, fly = false) => {
@@ -273,7 +280,7 @@ export function PhotoInspector({
                 : `${fmtInt(located.length)} of ${fmtInt(n)} have a location.`}
           </p>
           <div className="relative">
-            <MapPicker points={points} pin={pin} focus={focus} onPick={(p) => setLoc({ lat: p.lat, lon: p.lon, alt: null, source: 'map' })} />
+            <MapPicker points={points} pin={pin} hint={hint} focus={focus} onPick={(p) => setLoc({ lat: p.lat, lon: p.lon, alt: null, source: 'map' })} />
             <button type="button" className="btn absolute right-2 top-2 z-[500] h-7 px-2 text-xs" title="Expand map" aria-label="Expand map" onClick={() => setBig(true)}>
               Expand
             </button>
@@ -286,7 +293,7 @@ export function PhotoInspector({
           {big && (
             <MapWindow
               points={points}
-              start={pin}
+              start={pin ?? (points.length ? null : hint)}
               onCancel={() => setBig(false)}
               onDone={(p) => {
                 setLoc({ lat: p.lat, lon: p.lon, alt: null, source: 'map' }, true);
@@ -294,7 +301,7 @@ export function PhotoInspector({
               }}
             />
           )}
-          {first && <Suggestions key={first.group_id} first={first} pool={pool} selected={selected} windowS={windowS} onUse={(l, f) => { setLoc(l, true); if (f) setPend((p) => ({ ...p, ...placeEdits(f) })); }} />}
+          {first && <Suggestions key={first.group_id} first={first} pool={pool} selected={selected} windowS={windowS} onTop={onTop} onUse={(l, f) => { setLoc(l, true); if (f) setPend((p) => ({ ...p, ...placeEdits(f) })); }} />}
           <PlaceSearch
             groupId={first?.group_id ?? null}
             onPick={(loc, f) => {
@@ -544,7 +551,7 @@ function TextField({
   );
 }
 
-function Suggestions({ first, pool, selected, windowS, onUse }: { first: PhotoGroup; pool: PhotoGroup[]; selected: PhotoGroup[]; windowS: number; onUse: (l: PendingLoc, f?: PlaceFields) => void }) {
+function Suggestions({ first, pool, selected, windowS, onUse, onTop }: { first: PhotoGroup; pool: PhotoGroup[]; selected: PhotoGroup[]; windowS: number; onUse: (l: PendingLoc, f?: PlaceFields) => void; onTop?: (p: MapPoint | null) => void }) {
   const [list, setList] = useState<Suggestion[] | null>(null);
   const [err, setErr] = useState('');
   useEffect(() => {
@@ -595,6 +602,13 @@ function Suggestions({ first, pool, selected, windowS, onUse }: { first: PhotoGr
       loc: { lat: near.group.lat, lon: near.group.lon, alt: near.group.alt, source: 'neighbour' },
     });
   }
+  // Tell the map where the best suggestion is, so it can centre there before anything is used (a hint, not a pin).
+  const top = rows[0]?.loc;
+  const topKey = top && top.lat !== null && top.lon !== null ? `${top.lat},${top.lon}` : '';
+  useEffect(() => {
+    if (list === null && !near) return;
+    onTop?.(top && top.lat !== null && top.lon !== null ? { lat: top.lat, lon: top.lon } : null);
+  }, [topKey, list === null]); // eslint-disable-line react-hooks/exhaustive-deps
   if (list === null && !err) return <p className="text-xs text-faint">Looking for GPS matches…</p>;
   if (!rows.length) return <p className="text-xs text-faint">{err || 'No GPS points or located photos near this time. Add a GPS reference folder in Settings to match by time.'}</p>;
   return (

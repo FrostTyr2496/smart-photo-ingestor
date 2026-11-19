@@ -19,7 +19,7 @@ export interface MapPoint {
 }
 
 /** A dot for each existing location in the selection, a pin for the pending one; click or drag sets the pending one. */
-export function MapPicker({ points, pin, focus, onPick, big = false }: { points: MapPoint[]; pin: MapPoint | null; focus: number; onPick: (p: MapPoint) => void; big?: boolean }) {
+export function MapPicker({ points, pin, hint = null, focus, onPick, big = false }: { points: MapPoint[]; pin: MapPoint | null; hint?: MapPoint | null; focus: number; onPick: (p: MapPoint) => void; big?: boolean }) {
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
   const lib = useRef<Leaflet | null>(null);
@@ -71,6 +71,21 @@ export function MapPicker({ points, pin, focus, onPick, big = false }: { points:
     }
   }, [ready, points]);
 
+  // The top suggestion, as a faint dashed ring: a hint where to look, never saved until "Use" or a click.
+  const ghost = useRef<L.CircleMarker | null>(null);
+  useEffect(() => {
+    const Lf = lib.current;
+    const m = map.current;
+    if (!ready || !Lf || !m) return;
+    ghost.current?.remove();
+    ghost.current = null;
+    if (hint && !pin) {
+      ghost.current = Lf.circleMarker([hint.lat, hint.lon], {
+        radius: 9, weight: 2, dashArray: '3 3', color: 'rgb(var(--c-accent))', fillColor: 'rgb(var(--c-accent))', fillOpacity: 0.15, interactive: false,
+      }).addTo(m);
+    }
+  }, [ready, hint, pin]);
+
   // The pending location, as a draggable pin (a styled div, so no marker images are needed).
   useEffect(() => {
     const Lf = lib.current;
@@ -104,9 +119,12 @@ export function MapPicker({ points, pin, focus, onPick, big = false }: { points:
       else if (v.kind === 'fit') m.fitBounds(Lf.latLngBounds(v.points.map((p) => [p.lat, p.lon] as [number, number])), { padding: [24, 24], maxZoom: 14 });
       return;
     }
-    const all = pin ? [pin] : points;
+    // A pin wins, then the selection's own locations, then the top suggestion; with none, back to the world view
+    // rather than keeping the last photo's place.
+    const all = pin ? [pin] : points.length ? points : hint ? [hint] : [];
     if (all.length === 1) m.setView([all[0]!.lat, all[0]!.lon], Math.max(m.getZoom(), 12));
     else if (all.length > 1) m.fitBounds(Lf.latLngBounds(all.map((p) => [p.lat, p.lon] as [number, number])), { padding: [24, 24], maxZoom: 14 });
+    else m.setView([20, 0], 2);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, focus]);
 
