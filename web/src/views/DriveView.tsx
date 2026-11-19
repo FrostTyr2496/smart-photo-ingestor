@@ -24,6 +24,7 @@ import {
 } from '../lib/labels';
 import { rise, springs } from '../lib/motion';
 import { hrefFor } from '../lib/route';
+import { UnpluggedStrip, useUnpluggedEdge } from '../components/Unplugged';
 import { useStore } from '../lib/store';
 import type { Drive, DriveSummary, DriveUsage } from '../lib/types';
 
@@ -415,6 +416,7 @@ export function DriveView({ id }: { id: string }) {
   const filesRef = useRef<HTMLElement>(null);
   const drive = drives.find((x) => x.volume_id === id) ?? summary?.drive ?? null;
   const live = drive ? liveStep(drive, tasks, elsewhere) : null;
+  const edge = useUnpluggedEdge(drive);
 
   const load = useCallback(async () => {
     try {
@@ -569,7 +571,7 @@ export function DriveView({ id }: { id: string }) {
   return (
     <motion.div key={id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={springs.snappy} className="flex flex-col gap-5">
       {/* Head */}
-      <section className="card p-5">
+      <section className={`card p-5 ${edge}`}>
         <div className="flex flex-wrap items-start gap-3">
           <div className="min-w-0 flex-1">
             <DriveTitle drive={drive} />
@@ -614,6 +616,8 @@ export function DriveView({ id }: { id: string }) {
             </a>
           </div>
         </div>
+
+        <UnpluggedStrip d={drive} />
 
         {steps.length > 0 && (
           <div className="mt-6 border-t border-line pt-6">

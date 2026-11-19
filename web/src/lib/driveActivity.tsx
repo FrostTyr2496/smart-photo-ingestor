@@ -1,7 +1,8 @@
 // Tracks newly plugged-in drives and when each drive was last used (rv-33). Lives in the shell, not the sidebar, so
 // it keeps watching while the sidebar is hidden. Stored per browser (localStorage), like other conveniences.
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { busyDriveKeys, driveForRoute, touchDrive, trackArrivals, type SeenState } from './driveList';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { busyDriveKeys, driveForRoute, driveHref, touchDrive, trackArrivals, unplugged, type SeenState } from './driveList';
+import { driveName } from './labels';
 import { readPref, writePref } from './prefs';
 import type { Route } from './route';
 import { useStore } from './store';
@@ -15,13 +16,15 @@ interface DriveActivity {
   touched: Record<string, number>;
   /** Mark a drive as interacted with (clears its "New" highlight). */
   touch: (key: string) => void;
+  /** Drives unplugged while this page was open: key -> when (ms). Cleared when a drive comes back (rv-38). */
+  left: Record<string, number>;
 }
 
-const Ctx = createContext<DriveActivity>({ fresh: {}, touched: {}, touch: () => {} });
+const Ctx = createContext<DriveActivity>({ fresh: {}, touched: {}, touch: () => {}, left: {} });
 export const useDriveActivity = (): DriveActivity => useContext(Ctx);
 
 export function DriveActivityProvider({ route, children }: { route: Route; children: ReactNode }) {
-  const { drives, loaded, tasks, elsewhere } = useStore();
+  const { drives, loaded, tasks, elsewhere, toast } = useStore();
   const [seen, setSeen] = useState<SeenState | null>(() => readPref<SeenState | null>(KEY, null));
 
   const update = useCallback((f: (s: SeenState | null) => SeenState | null) => {
@@ -37,6 +40,34 @@ export function DriveActivityProvider({ route, children }: { route: Route; child
     if (loaded) update((prev) => trackArrivals(prev, drives, Date.now()));
   }, [drives, loaded, update]);
 
+  // Each poll: who was unplugged since the last one (rv-38). A popup names it (a warning when a task was using it),
+  // with an Open link to its page; the sidebar and the drive's page show it as just pulled.
+  const mountedRef = useRef<string[] | null>(null);
+  const [left, setLeft] = useState<Record<string, number>>({});
+  const busyRef = useRef<string[]>([]);
+  useEffect(() => {
+    if (!loaded) return;
+    const gone = unplugged(mountedRef.current, drives);
+    const on = drives.filter((d) => d.mounted).map((d) => d.key);
+    mountedRef.current = on;
+    setLeft((l) => {
+      const back = Object.keys(l).filter((k) => on.includes(k));
+      if (!gone.length && !back.length) return l;
+      const next = { ...l };
+      for (const k of back) delete next[k];
+      for (const d of gone) next[d.key] = Date.now();
+      return next;
+    });
+    for (const d of gone) {
+      const wasBusy = busyRef.current.includes(d.key);
+      toast(
+        wasBusy ? `${driveName(d)} was unplugged while a task was using it. Check Tasks to see whether it paused.` : `${driveName(d)} was unplugged.`,
+        wasBusy ? 'err' : 'ok',
+        { label: 'Open', run: () => (window.location.hash = driveHref(d)) },
+      );
+    }
+  }, [drives, loaded, toast]);
+
   // Opening a drive's page (drive, card or setup) is an interaction; so is staying on it while it is plugged back in.
   const routeDrive = driveForRoute(route, drives);
   const routeKey = routeDrive?.key;
@@ -47,6 +78,7 @@ export function DriveActivityProvider({ route, children }: { route: Route; child
 
   // Running something on a drive (import, backup, index, check, clear…) is an interaction.
   const busy = busyDriveKeys(tasks, elsewhere, drives).join('\n');
+  busyRef.current = busy ? busy.split('\n') : [];
   useEffect(() => {
     if (!busy) return;
     const now = Date.now();
@@ -61,6 +93,6 @@ export function DriveActivityProvider({ route, children }: { route: Route; child
   }, [busy, update]);
 
   const touch = useCallback((key: string) => update((s) => (s ? touchDrive(s, key, Date.now()) : s)), [update]);
-  const value = useMemo(() => ({ fresh: seen?.fresh ?? {}, touched: seen?.touched ?? {}, touch }), [seen, touch]);
+  const value = useMemo(() => ({ fresh: seen?.fresh ?? {}, touched: seen?.touched ?? {}, touch, left }), [seen, touch, left]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

@@ -32,8 +32,11 @@ export const PRESETS: Preset[] = [
 
 export const DEFAULT_PRESET = 'argus';
 
-/** Status colours stay fixed per scheme whatever the palette, so "done" and "failed" always read the same. */
+/**
+ * Status colours stay fixed per scheme whatever the palette, so "done" and "failed" always read the same. `select`
+ * marks the page you are on in lists (rv-38): a fixed blue, so a warm theme accent never reads as a warning.
+ */
 export const SCHEME_TOKENS: Record<'dark' | 'light', Tokens> = {
-  dark: { go: '#4ade80', maybe: '#facc15', err: '#f87171', skip: '#94a3b8', card: '#a78bfa', master: '#60a5fa' },
-  light: { go: '#16803d', maybe: '#a16207', err: '#b91c1c', skip: '#475569', card: '#6d28d9', master: '#1d4ed8' },
+  dark: { go: '#4ade80', maybe: '#facc15', err: '#f87171', skip: '#94a3b8', card: '#a78bfa', master: '#60a5fa', select: '#38bdf8' },
+  light: { go: '#16803d', maybe: '#a16207', err: '#b91c1c', skip: '#475569', card: '#6d28d9', master: '#1d4ed8', select: '#0369a1' },
 };

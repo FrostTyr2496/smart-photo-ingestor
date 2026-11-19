@@ -500,3 +500,30 @@ Rules for every task:
     the drive, `liveTaskKey`; between workflow steps it opens Tasks).
   - Verify: `cd web && npm run typecheck && npm test && npm run build`.
   - Result (2026-11-19): typecheck clean; 227 web tests pass (2 new); build committed. Not seen in a browser.
+
+- [x] 38. Unplugged drives: notice, sidebar, page edge and "last seen"
+  - ID: rv-38 (user ask, 2026-11-19; D-121)
+  - When a connected drive turns up not connected at the next poll (ignored drives excepted; first load reports
+    nothing), a popup says "<name> was unplugged." with Open (a warning, "while a task was using it", if a live task
+    named it). The sidebar opens its Not connected group, and the row shows amber dashes, pulses for 8 s and reads
+    "Unplugged just now". The page stays where it is. A drive or card page whose device is not connected gets a
+    dashed amber edge (pulsing for 8 s after the unplug) and a strip: Last seen (the unplug time when seen here, else
+    `last_seen_at`), Last mounted at, Free when last seen, and on a card, Last checked. The card page now takes
+    "connected" from the live drive list (its card data was as of the last load, so it still said connected).
+  - Pure rules `unplugged`, `driveHref` in `web/src/lib/driveList.ts`; detection in `DriveActivityProvider`; the strip
+    and edge in `web/src/components/Unplugged.tsx`.
+  - Verify: `cd web && npm run typecheck && npm test && npm run build`.
+  - Result (2026-11-19): typecheck clean; 230 web tests pass (3 new); build committed. Not seen in a browser.
+    Committed with rv-39 (same sidebar and CSS lines).
+
+- [x] 39. Sidebar colours: one meaning per channel, with a Key
+  - ID: rv-39 (user ask, 2026-11-19; D-122)
+  - The selected row, the "New" glow and busy rows all used the theme accent, so a warm palette (Forest · Ember) made
+    them read as warnings. Now: role = dot + pill (unchanged); the page you are on = a fixed blue (`select`, a new
+    scheme token beside the status colours, same in every palette); just plugged in = green ring, "New" chip and
+    banner, and the row lands on the list (drops in with a lifted shadow that settles, if plugged in under 10 s
+    ago); read or written by a task = a neutral shimmer, with ↑ / ↓ / ↓↑ before the status line (replaces rv-35's
+    accent/green tints); unplugged = amber dashes; not connected = dimmed. Filter chips use `select` too. A "Key"
+    chip opens a legend drawn with the real styles. Reduced motion stops the shimmer, landing and pulses.
+  - Verify: `cd web && npm run typecheck && npm test && npm run build`.
+  - Result (2026-11-19): as rv-38. Not seen in a browser.

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   busyDriveKeys,
+  driveHref,
+  unplugged,
   driveForRoute,
   facetOptions,
   filterDrives,
@@ -146,5 +148,23 @@ describe('interactions', () => {
     expect(busyDriveKeys([t], [], [card, work, legacy])).toEqual(['v-card', 'v-work']);
     expect(busyDriveKeys([{ ...t, final: true }], [], [card, work])).toEqual([]);
     expect(busyDriveKeys([], [{ pid: 1, words: ['index', '/mnt/OLD'], started_at: '' }], [legacy])).toEqual(['v-old']);
+  });
+});
+
+describe('unplugged (rv-38)', () => {
+  it('reports drives connected last poll and listed as not connected now', () => {
+    const out = { ...card, mounted: false };
+    expect(unplugged(['v-card', 'v-work'], [out, work]).map((d) => d.key)).toEqual(['v-card']);
+  });
+  it('reports nothing on the first poll, for ignored drives, or for drives that were already out', () => {
+    const out = { ...card, mounted: false };
+    expect(unplugged(null, [out])).toEqual([]);
+    expect(unplugged(['v-card'], [{ ...out, ignored: true }])).toEqual([]);
+    expect(unplugged(['v-work'], [out, work])).toEqual([]);
+  });
+  it('links a card to Cards, a set-up drive to its page, a new one to setup', () => {
+    expect(driveHref(card)).toBe('#/cards/v-card');
+    expect(driveHref(work)).toBe('#/drive/v-work');
+    expect(driveHref(drive({ volume_id: null, key: 'k-new' }))).toBe('#/setup/k-new');
   });
 });

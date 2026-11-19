@@ -1,11 +1,13 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { useMemo, useState, type MouseEvent } from 'react';
+import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { Disclosure, FsPill, Icon, RolePill, ROLE_DOT } from '../components/bits';
 import { RefsDialog } from './RefsDialog';
+import { PULLED_MS } from '../components/Unplugged';
 import { ProgressBar } from '../components/ProgressBar';
 import { extVM, FinishedRow, RunningCard, taskVM } from '../components/TaskCard';
 import { useDriveActivity } from '../lib/driveActivity';
 import {
+  driveHref,
   facetOptions,
   filterCount,
   filterDrives,
@@ -27,6 +29,8 @@ import { useStore } from '../lib/store';
 import type { Drive } from '../lib/types';
 
 const RECENT_FINISHED = 3;
+/** A drive plugged in this recently plays its landing animation when its row appears (rv-38). */
+const LANDED_MS = 10_000;
 
 const GROUPS = [
   { key: 'mounted', label: 'Mounted', test: (d: Drive) => !d.ignored && d.mounted },
@@ -34,17 +38,30 @@ const GROUPS = [
   { key: 'ignored', label: 'Ignored', test: (d: Drive) => d.ignored },
 ] as const;
 
-/** A card opens in Cards; a new drive opens its setup page. */
-const driveHref = (d: Drive): string =>
-  isCardDrive(d) ? hrefFor({ view: 'cards', id: d.volume_id }) : d.volume_id ? hrefFor({ view: 'drive', id: d.volume_id }) : hrefFor({ view: 'setup', key: d.key });
 
-function DriveRow({ d, active, fresh, onSeen }: { d: Drive; active: boolean; fresh: boolean; onSeen: () => void }) {
+function DriveRow({
+  d,
+  active,
+  fresh,
+  landed = false,
+  pulled = false,
+  onSeen,
+}: {
+  d: Drive;
+  active: boolean;
+  fresh: boolean;
+  /** Plugged in seconds ago: play the landing animation. */
+  landed?: boolean;
+  pulled?: boolean;
+  onSeen: () => void;
+}) {
   const { tasks, elsewhere, setIgnored, drives } = useStore();
   const isNew = !d.volume_id && !isCardDrive(d);
   const live = d.mounted ? liveStep(d, tasks, elsewhere) : null;
   // Being read or written right now (rv-35): the row is shaded with a moving sheen, and says what is happening.
   const io = driveIO(d, tasks, elsewhere, drives);
   const writing = io.some((x) => x.mode === 'write');
+  const reading = io.some((x) => x.mode === 'read');
   const assign = isNew ? newestAssignTask(tasks, d.mount) : null;
   const assignRole = assign ? ROLE_WORD[flagValue(argvWords(assign.argv), '--role') ?? ''] || 'a drive' : '';
   const status = isNew
@@ -70,18 +87,17 @@ function DriveRow({ d, active, fresh, onSeen }: { d: Drive; active: boolean; fre
       href={href}
       aria-current={active ? 'page' : undefined}
       onClick={fresh ? onSeen : undefined}
-      // A just-plugged-in drive glows until it is opened or used; the glow then fades out (rv-33).
+      // States (rv-38, see the Key): role = dot + pill; on this page = blue bar + tint; just plugged in = green ring
+      // (and it lands on the list with a lifted shadow); read or written now = neutral shimmer; unplugged = amber dashes.
       className={`group relative block rounded-xl border px-3 py-2.5 transition-[border-color,background-color,box-shadow] duration-700 ${
         fresh
-          ? 'border-accent/60 bg-accent/[0.09] shadow-[0_0_0_3px_rgb(var(--c-accent)/0.14)]'
-          : io.length
-            ? `drive-busy ${writing ? 'drive-busy-write border-go/45' : 'border-accent/45'}`
-            : active
-            ? 'border-accent/40 bg-accent/[0.07]'
+          ? `border-go/55 bg-go/[0.05] shadow-[0_0_0_3px_rgb(var(--c-go)/0.12)] ${landed ? 'drive-landed' : ''}`
+          : active
+            ? 'border-select/45 bg-select/[0.07]'
             : 'border-line bg-raised/30 hover:border-line-strong hover:bg-raised/60'
-      } ${d.mounted ? '' : 'opacity-60 hover:opacity-90'} ${isNew && !fresh ? 'border-dashed' : ''}`}
+      } ${io.length ? 'drive-busy' : ''} ${d.mounted ? '' : pulled || active ? 'border-dashed' : 'opacity-60 hover:opacity-90'} ${pulled ? 'drive-pulled' : ''} ${isNew && !fresh ? 'border-dashed' : ''}`}
     >
-      {active && <motion.span layoutId="drive-active" transition={springs.snappy} className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-accent" />}
+      {active && <motion.span layoutId="drive-active" transition={springs.snappy} className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-select" />}
       <div className="flex items-center gap-2">
         <span className={`h-2 w-2 shrink-0 rounded-full ${ROLE_DOT[key]} ${live || io.length ? 'live-dot' : ''}`} aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate text-sm font-medium" title={d.mount}>
@@ -96,14 +112,14 @@ function DriveRow({ d, active, fresh, onSeen }: { d: Drive; active: boolean; fre
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.6 } }}
               title="Just plugged in. Open or use it, or click here, to clear this."
-              className="chip shrink-0 border-accent/40 bg-accent/15 text-accent hover:bg-accent/25"
+              className="chip shrink-0 border-go/40 bg-go/15 text-go hover:bg-go/25"
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 onSeen();
               }}
             >
-              <span className="live-dot h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true" />
+              <span className="live-dot h-1.5 w-1.5 rounded-full bg-go" aria-hidden="true" />
               New
             </motion.button>
           )}
@@ -125,8 +141,13 @@ function DriveRow({ d, active, fresh, onSeen }: { d: Drive; active: boolean; fre
       </div>
       <p
         title={io.length ? status.text : undefined}
-        className={`mt-1 truncate pl-4 text-xs ${io.length && writing ? 'text-go' : status.tone === 'running' ? 'text-accent' : status.tone === 'warn' ? 'text-maybe' : 'text-muted'}`}>
-        {d.mounted ? status.text : `Not connected${d.last_seen_at ? ` · last seen ${relTime(d.last_seen_at)}` : ''}`}
+        className={`mt-1 truncate pl-4 text-xs ${status.tone === 'running' ? 'text-ink/85' : status.tone === 'warn' ? 'text-maybe' : 'text-muted'}`}>
+        {io.length > 0 && (
+          <span className="mr-1 font-mono text-faint" aria-label={writing && reading ? 'Reading and writing' : writing ? 'Writing' : 'Reading'}>
+            {writing && reading ? '↓↑' : writing ? '↓' : '↑'}
+          </span>
+        )}
+        {d.mounted ? status.text : pulled ? 'Unplugged just now' : `Not connected${d.last_seen_at ? ` · last seen ${relTime(d.last_seen_at)}` : ''}`}
       </p>
       {d.mounted && used !== null && (
         <div className="mt-2 flex items-center gap-2 pl-4">
@@ -157,7 +178,7 @@ function Facet<T extends string>({ label, values, chosen, text, onToggle }: { la
             type="button"
             aria-pressed={on}
             onClick={() => onToggle(v)}
-            className={`chip ${on ? 'border-accent/50 bg-accent/15 text-accent' : 'border-line text-muted hover:border-line-strong hover:text-ink'}`}
+            className={`chip ${on ? 'border-select/50 bg-select/15 text-select' : 'border-line text-muted hover:border-line-strong hover:text-ink'}`}
           >
             {text(v)}
           </button>
@@ -168,6 +189,38 @@ function Facet<T extends string>({ label, values, chosen, text, onToggle }: { la
 }
 
 /** Sort and filter controls for the drive list (rv-33). Each group (Mounted, Not connected, Ignored) sorts on its own. */
+/** What a drive row's colours and shading mean (rv-38): one channel per meaning, drawn with the real styles. */
+function DriveKey() {
+  const swatch = 'h-4 w-7 shrink-0 rounded-md border';
+  const rows: [JSX.Element, string, string][] = [
+    [
+      <span className="flex w-7 shrink-0 items-center gap-1">
+        <span className={`h-2 w-2 rounded-full ${ROLE_DOT.card}`} />
+        <span className={`h-2 w-2 rounded-full ${ROLE_DOT.working}`} />
+        <span className={`h-2 w-2 rounded-full ${ROLE_DOT.legacy}`} />
+      </span>,
+      'Dot and pill',
+      'What the drive is: card, working, legacy or master.',
+    ],
+    [<span className={`${swatch} relative border-select/45 bg-select/[0.07]`}><span className="absolute inset-y-0.5 left-0 w-[2px] rounded-full bg-select" /></span>, 'Blue bar', 'The page you are on.'],
+    [<span className={`${swatch} border-go/55 bg-go/[0.05] shadow-[0_0_0_2px_rgb(var(--c-go)/0.15)]`} />, 'Green ring', 'Just plugged in. Clears when you open or use it.'],
+    [<span className={`${swatch} drive-busy border-line bg-raised/30`} />, 'Shimmer', 'Being read (↑) or written (↓) by a task right now.'],
+    [<span className={`${swatch} border-dashed border-maybe/55`} />, 'Amber dashes', 'Just unplugged, or the page you are on is not connected.'],
+    [<span className={`${swatch} border-line bg-raised/30 opacity-50`} />, 'Dimmed', 'Not connected.'],
+  ];
+  return (
+    <ul className="mt-1 flex flex-col gap-1.5 rounded-lg border border-line bg-bg/40 p-2.5">
+      {rows.map(([icon, name, text]) => (
+        <li key={name} className="flex items-center gap-2.5 text-2xs">
+          {icon}
+          <span className="w-20 shrink-0 font-medium text-ink/85">{name}</span>
+          <span className="text-muted">{text}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function DriveTools({
   sort,
   setSort,
@@ -184,6 +237,7 @@ function DriveTools({
   hidden: number;
 }) {
   const [open, setOpen] = usePref('pv:driveFilterOpen', false);
+  const [keyOpen, setKeyOpen] = usePref('pv:driveKeyOpen', false);
   const n = filterCount(filter);
   const toggle = <K extends keyof DriveFilter>(k: K, v: DriveFilter[K][number]) => {
     const list = filter[k] as string[];
@@ -206,7 +260,7 @@ function DriveTools({
           type="button"
           aria-expanded={open}
           onClick={() => setOpen((o) => !o)}
-          className={`chip ${n ? 'border-accent/50 bg-accent/10 text-accent' : 'border-line text-muted hover:text-ink'}`}
+          className={`chip ${n ? 'border-select/50 bg-select/10 text-select' : 'border-line text-muted hover:text-ink'}`}
         >
           Filter{n ? ` · ${n}` : ''}
         </button>
@@ -215,8 +269,30 @@ function DriveTools({
             Clear
           </button>
         )}
-        {hidden > 0 && <span className="ml-auto shrink-0 font-mono text-2xs text-faint">{hidden} hidden</span>}
+        <button
+          type="button"
+          aria-expanded={keyOpen}
+          onClick={() => setKeyOpen((o) => !o)}
+          title="What the colours and shading mean"
+          className={`chip ml-auto ${keyOpen ? 'border-line-strong text-ink' : 'border-line text-muted hover:text-ink'}`}
+        >
+          Key
+        </button>
+        {hidden > 0 && <span className="shrink-0 font-mono text-2xs text-faint">{hidden} hidden</span>}
       </div>
+      <AnimatePresence initial={false}>
+        {keyOpen && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ ...springs.snappy, opacity: { duration: 0.2 } }}
+            className="overflow-hidden"
+          >
+            <DriveKey />
+          </motion.div>
+        )}
+      </AnimatePresence>
       <AnimatePresence initial={false}>
         {open && (
           <motion.div
@@ -247,10 +323,10 @@ function FreshBanner({ list, onSeen }: { list: Drive[]; onSeen: (d: Drive) => vo
           exit={{ height: 0, opacity: 0, transition: { duration: 0.6 } }}
           className="overflow-hidden"
         >
-          <div className="mx-1 mb-2 flex items-start gap-2 rounded-lg border border-accent/40 bg-accent/10 px-2.5 py-2 text-xs" role="status">
-            <span className="live-dot mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-accent" aria-hidden="true" />
+          <div className="mx-1 mb-2 flex items-start gap-2 rounded-lg border border-go/40 bg-go/10 px-2.5 py-2 text-xs" role="status">
+            <span className="live-dot mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-go" aria-hidden="true" />
             <div className="min-w-0 flex-1">
-              <p className="font-medium text-accent">{freshHeadline(list.length)}</p>
+              <p className="font-medium text-go">{freshHeadline(list.length)}</p>
               <p className="truncate text-muted">
                 {list.map((d, i) => (
                   <span key={d.key}>
@@ -279,9 +355,14 @@ function FreshBanner({ list, onSeen }: { list: Drive[]; onSeen: (d: Drive) => vo
 }
 
 function DriveList({ route }: { route: Route }) {
-  const { drives, loaded } = useStore();
-  const { fresh, touched, touch } = useDriveActivity();
+  const { drives, loaded, now } = useStore();
+  const { fresh, touched, touch, left } = useDriveActivity();
   const [folded, setFolded] = usePref<string[]>('pv:driveFold', ['ignored']);
+  // A drive just unplugged moves to Not connected: open that group so it stays in sight (rv-38).
+  const newest = Math.max(0, ...Object.values(left));
+  useEffect(() => {
+    if (newest) setFolded((f) => (f.includes('unmounted') ? f.filter((x) => x !== 'unmounted') : f));
+  }, [newest, setFolded]);
   const [sort, setSort] = usePref<SortKey>('pv:driveSort', 'default');
   const [savedFilter, setFilter] = usePref<DriveFilter>('pv:driveFilter', NO_FILTER);
   const [refsOpen, setRefsOpen] = useState(false);
@@ -364,7 +445,7 @@ function DriveList({ route }: { route: Route }) {
                     <div className="flex flex-col gap-1.5 pb-2">
                       {list.map((d, i) => (
                         <motion.div key={d.key} {...rise(i)}>
-                          <DriveRow d={d} fresh={fresh[d.key] !== undefined} onSeen={() => touch(d.key)} active={
+                          <DriveRow d={d} fresh={fresh[d.key] !== undefined} landed={fresh[d.key] !== undefined && (now || Date.now()) - fresh[d.key]! < LANDED_MS} pulled={!d.mounted && left[d.key] !== undefined && (now || Date.now()) - left[d.key]! < PULLED_MS} onSeen={() => touch(d.key)} active={
                               route.view === 'setup'
                                 ? route.key === d.key
                                 : (route.view === 'drive' || route.view === 'cards') && route.id !== null && route.id === d.volume_id

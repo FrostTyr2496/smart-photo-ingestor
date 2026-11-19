@@ -2,7 +2,7 @@
 // sorted and filtered. Pure functions; the React side is in driveActivity.tsx and Sidebar.tsx.
 import { fsLabel, parseSize } from './format';
 import { driveName, isCardDrive, roleKey, runMounts, sameMount, taskMounts } from './labels';
-import type { Route } from './route';
+import { hrefFor, type Route } from './route';
 import type { Drive, ExtRun, TaskRec } from './types';
 
 /** What the browser remembers between polls and page loads (localStorage, per browser). */
@@ -37,6 +37,22 @@ export function trackArrivals(prev: SeenState | null, drives: Drive[], now: numb
     }
   }
   return { keys, mounts, fresh, touched };
+}
+
+/**
+ * Drives connected at the previous poll (`prevMounted`, their keys) that are now listed as not connected: just
+ * unplugged (rv-38). Ignored drives are left out; a drive that vanishes from the list (never set up) is not reported.
+ * With no previous poll (first load), nothing was unplugged.
+ */
+export function unplugged(prevMounted: string[] | null, drives: Drive[]): Drive[] {
+  if (!prevMounted) return [];
+  return drives.filter((d) => !d.mounted && !d.ignored && prevMounted.includes(d.key));
+}
+
+/** A drive's own page: a card opens in Cards, a set-up drive its drive page, a new one its setup page. */
+export function driveHref(d: Drive): string {
+  if (isCardDrive(d)) return hrefFor({ view: 'cards', id: d.volume_id });
+  return d.volume_id ? hrefFor({ view: 'drive', id: d.volume_id }) : hrefFor({ view: 'setup', key: d.key });
 }
 
 /** The user interacted with a drive: it is no longer new, and it moves up in "Recently used". */

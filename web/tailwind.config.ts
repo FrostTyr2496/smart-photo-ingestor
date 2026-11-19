@@ -24,6 +24,7 @@ export default {
         skip: token('skip'),
         card: token('card'),
         master: token('master'),
+        select: token('select'),
         line: 'rgb(var(--c-ink) / 0.08)',
         'line-strong': 'rgb(var(--c-ink) / 0.14)',
       },

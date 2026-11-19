@@ -9,6 +9,7 @@ import { fmtBytes, fmtDate, fmtInt, plural, relTime } from '../lib/format';
 import { argvWords, commandKey, displayLabel, mountName } from '../lib/labels';
 import { rise, springs } from '../lib/motion';
 import { hrefFor } from '../lib/route';
+import { UnpluggedStrip, useUnpluggedEdge } from '../components/Unplugged';
 import { useDialogs } from '../lib/dialogs';
 import { useStore } from '../lib/store';
 import { cardHeadline, cardHint, TIER, TIER_HINT, TIER_ORDER, TIER_TONE, type Card, type CardCamera, type Tier } from '../lib/tiers';
@@ -342,6 +343,8 @@ function CardList({ onImport, onClear, onGreen }: { onImport: (c: Card) => void;
 
 function CardDetail({ id, onImport, onClear, onGreen }: { id: string; onImport: (c: Card) => void; onClear: (c: Card) => void; onGreen: (c: Card) => void }) {
   const { epoch, drives, now } = useStore();
+  const cardDrive = drives.find((d) => d.volume_id === id);
+  const edge = useUnpluggedEdge(cardDrive);
   const [filter, setFilter] = useState({ tier: '', copies: '', other: '', camera: '', offset: 0 });
   const [data, setData] = useState<{ card: Card; files: CardFile[]; total: number } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -397,6 +400,8 @@ function CardDetail({ id, onImport, onClear, onGreen }: { id: string; onImport: 
   if (error && !data) return <div className="card p-6 text-err">Could not load the card: {error}</div>;
   if (!data) return <div className="card h-96 animate-pulse" />;
   const c = data.card;
+  // The live drive list knows at once when the card is pulled; the card's own data is as of its last load (rv-38).
+  const mounted = cardDrive ? cardDrive.mounted : c.mounted;
 
   const columns: Array<Column<CardFile>> = [
     { head: 'Status', cell: (f) => <TierPill tier={f.tier} /> },
@@ -428,13 +433,13 @@ function CardDetail({ id, onImport, onClear, onGreen }: { id: string; onImport: 
 
   return (
     <div className="flex flex-col gap-5">
-      <section className="card p-5">
+      <section className={`card p-5 ${edge}`}>
         <div className="flex flex-wrap items-start gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2.5">
               <h1 className="truncate text-2xl font-semibold tracking-tight">{displayLabel(c.label)}</h1>
               {c.test_card && <TestBadge c={c} />}
-              {!c.mounted && <NotConnected />}
+              {!mounted && <NotConnected />}
               {kind ? <LivePill kind={kind} /> : <TierPill tier={c.tier} />}
             </div>
             <p className={`mt-2 ${kind ? 'text-accent' : TIER_TONE[c.tier].text}`}>{kind ? liveHeadline(c, kind, runs, (m) => mountName(m, drives)) : cardHeadline(c)}</p>
@@ -443,7 +448,7 @@ function CardDetail({ id, onImport, onClear, onGreen }: { id: string; onImport: 
                 kind
                   ? `${kind === 'copy' ? 'Counts update as each file is verified. Keep the card in until it finishes.' : 'Counts update as it goes.'} ${updatedAgo(updatedAt, now)}.`
                   : cardHint(c),
-                kind ? '' : c.mounted ? (c.checked_at ? `Checked ${relTime(c.checked_at)}.` : 'Never checked.') : 'Not connected: as last checked.',
+                kind ? '' : mounted ? (c.checked_at ? `Checked ${relTime(c.checked_at)}.` : 'Never checked.') : 'Not connected: as last checked.',
                 c.cleared_at ? `Cleared by PhotoVault on ${fmtDate(c.cleared_at)}.` : '', c.test_card ? `Test card: copies on ${c.test_card.hidden.join(', ')} are hidden.` : '']
                 .filter(Boolean)
                 .join(' ')}
@@ -456,6 +461,9 @@ function CardDetail({ id, onImport, onClear, onGreen }: { id: string; onImport: 
             </a>
           </div>
         </div>
+        {cardDrive && !cardDrive.mounted && (
+          <UnpluggedStrip d={cardDrive} extra={c.checked_at ? [{ label: 'Last checked', value: relTime(c.checked_at) || fmtDate(c.checked_at), title: fmtDate(c.checked_at) }] : []} />
+        )}
         {runs.length > 0 && (
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             {runs.map((r) => (
