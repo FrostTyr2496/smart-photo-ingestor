@@ -43,9 +43,9 @@ export function Modal({ open, title, onClose, onMinimize, children, footer, wide
             exit={{ opacity: 0, y: 8, scale: 0.98 }}
             transition={springs.snappy}
             onClick={(e) => e.stopPropagation()}
-            className={`w-full ${wide ? 'max-w-xl' : 'max-w-md'} rounded-2xl border border-line-strong bg-raised shadow-2xl shadow-black/60`}
+            className={`flex max-h-[calc(100dvh-2rem)] w-full flex-col ${wide ? 'max-w-xl' : 'max-w-md'} rounded-2xl border border-line-strong bg-raised shadow-2xl shadow-black/60`}
           >
-            <div className="flex items-center gap-2 border-b border-line px-5 py-4">
+            <div className="flex shrink-0 items-center gap-2 border-b border-line px-5 py-4">
               <h2 className="flex-1 text-lg font-semibold">{title}</h2>
               {onMinimize && (
                 <button type="button" onClick={onMinimize} title="Minimize: it keeps running, find it at the bottom right" aria-label="Minimize" className="btn-ghost h-7 gap-1 px-2 text-xs">
@@ -53,8 +53,9 @@ export function Modal({ open, title, onClose, onMinimize, children, footer, wide
                 </button>
               )}
             </div>
-            <div className="flex flex-col gap-4 px-5 py-4">{children}</div>
-            <div className="flex items-center justify-end gap-2 border-t border-line px-5 py-3">{footer}</div>
+            {/* Only the body scrolls, so the title and the buttons stay on screen however tall the content gets. */}
+            <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">{children}</div>
+            <div className="flex shrink-0 items-center justify-end gap-2 border-t border-line px-5 py-3">{footer}</div>
           </motion.div>
         </motion.div>
       )}
