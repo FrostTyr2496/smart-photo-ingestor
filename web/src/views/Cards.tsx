@@ -12,7 +12,7 @@ import { cardHeadline, cardHint, TIER, TIER_HINT, TIER_ORDER, TIER_TONE, type Ca
 import { ClearDialog } from './ClearDialog';
 import { ImportDialog } from './ImportDialog';
 
-const CARD_PAGE = 200;
+const CARD_PAGE = 1000;
 
 interface CardFile {
   rel_path: string;
@@ -268,9 +268,12 @@ function CardDetail({ id, onImport, onClear }: { id: string; onImport: (c: Card)
     { head: 'Status', cell: (f) => <TierPill tier={f.tier} /> },
     {
       head: 'File',
-      cell: (f) => (
+      path: true,
+      cell: (f, _o, _t, name) => (
         <div className="min-w-[16rem]">
-          <p className="break-all font-mono text-xs">{f.rel_path}</p>
+          <p className="break-all font-mono text-xs" title={f.rel_path}>
+            {name}
+          </p>
           <p className="text-2xs text-faint">{f.reason}</p>
         </div>
       ),
@@ -348,10 +351,24 @@ function CardDetail({ id, onImport, onClear }: { id: string; onImport: (c: Card)
           shown={data.total}
           total={c.files}
         />
-        <FileTable rows={data.files} columns={columns} volumeId={c.volume_id ?? ''} loading={loading} />
+        <FileTable rows={data.files} columns={columns} volumeId={c.volume_id ?? ''} loading={loading} summarize={summarizeCardFiles} />
         <Pager offset={filter.offset} count={data.files.length} total={data.total} page={CARD_PAGE} onPage={(offset) => setFilter((f) => ({ ...f, offset }))} />
       </section>
     </div>
+  );
+}
+
+/** A folder or run of card files: size and how many per tier, worst first. */
+function summarizeCardFiles(rows: CardFile[]) {
+  return (
+    <>
+      <span className="font-mono">{fmtBytes(rows.reduce((n, r) => n + r.size, 0))}</span>
+      {TIER_ORDER.map((t) => [t, rows.filter((r) => r.tier === t).length] as const)
+        .filter(([, n]) => n)
+        .map(([t, n]) => (
+          <TierPill key={t} tier={t} text={`${fmtInt(n)} ${TIER[t].label.toLowerCase()}`} />
+        ))}
+    </>
   );
 }
 

@@ -100,7 +100,7 @@ task's commit:
 - **[user] browser check (phone import done 2026-11-18):** restart `serve` and check in Photos: the "Applies to" block (rv-16), phone place names and "Near this time"
   (sp-3), Copy name (rv-18), Maps links (rv-17), the farther suggestions (sp-8), Show in All Photos (rv-19), the
   full-screen viewer (rv-20), the condensed headers and filter chips (rv-21), hiding the sidebar with `[` (rv-22),
-  full size vs "plug in PP 1" plus the grid's unplugged icon (rv-23), the expandable map / "Refine on map" (rv-24).
+  full size vs "plug in PP 1" plus the grid's unplugged icon (rv-23), the expandable map / "Refine on map" (rv-24). On a drive or card page, the Files list's Folders view (rv-26).
   No clock banners should show now (sp-7b). Then run `uv run photovault --json meta scan --rescan "<mount>"` on each
   connected drive so `subsec` fills in (sh-0b), and try the review mode on test data:
   `PHOTOVAULT_DEV_PLAN=tests/fixtures/plans/shoots-fixture.json uv run photovault serve` → `#/review/shoots` (sh-3),
@@ -118,11 +118,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-098 (agent): rv-26 file lists as a folder tree, runs of similar names collapsed, pages of 1000.
 - D-097 (agent): cc-1 details: V8 rebuilds `jobs`; frames held back whole; one copy re-hashed, a mismatch stops the run.
 - D-096 (user): safe card clear; vault-rules 1 and 4 exceptions; job kind `card_clear`.
 - D-095 (agent): act-3 locations deep link `#/photos?missing=gps&day=`, shoots_review offers a plan, clock_suggested rule.
 - D-094 (agent): act-4 previews cached by a user-started task, offered as the action `previews_missing`.
-- D-093 (agent): sh-4 Apply and Undo run as tasks; apply id stored in `shoot_apply_log.job_id`.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

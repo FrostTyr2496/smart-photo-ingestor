@@ -1,9 +1,11 @@
 import { motion } from 'framer-motion';
-import { Fragment, useEffect, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api } from '../lib/api';
+import { allKeys, buildTree, visibleRows, type FolderNode, type RunNode } from '../lib/filetree';
 import { fmtInt } from '../lib/format';
 import { roleKey, roleLabel } from '../lib/labels';
 import { springs } from '../lib/motion';
+import { usePref } from '../lib/prefs';
 import { useStore } from '../lib/store';
 import { TIER, TIER_ORDER, TIER_TONE, nameList, type Tier, type TierCounts } from '../lib/tiers';
 import { Icon, RolePill } from './bits';
@@ -236,54 +238,197 @@ function CopiesRow({ assetId, volumeId, relPath, cols }: { assetId: number; volu
 export interface Column<T> {
   head: string;
   num?: boolean;
-  cell: (row: T, open: boolean, toggle: (() => void) | null) => ReactNode;
+  /** The column that holds the file name: indented in the folder view. */
+  path?: boolean;
+  /** `name` is the file name in the folder view and the full path in the list view. */
+  cell: (row: T, open: boolean, toggle: (() => void) | null, name: string) => ReactNode;
 }
 
-/** A file table whose rows can open a copies row under them. */
+const INDENT = 18;
+
+function GroupRow<T>({
+  node,
+  depth,
+  open,
+  onToggle,
+  cols,
+  summarize,
+}: {
+  node: FolderNode<T> | RunNode<T>;
+  depth: number;
+  open: boolean;
+  onToggle: () => void;
+  cols: number;
+  summarize?: (rows: T[]) => ReactNode;
+}) {
+  const folder = node.kind === 'folder';
+  return (
+    <tr className={`border-b border-line ${folder ? 'bg-raised/30' : ''} hover:bg-ink/[0.03]`}>
+      <td colSpan={cols} className="px-3 py-1.5">
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={onToggle}
+          className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 text-left"
+          style={{ paddingLeft: depth * INDENT }}
+          title={folder ? node.key.slice(0, -1) : `${fmtInt(node.rows.length)} files named like ${node.pattern}`}
+        >
+          <span className="flex min-w-0 items-center gap-1.5">
+            <motion.span animate={{ rotate: open ? 90 : 0 }} transition={springs.snappy} className="inline-flex text-faint">
+              <Icon name="chevron" size={11} />
+            </motion.span>
+            {folder ? (
+              <>
+                <span className="inline-flex text-muted">
+                  <Icon name="folder" size={13} />
+                </span>
+                <span className="break-all font-mono text-xs font-medium">{node.name}</span>
+              </>
+            ) : (
+              <>
+                <span className="break-all font-mono text-xs">{node.label}</span>
+                {node.exts.length > 0 && <span className="text-2xs text-faint">{node.exts.join(' · ')}</span>}
+              </>
+            )}
+            <span className="chip border-line text-2xs text-muted">{fmtInt(node.rows.length)}</span>
+          </span>
+          {summarize && <span className="ml-auto flex flex-wrap items-center gap-2 text-2xs text-muted">{summarize(node.rows)}</span>}
+        </button>
+      </td>
+    </tr>
+  );
+}
+
+/**
+ * A file table whose rows can open a copies row under them. The folder view (rv-26) nests rows by folder and
+ * collapses runs of similar names; the list view is the flat page in server order.
+ */
 export function FileTable<T extends { rel_path: string; asset_id?: number | null }>({
   rows,
   columns,
   volumeId,
   loading,
+  summarize,
 }: {
   rows: T[];
   columns: Array<Column<T>>;
   volumeId: string;
   loading: boolean;
+  /** One line for a folder or run row: e.g. total size and states. */
+  summarize?: (rows: T[]) => ReactNode;
 }) {
   const [openRow, setOpenRow] = useState<string | null>(null);
+  const [view, setView] = usePref<'tree' | 'list'>('pv.files.view', 'tree');
+  const [closed, setClosed] = useState<Set<string>>(new Set());
+  const [opened, setOpened] = useState<Set<string>>(new Set());
+  const tree = useMemo(() => buildTree(rows), [rows]);
+  const keys = useMemo(() => allKeys(tree), [tree]);
   if (!rows.length) return <p className="py-4 text-center text-sm text-muted">{loading ? 'Loading…' : 'No files in this view.'}</p>;
+
+  const isTree = view === 'tree';
+  const flip = (set: Set<string>, key: string) => {
+    const next = new Set(set);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    return next;
+  };
+  const visible = isTree
+    ? visibleRows(tree, closed, opened)
+    : rows.map((r) => ({ node: { kind: 'file' as const, key: r.rel_path, name: r.rel_path, row: r }, depth: 0 }));
+
+  const fileRow = (r: T, name: string, depth: number) => {
+    const open = openRow === r.rel_path;
+    const toggle = r.asset_id ? () => setOpenRow(open ? null : r.rel_path) : null;
+    return (
+      <Fragment key={r.rel_path}>
+        <tr className="border-b border-line hover:bg-ink/[0.03]">
+          {columns.map((c) => (
+            <td
+              key={c.head}
+              className={`px-3 py-2 align-top ${c.num ? 'text-right font-mono text-xs text-muted' : ''}`}
+              style={c.path && depth ? { paddingLeft: 12 + depth * INDENT + 17 } : undefined}
+            >
+              {c.cell(r, open, toggle, name)}
+            </td>
+          ))}
+        </tr>
+        {open && r.asset_id && <CopiesRow assetId={r.asset_id} volumeId={volumeId} relPath={r.rel_path} cols={columns.length} />}
+      </Fragment>
+    );
+  };
+
+  const toolBtn = 'btn-ghost h-6 px-2 text-2xs';
   return (
-    <div className={`overflow-x-auto rounded-xl border border-line transition-opacity ${loading ? 'opacity-60' : ''}`}>
-      <table className="w-full border-collapse text-sm">
-        <thead>
-          <tr className="border-b border-line bg-raised/40 text-left">
-            {columns.map((c) => (
-              <th key={c.head} className={`label px-3 py-2.5 font-normal ${c.num ? 'text-right' : ''}`}>
-                {c.head}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => {
-              const open = openRow === r.rel_path;
-              const toggle = r.asset_id ? () => setOpenRow(open ? null : r.rel_path) : null;
-              return (
-                <Fragment key={r.rel_path}>
-                  <tr className="border-b border-line hover:bg-ink/[0.03]">
-                    {columns.map((c) => (
-                      <td key={c.head} className={`px-3 py-2 align-top ${c.num ? 'text-right font-mono text-xs text-muted' : ''}`}>
-                        {c.cell(r, open, toggle)}
-                      </td>
-                    ))}
-                  </tr>
-                  {open && r.asset_id && <CopiesRow assetId={r.asset_id} volumeId={volumeId} relPath={r.rel_path} cols={columns.length} />}
-                </Fragment>
-              );
-            })}
-        </tbody>
-      </table>
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex rounded-lg border border-line p-0.5" role="group" aria-label="File view">
+          {(['tree', 'list'] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              aria-pressed={view === v}
+              onClick={() => setView(v)}
+              className={`h-6 rounded-md px-2.5 text-2xs ${view === v ? 'bg-ink/10 text-ink' : 'text-muted hover:text-ink'}`}
+            >
+              {v === 'tree' ? 'Folders' : 'List'}
+            </button>
+          ))}
+        </div>
+        {isTree && (keys.folders.length > 0 || keys.runs.length > 0) && (
+          <>
+            <button
+              type="button"
+              className={toolBtn}
+              onClick={() => {
+                setClosed(new Set());
+                setOpened(new Set(keys.runs));
+              }}
+            >
+              Expand all
+            </button>
+            <button
+              type="button"
+              className={toolBtn}
+              onClick={() => {
+                setClosed(new Set(keys.folders));
+                setOpened(new Set());
+              }}
+            >
+              Collapse all
+            </button>
+          </>
+        )}
+      </div>
+      <div className={`overflow-x-auto rounded-xl border border-line transition-opacity ${loading ? 'opacity-60' : ''}`}>
+        <table className="w-full border-collapse text-sm">
+          <thead>
+            <tr className="border-b border-line bg-raised/40 text-left">
+              {columns.map((c) => (
+                <th key={c.head} className={`label px-3 py-2.5 font-normal ${c.num ? 'text-right' : ''}`}>
+                  {c.head}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map(({ node, depth }) =>
+              node.kind === 'file' ? (
+                fileRow(node.row, node.name, depth)
+              ) : (
+                <GroupRow
+                  key={node.key}
+                  node={node}
+                  depth={depth}
+                  cols={columns.length}
+                  summarize={summarize}
+                  open={node.kind === 'folder' ? !closed.has(node.key) : opened.has(node.key)}
+                  onToggle={() => (node.kind === 'folder' ? setClosed((s) => flip(s, node.key)) : setOpened((s) => flip(s, node.key)))}
+                />
+              ),
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

@@ -310,3 +310,13 @@ Rules for every task:
     and inspector at `top-[117px]`, with their max heights reduced to match. The day header's own filter note is off,
     since the bar always shows the filters.
   - Result (2026-11-18): `cd web && npm run typecheck && npm test` → clean, 93 passed; build committed. Browser check pending.
+
+- [x] 26. Drive and card file lists as a collapsible folder tree
+  - ID: rv-26 (user ask, 2026-11-18)
+  - `FileTable` gets a **Folders / List** toggle (remembered per browser). Folders nests the page by `rel_path`, merges
+    single-child chains (`DCIM/100NIKON`), and collapses runs of ≥ 5 names that differ only in digits and extension
+    (`DSC_0001 – DSC_0150 · JPG · NEF`), closed by default. Folder and run rows show the count, total size and states
+    (drive) or tiers (card). Expand all / Collapse all. Logic in `web/src/lib/filetree.ts`. Page size 200 → 1000 (the
+    server maximum), since collapsed groups keep the page short. The card list's tree is in name order, not urgency;
+    the tier pills on each group carry the urgency, and List keeps the server order.
+  - Result (2026-11-18): `cd web && npm run typecheck && npm test` → clean, 133 passed; build committed. Browser check pending.

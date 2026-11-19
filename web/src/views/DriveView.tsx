@@ -32,7 +32,7 @@ const TILES = [
   { key: 'missing', label: 'Missing', tone: 'text-maybe' },
 ] as const;
 
-const FILE_PAGE = 200;
+const FILE_PAGE = 1000;
 
 const STATE_TONE: Record<string, string> = {
   verified: 'border-go/30 bg-go/10 text-go',
@@ -507,7 +507,7 @@ export function DriveView({ id }: { id: string }) {
     api('POST', `/api/volumes/${encodeURIComponent(id)}/reveal`, { rel_path: relPath }).catch((err: Error) => toast(err.message, 'err'));
 
   const columns: Array<Column<DriveFile>> = [
-    { head: 'Path', cell: (f) => <p className="min-w-[16rem] break-all font-mono text-xs">{f.rel_path}</p> },
+    { head: 'Path', path: true, cell: (f, _o, _t, name) => <p className="min-w-[16rem] break-all font-mono text-xs" title={f.rel_path}>{name}</p> },
     { head: 'Size', num: true, cell: (f) => fmtBytes(f.size) },
     { head: 'Kind', cell: (f) => <span className="text-xs text-muted">{f.kind}</span> },
     { head: 'Camera', cell: (f) => <span className="text-xs text-muted">{f.camera_name}</span> },
@@ -539,6 +539,21 @@ export function DriveView({ id }: { id: string }) {
       ),
     });
   }
+
+  const summarizeFiles = (rows: DriveFile[]) => {
+    const counts = new Map<string, number>();
+    for (const r of rows) counts.set(r.state, (counts.get(r.state) ?? 0) + 1);
+    return (
+      <>
+        <span className="font-mono">{fmtBytes(rows.reduce((n, r) => n + r.size, 0))}</span>
+        {[...counts].map(([state, n]) => (
+          <span key={state} className={`chip ${STATE_TONE[state] ?? 'border-line text-muted'}`}>
+            {fmtInt(n)} {(TILES.find((t) => t.key === state)?.label ?? state).toLowerCase()}
+          </span>
+        ))}
+      </>
+    );
+  };
 
   return (
     <motion.div key={id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={springs.snappy} className="flex flex-col gap-5">
@@ -725,7 +740,7 @@ export function DriveView({ id }: { id: string }) {
           total={s.files}
         />
         {filesError && <p className="text-sm text-err">Could not list files: {filesError}</p>}
-        <FileTable rows={files?.files ?? []} columns={columns} volumeId={id} loading={filesLoading} />
+        <FileTable rows={files?.files ?? []} columns={columns} volumeId={id} loading={filesLoading} summarize={summarizeFiles} />
         <Pager
           offset={filter.offset}
           count={files?.files.length ?? 0}
