@@ -549,3 +549,14 @@ Rules for every task:
     times recorded under the old rule are dropped.
   - Verify: `cd web && npm run typecheck && npm test && npm run build`.
   - Result (2026-11-19): typecheck clean; 234 web tests pass (2 new); build committed. Not seen in a browser.
+
+- [x] 42. Sidebar rows: no Rename, Ignore moved to a menu, names never squeezed out
+  - ID: rv-42 (user ask, 2026-11-19; D-125)
+  - The hover "Rename" (rv-40) and "Ignore" buttons sat in the name line and squeezed names to "B…" (or nothing, next
+    to a long format and role pill). Both are gone from the row. Rename lives on the drive and card pages only (the
+    rv-40 cross-page rename plumbing is removed). Ignore / "Show in the list again" is in a right-click menu on the
+    row (with Open), also reached by a small "⋯" button that appears on hover in the row's top-right corner,
+    over the pills, so nothing moves. The name keeps at least 4.5rem and shows its full name and mount on hover; the
+    role pill no longer wraps.
+  - Verify: `cd web && npm run typecheck && npm test && npm run build`.
+  - Result (2026-11-19): typecheck clean; 234 web tests pass; build committed. Not seen in a browser.

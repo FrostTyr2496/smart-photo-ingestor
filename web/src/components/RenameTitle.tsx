@@ -4,18 +4,6 @@ import { useStore } from '../lib/store';
 import type { Drive } from '../lib/types';
 import { Icon } from './bits';
 
-// A rename asked for from elsewhere (the sidebar's hover "Rename", rv-40): the page's title starts editing when it
-// mounts, or at once if it is already showing that drive.
-let pending: string | null = null;
-const EVENT = 'pv:rename';
-
-/** Open `href` (the drive's or card's page) with its name ready to edit. */
-export function renameFromAnywhere(volumeId: string, href: string): void {
-  pending = volumeId;
-  window.dispatchEvent(new CustomEvent(EVENT, { detail: volumeId }));
-  if (window.location.hash !== href) window.location.hash = href;
-}
-
 /** The label to save: a card keeps its `card:` prefix (hidden in the UI), so card labels stay alike in the CLI. */
 export function labelToSave(current: string | null | undefined, typed: string): string {
   const name = typed.trim();
@@ -47,23 +35,6 @@ export function RenameTitle({ drive, fallback, children }: { drive: Drive | null
     if (editing) inputRef.current?.select();
   }, [editing]);
   useEffect(() => setEditing(false), [id]);
-  useEffect(() => {
-    if (!id) return;
-    if (pending === id) {
-      pending = null;
-      start();
-    }
-    const on = (e: Event) => {
-      if ((e as CustomEvent<string>).detail === id) {
-        pending = null;
-        start();
-      }
-    };
-    window.addEventListener(EVENT, on);
-    return () => window.removeEventListener(EVENT, on);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
-
   const save = async () => {
     const next = text.trim();
     if (!drive || !next || next === name) {

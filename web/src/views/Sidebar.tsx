@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { Disclosure, FsPill, Icon, RolePill, ROLE_DOT } from '../components/bits';
 import { RefsDialog } from './RefsDialog';
 import { PULLED_MS } from '../components/Unplugged';
-import { renameFromAnywhere } from '../components/RenameTitle';
+import { openMenu } from '../lib/menu';
 import { ProgressBar } from '../components/ProgressBar';
 import { extVM, FinishedRow, RunningCard, taskVM } from '../components/TaskCard';
 import { useDriveActivity } from '../lib/driveActivity';
@@ -82,12 +82,27 @@ function DriveRow({
   const used = size && free !== null ? (size - free) / size : null;
   const key = isNew ? 'new' : roleKey(d.role);
   const href = driveHref(d);
+  const menu = (e: MouseEvent) =>
+    openMenu(
+      e,
+      [
+        { label: 'Open', icon: 'open', onSelect: () => (window.location.hash = href) },
+        'sep',
+        {
+          label: d.ignored ? 'Show in the list again' : 'Ignore (move under Ignored)',
+          icon: d.ignored ? 'check' : 'minus',
+          onSelect: () => void setIgnored(d, !d.ignored),
+        },
+      ],
+      driveName(d),
+    );
 
   return (
     <a
       href={href}
       aria-current={active ? 'page' : undefined}
       onClick={fresh ? onSeen : undefined}
+      onContextMenu={menu}
       // States (rv-38, see the Key): role = dot + pill; on this page = blue bar + tint; just plugged in = green ring
       // (and it lands on the list with a lifted shadow); read or written now = neutral shimmer; unplugged = amber dashes.
       className={`group relative block rounded-xl border px-3 py-2.5 transition-[border-color,background-color,box-shadow] duration-700 ${
@@ -101,7 +116,7 @@ function DriveRow({
       {active && <motion.span layoutId="drive-active" transition={springs.snappy} className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-select" />}
       <div className="flex items-center gap-2">
         <span className={`h-2 w-2 shrink-0 rounded-full ${ROLE_DOT[key]} ${live || io.length ? 'live-dot' : ''}`} aria-hidden="true" />
-        <span className="min-w-0 flex-1 truncate text-sm font-medium" title={d.mount}>
+        <span className="min-w-[4.5rem] flex-1 truncate text-sm font-medium" title={`${driveName(d)}${d.mount ? ` · ${d.mount}` : ''}`}>
           {driveName(d)}
         </span>
         <AnimatePresence initial={false}>
@@ -125,35 +140,26 @@ function DriveRow({
             </motion.button>
           )}
         </AnimatePresence>
-        {d.volume_id && (
-          <button
-            type="button"
-            title={`Rename ${driveName(d)} in PhotoVault`}
-            className="shrink-0 rounded px-1 text-2xs text-muted opacity-0 hover:text-ink focus:opacity-100 group-hover:opacity-100"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              renameFromAnywhere(d.volume_id!, driveHref(d));
-            }}
-          >
-            Rename
-          </button>
-        )}
-        <button
-          type="button"
-          title={d.ignored ? 'Show this drive in the list again' : 'Hide this drive under Ignored'}
-          className="shrink-0 rounded px-1 text-2xs text-muted opacity-0 hover:text-ink focus:opacity-100 group-hover:opacity-100"
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            void setIgnored(d, !d.ignored);
-          }}
-        >
-          {d.ignored ? 'Unignore' : 'Ignore'}
-        </button>
         <FsPill fs={d.fs} />
-        <RolePill role={d.role} isNew={isNew} />
+        <span className="shrink-0 whitespace-nowrap">
+          <RolePill role={d.role} isNew={isNew} />
+        </span>
       </div>
+      {/* Less used actions live in a menu (rv-42): right-click the row, or this button, which shows on hover over the
+          pills without moving anything. */}
+      <button
+        type="button"
+        aria-label={`More for ${driveName(d)}`}
+        title="More (or right-click)"
+        className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-md border border-line bg-surface text-muted opacity-0 shadow-sm hover:text-ink focus:opacity-100 group-hover:opacity-100"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          menu(e);
+        }}
+      >
+        ⋯
+      </button>
       <p
         title={io.length ? status.text : undefined}
         className={`mt-1 truncate pl-4 text-xs ${status.tone === 'running' ? 'text-ink/85' : status.tone === 'warn' ? 'text-maybe' : 'text-muted'}`}>
