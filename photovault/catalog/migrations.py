@@ -141,4 +141,20 @@ CREATE INDEX body_clock_body ON body_clock (body_id, start_utc);
 ALTER TABLE capture_groups ADD COLUMN subsec TEXT;     -- EXIF SubSecTimeOriginal, so vault names match ingest
 """
 
-MIGRATIONS: list[str] = [V1, V2, V3, V4, V5, V6, V7]
+# The `jobs.kind` CHECK cannot be altered in place, so the table is rebuilt the SQLite way (create new, copy, drop,
+# rename). `db.migrate` runs migrations with foreign keys off and checks them before COMMIT, so `job_items` keeps
+# pointing at `jobs` and no row is lost.
+V8 = """
+CREATE TABLE jobs_new (
+  job_id INTEGER PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN ('card_ingest','index_volume','baseline_hash','replicate','fixity_audit','card_clear')),
+  source_volume_id TEXT REFERENCES volumes, target_volume_id TEXT REFERENCES volumes,
+  state TEXT NOT NULL CHECK (state IN ('planned','running','paused','done','failed')),
+  params_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, finished_at TEXT
+);
+INSERT INTO jobs_new (job_id, kind, source_volume_id, target_volume_id, state, params_json, created_at, finished_at)
+  SELECT job_id, kind, source_volume_id, target_volume_id, state, params_json, created_at, finished_at FROM jobs;
+DROP TABLE jobs;
+ALTER TABLE jobs_new RENAME TO jobs;
+"""
+
+MIGRATIONS: list[str] = [V1, V2, V3, V4, V5, V6, V7, V8]

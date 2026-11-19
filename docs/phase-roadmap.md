@@ -197,6 +197,7 @@ companion.
 | P5e.4 | im-4 import from the Cards view: dry-run plan, then apply (**done 2026-11-18**) | im-1, im-3 | **[user]** visual check |
 | P5e.5 | im-5 make Backup Plus a working drive | im-2 | **[user]** |
 | P5e.6 | im-6 test imports, small to full | im-1, im-3, im-4 | **[user]**, X9 Pro plugged in |
+| P5e.7 | cc-1 safe card clear: `cards clear`, V8 job kind, Clear card dialog (**done 2026-11-18**) | im-1 | **[user]**: first real clear after a verified import |
 
 Note: the second-drive copy (green in one pass) is bk-3; im-4's dialog shows it disabled until bk-3 lands.
 

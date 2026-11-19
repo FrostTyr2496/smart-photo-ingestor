@@ -59,6 +59,7 @@ export function commandKey(words: string[]): string {
   const [a, b] = words;
   if (a === 'volumes' && b === 'assign') return 'assign';
   if (a === 'cards' && b === 'check') return 'card_check';
+  if (a === 'cards' && b === 'clear') return 'card_clear';
   if (a === 'meta') return ({ scan: 'meta_scan', refs: 'meta_refs', sidecars: 'meta_sidecars' } as Record<string, string>)[b ?? ''] || 'meta';
   return a || '';
 }
@@ -79,6 +80,8 @@ export function taskTitle(argv: string[], drives: Drive[]): string {
       return `Checking card ${name(w[1])}`;
     case 'card_check':
       return `Checking what is backed up on ${name(w[2])}`;
+    case 'card_clear':
+      return `${dry ? 'Planning a clear of' : 'Clearing'} card ${name(w[2])}`;
     case 'index':
       return `Indexing ${name(w[1])}`;
     case 'hash':
@@ -100,6 +103,7 @@ export function taskMounts(words: string[]): string[] {
   switch (commandKey(words)) {
     case 'assign':
     case 'card_check':
+    case 'card_clear':
       out = [words[2]];
       break;
     case 'index':
@@ -235,6 +239,9 @@ export function resultText(kind: string, r: R, dry: boolean): string {
         `${n('only_on_card')} only on the card${(c.unchecked || {}).files ? `, ${n('unchecked')} not checked` : ''}.`
       );
     }
+    case 'card_clear':
+      if (dry) return `Dry run: ${plural(r.deletable_files, 'file')} could be deleted, ${fmtInt(r.kept_files)} kept. Nothing was deleted.`;
+      return `Deleted ${plural(r.deleted, 'file')} from the card${r.stopped ? `. Stopped: ${r.stopped}` : ''}.`;
     case 'card-status':
       if (r.state === 'green') return `Safe to format: all ${plural(r.total, 'file')} are verified on a working drive.`;
       return `Not safe to format. ${fmtInt(r.safe)} of ${fmtInt(r.total)} files verified, ${fmtInt(r.unknown)} not imported yet, ${fmtInt(r.changed)} changed, ${fmtInt(r.short)} short.`;

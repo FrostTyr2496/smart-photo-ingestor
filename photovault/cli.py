@@ -12,7 +12,7 @@ import uuid
 import webbrowser
 from pathlib import Path
 
-from photovault import cards, meta, metrics, phone, report, shoots, volumes
+from photovault import card_clear, cards, meta, metrics, phone, report, shoots, volumes
 from photovault import activity
 from photovault.activity import ActivityEmitter
 from photovault.drives import CLI_DRIVE_KEYS, VOLUMES_ROOT, scan_mounts
@@ -180,6 +180,29 @@ def cmd_cards_check(args, cfg, emit) -> int:
         return EXIT_USAGE
     emit.emit("result", **out)
     return EXIT_PAUSED if out["paused"] else EXIT_OK
+
+
+def cmd_cards_clear(args, cfg, emit) -> int:
+    """Delete the card files that are safe (D-092). `--dry-run` only plans; otherwise `--confirm N` must equal the plan."""
+    conn = _open(cfg)
+    root = Path(args.root) if args.root else VOLUMES_ROOT
+    try:
+        if args.dry_run:
+            plan = card_clear.plan_clear(conn, cfg, Path(args.mount), volumes_root=root, emit=emit)
+            emit.emit("warning", code="dry_run", message="dry run: nothing was deleted")
+            emit.emit("result", **card_clear.public_plan(plan))
+            return EXIT_OK
+        if args.confirm is None:
+            emit.emit("error", code="confirm", message="pass --confirm N, where N is the file count a dry run reports")
+            return EXIT_USAGE
+        stop = _Stop()
+        stop.install(emit)
+        out = card_clear.run_clear(conn, cfg, Path(args.mount), confirm=args.confirm, volumes_root=root, emit=emit,
+                                   should_stop=stop)
+    except (card_clear.ClearRefused, volumes.UnknownVolume) as exc:
+        emit.emit("error", code="clear_refused", message=str(exc))
+        return EXIT_USAGE
+    return EXIT_ERROR if out["stopped"] else EXIT_OK
 
 
 def cmd_cards_list(args, cfg, emit) -> int:
@@ -510,6 +533,12 @@ def build_parser() -> argparse.ArgumentParser:
     cc = crd.add_parser("check", help="index and hash a card (read-only; Ctrl-C pauses, re-run resumes)")
     cc.add_argument("mount")
     cc.set_defaults(func=cmd_cards_check)
+    ccl = crd.add_parser("clear", help="delete the card files that are safe (green) after a dry run and a typed count")
+    ccl.add_argument("mount")
+    ccl.add_argument("--dry-run", action="store_true", help="show what would be deleted and kept; delete nothing")
+    ccl.add_argument("--confirm", type=int, metavar="N", help="the file count a dry run reported")
+    ccl.add_argument("--root", help=argparse.SUPPRESS)
+    ccl.set_defaults(func=cmd_cards_clear)
     cl = crd.add_parser("list", help="every card, ranked green/yellow/red, and the cameras on them")
     cl.add_argument("--root", help=argparse.SUPPRESS)
     cl.set_defaults(func=cmd_cards_list)

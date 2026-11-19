@@ -192,7 +192,7 @@ CREATE TABLE sidecars (                                                         
   mtime_ns INTEGER NOT NULL, seen_at TEXT NOT NULL, UNIQUE (volume_id, rel_path, sha256)
 );
 CREATE TABLE jobs (
-  job_id INTEGER PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN ('card_ingest','index_volume','baseline_hash','replicate','fixity_audit')),
+  job_id INTEGER PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN ('card_ingest','index_volume','baseline_hash','replicate','fixity_audit','card_clear')),
   source_volume_id TEXT REFERENCES volumes, target_volume_id TEXT REFERENCES volumes,
   state TEXT NOT NULL CHECK (state IN ('planned','running','paused','done','failed')),
   params_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, finished_at TEXT
@@ -317,6 +317,15 @@ the `V7` string in `photovault/catalog/migrations.py`:
 boundary) and "Same day" use the **wall clock**: the instant in the shoot's `local_offset` when the photo is in a shoot
 that has one, else `capture_time` as the camera wrote it. A phone-derived offset reaches the wall clock only through a
 reviewed shoot (decision 2), never silently.
+
+## 5h. Catalog schema v8 (migration 8)
+
+Approved with D-092 (safe card clear, cc-1). The SQL is the `V8` string in `photovault/catalog/migrations.py`. It only
+widens the `jobs.kind` CHECK to include `card_clear` (shown in the v1 listing above); SQLite cannot alter a CHECK, so
+the table is rebuilt (create `jobs_new`, copy every row, drop, rename) and `db.migrate` runs migrations with foreign
+keys off and checks them before COMMIT. No row changes. A `card_clear` job has `source_volume_id` = the card and no
+target; its `job_items` use `src_rel` (the card file), `state` `committed` once deleted or `failed` with `error`. The
+cu-0 proposal (formerly V8) becomes V9.
 
 ## 6. Naming (D-004, D-005)
 

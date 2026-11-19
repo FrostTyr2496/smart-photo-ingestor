@@ -36,6 +36,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from PIL import Image
 
 from photovault import actions, activity, cards, clock, metadata, naming, preview, shoots, timemodel, usage, volumes
+from photovault.card_clear import cleared_at
 from photovault.catalog import db, repo
 from photovault.config import ConfigError, load_config
 from photovault.drives import DEFAULT_MAC_FOLDER, VOLUMES_ROOT, scan_mounts
@@ -292,6 +293,15 @@ def build_argv(cmd: str, args: dict) -> list[str]:
     if cmd == "card_check":
         _allow_only(args, {"mount"})
         return ["cards", "check", _path_arg(args, "mount")]
+    if cmd == "card_clear":
+        _allow_only(args, {"mount", "dry_run", "confirm"})
+        argv = ["cards", "clear", _path_arg(args, "mount")]
+        if _bool_arg(args, "dry_run"):
+            return argv + ["--dry-run"]
+        confirm = args.get("confirm")
+        if isinstance(confirm, bool) or not isinstance(confirm, int) or confirm < 1:
+            raise BadRequest("confirm must be the planned file count")
+        return argv + ["--confirm", str(confirm)]
     if cmd == "meta_scan":
         _allow_only(args, {"mount", "rescan"})
         argv = ["meta", "scan", "--volume", _path_arg(args, "mount")]
@@ -339,7 +349,7 @@ def build_argv(cmd: str, args: dict) -> list[str]:
     raise BadRequest(f"unknown command {cmd!r}")
 
 
-ALLOWED_CMDS = ("assign", "ingest", "resume", "card_status", "card_check", "index", "hash", "meta_scan",
+ALLOWED_CMDS = ("assign", "ingest", "card_clear", "resume", "card_status", "card_check", "index", "hash", "meta_scan",
                 "meta_refs", "meta_sidecars", "shoots_plan", "shoots_apply", "shoots_undo")
 
 
@@ -1176,7 +1186,8 @@ def _card_files(app: WebApp, conn, volume_id: str, query: dict) -> dict:
     if other is not None:
         files = [f for f in files if any(c["volume_id"] == other for c in f["copies"])]
     return {"card": {"volume_id": volume_id, "label": vol["label"], "mounted": mount is not None,
-                     "mount": str(mount) if mount else None, "last_seen_at": vol["last_seen_at"], **summary},
+                     "mount": str(mount) if mount else None, "last_seen_at": vol["last_seen_at"],
+                     "cleared_at": cleared_at(conn, volume_id), **summary},
             "files": files[offset:offset + limit], "total": len(files), "limit": limit, "offset": offset}
 
 

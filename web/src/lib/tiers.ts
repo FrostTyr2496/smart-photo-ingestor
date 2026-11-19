@@ -61,6 +61,7 @@ export interface Card {
   cameras: CardCamera[];
   copies_by_volume: CopyVolume[];
   checked_at: string | null;
+  cleared_at?: string | null;
 }
 
 /** "A", "A and B", "A, B and C". */

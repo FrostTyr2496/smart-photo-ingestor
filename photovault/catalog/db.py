@@ -53,12 +53,20 @@ def migrate(conn: sqlite3.Connection) -> int:
         )
     for n in range(current + 1, len(migrations.MIGRATIONS) + 1):
         sql = migrations.MIGRATIONS[n - 1]
+        # Foreign keys are off while a migration runs (a table rebuild needs it) and checked before COMMIT.
+        conn.execute("PRAGMA foreign_keys=OFF")
         try:
-            conn.executescript(f"BEGIN;\n{sql}\nPRAGMA user_version={n};\nCOMMIT;")
+            conn.executescript(f"BEGIN;\n{sql}\nPRAGMA user_version={n};")
+            bad = conn.execute("PRAGMA foreign_key_check").fetchall()
+            if bad:
+                raise sqlite3.IntegrityError(f"{len(bad)} foreign key violation(s) after the migration")
+            conn.execute("COMMIT")
         except sqlite3.Error as exc:
             if conn.in_transaction:
                 conn.rollback()
             raise sqlite3.OperationalError(f"catalog migration {n} failed and was rolled back: {exc}") from exc
+        finally:
+            conn.execute("PRAGMA foreign_keys=ON")
     return int(conn.execute("PRAGMA user_version").fetchone()[0])
 
 

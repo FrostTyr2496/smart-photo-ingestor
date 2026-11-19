@@ -3,12 +3,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { CountUp, Disclosure, Icon, SelectTile } from '../components/bits';
 import { cameraOptions, copyOptions, CopiesCell, FileTable, FilterBar, Pager, TierBar, tierCounts, TierPill, type Column } from '../components/FileList';
 import { api } from '../lib/api';
-import { fmtBytes, fmtInt, plural, relTime } from '../lib/format';
+import { fmtBytes, fmtDate, fmtInt, plural, relTime } from '../lib/format';
 import { argvWords, commandKey } from '../lib/labels';
 import { rise, springs } from '../lib/motion';
 import { hrefFor } from '../lib/route';
 import { useStore } from '../lib/store';
 import { cardHeadline, cardHint, TIER, TIER_HINT, TIER_ORDER, TIER_TONE, type Card, type CardCamera, type Tier } from '../lib/tiers';
+import { ClearDialog } from './ClearDialog';
 import { ImportDialog } from './ImportDialog';
 
 const CARD_PAGE = 200;
@@ -32,7 +33,7 @@ function useChecking() {
     Boolean(mount) && tasks.some((t) => !t.final && commandKey(argvWords(t.argv)) === 'card_check' && argvWords(t.argv)[2] === mount);
 }
 
-function CardActions({ c, onImport, showFiles }: { c: Card; onImport: (c: Card) => void; showFiles: boolean }) {
+function CardActions({ c, onImport, onClear, showFiles }: { c: Card; onImport: (c: Card) => void; onClear: (c: Card) => void; showFiles: boolean }) {
   const { startTask } = useStore();
   const checking = useChecking()(c.mount);
   return (
@@ -53,6 +54,15 @@ function CardActions({ c, onImport, showFiles }: { c: Card; onImport: (c: Card) 
           <button type="button" className="btn h-7 text-xs" onClick={() => onImport(c)}>
             Import…
           </button>
+          <button
+            type="button"
+            className="btn h-7 text-xs"
+            disabled={checking || !c.checked_at}
+            title={c.checked_at ? 'Delete the files that are safely backed up' : 'Check the card first'}
+            onClick={() => onClear(c)}
+          >
+            Clear card…
+          </button>
         </>
       ) : (
         <>
@@ -61,6 +71,9 @@ function CardActions({ c, onImport, showFiles }: { c: Card; onImport: (c: Card) 
           </button>
           <button type="button" className="btn h-7 text-xs" disabled title={`Plug in ${c.label} to import it`}>
             Import…
+          </button>
+          <button type="button" className="btn h-7 text-xs" disabled title={`Plug in ${c.label} to clear it`}>
+            Clear card…
           </button>
         </>
       )}
@@ -77,7 +90,7 @@ function NotConnected() {
   return <span className="chip border-line-strong text-muted">Not connected</span>;
 }
 
-function CardTile({ c, onImport }: { c: Card; onImport: (c: Card) => void }) {
+function CardTile({ c, onImport, onClear }: { c: Card; onImport: (c: Card) => void; onClear: (c: Card) => void }) {
   const when = c.mounted
     ? c.checked_at
       ? `Checked ${relTime(c.checked_at)}`
@@ -103,7 +116,8 @@ function CardTile({ c, onImport }: { c: Card; onImport: (c: Card) => void }) {
           ))}
         </div>
       )}
-      <CardActions c={c} onImport={onImport} showFiles />
+      {c.cleared_at && <p className="text-xs text-muted">Cleared by PhotoVault on {fmtDate(c.cleared_at)}</p>}
+      <CardActions c={c} onImport={onImport} onClear={onClear} showFiles />
     </motion.article>
   );
 }
@@ -158,7 +172,7 @@ function CameraTable({ cameras }: { cameras: CardCamera[] }) {
 
 // ---------------------------------------------------------------- list
 
-function CardList({ onImport }: { onImport: (c: Card) => void }) {
+function CardList({ onImport, onClear }: { onImport: (c: Card) => void; onClear: (c: Card) => void }) {
   const { epoch } = useStore();
   const [data, setData] = useState<{ cards: Card[]; cameras: CardCamera[] } | null>(null);
   const [error, setError] = useState('');
@@ -187,7 +201,7 @@ function CardList({ onImport }: { onImport: (c: Card) => void }) {
         <div className="grid gap-4 lg:grid-cols-2">
           {connected.map((c, i) => (
             <motion.div key={c.volume_id ?? c.mount ?? c.label} {...rise(i)}>
-              <CardTile c={c} onImport={onImport} />
+              <CardTile c={c} onImport={onImport} onClear={onClear} />
             </motion.div>
           ))}
         </div>
@@ -206,7 +220,7 @@ function CardList({ onImport }: { onImport: (c: Card) => void }) {
           <p className="pb-3 text-xs text-faint">As last checked. A card that was formatted since keeps its old record here.</p>
           <div className="grid gap-4 lg:grid-cols-2">
             {remembered.map((c) => (
-              <CardTile key={c.volume_id ?? c.label} c={c} onImport={onImport} />
+              <CardTile key={c.volume_id ?? c.label} c={c} onImport={onImport} onClear={onClear} />
             ))}
           </div>
         </Disclosure>
@@ -217,7 +231,7 @@ function CardList({ onImport }: { onImport: (c: Card) => void }) {
 
 // ---------------------------------------------------------------- one card
 
-function CardDetail({ id, onImport }: { id: string; onImport: (c: Card) => void }) {
+function CardDetail({ id, onImport, onClear }: { id: string; onImport: (c: Card) => void; onClear: (c: Card) => void }) {
   const { epoch } = useStore();
   const [filter, setFilter] = useState({ tier: '', copies: '', other: '', camera: '', offset: 0 });
   const [data, setData] = useState<{ card: Card; files: CardFile[]; total: number } | null>(null);
@@ -283,13 +297,13 @@ function CardDetail({ id, onImport }: { id: string; onImport: (c: Card) => void 
             </div>
             <p className={`mt-2 ${TIER_TONE[c.tier].text}`}>{cardHeadline(c)}</p>
             <p className="mt-1 text-sm text-muted">
-              {[cardHint(c), c.mounted ? (c.checked_at ? `Checked ${relTime(c.checked_at)}.` : 'Never checked.') : 'Not connected: as last checked.']
+              {[cardHint(c), c.mounted ? (c.checked_at ? `Checked ${relTime(c.checked_at)}.` : 'Never checked.') : 'Not connected: as last checked.', c.cleared_at ? `Cleared by PhotoVault on ${fmtDate(c.cleared_at)}.` : '']
                 .filter(Boolean)
                 .join(' ')}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <CardActions c={c} onImport={onImport} showFiles={false} />
+            <CardActions c={c} onImport={onImport} onClear={onClear} showFiles={false} />
             <a href={hrefFor({ view: 'cards', id: null })} className="btn h-7 text-xs">
               <Icon name="back" size={12} /> All cards
             </a>
@@ -344,10 +358,13 @@ function CardDetail({ id, onImport }: { id: string; onImport: (c: Card) => void 
 export function Cards({ id }: { id: string | null }) {
   const [importing, setImporting] = useState<{ mount: string; label: string } | null>(null);
   const onImport = (c: Card) => c.mount && setImporting({ mount: c.mount, label: c.label });
+  const [clearing, setClearing] = useState<{ mount: string; label: string } | null>(null);
+  const onClear = (c: Card) => c.mount && setClearing({ mount: c.mount, label: c.label });
   return (
     <>
-      {id ? <CardDetail id={id} onImport={onImport} /> : <CardList onImport={onImport} />}
+      {id ? <CardDetail id={id} onImport={onImport} onClear={onClear} /> : <CardList onImport={onImport} onClear={onClear} />}
       <ImportDialog card={importing} onClose={() => setImporting(null)} />
+      <ClearDialog card={clearing} onClose={() => setClearing(null)} />
     </>
   );
 }

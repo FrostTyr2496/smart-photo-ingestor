@@ -55,7 +55,7 @@ def test_connect_creates_parent_dirs_and_pragmas(tmp_path: Path) -> None:
 
 def test_fresh_db_migrates_to_1_with_all_tables(conn: sqlite3.Connection) -> None:
     assert conn.execute("PRAGMA user_version").fetchone()[0] == 0
-    assert db.migrate(conn) == len(migrations.MIGRATIONS) == 7
+    assert db.migrate(conn) == len(migrations.MIGRATIONS) == 8
     assert _tables(conn) == EXPECTED_TABLES
 
 
@@ -123,3 +123,25 @@ def test_snapshot_refuses_existing_dest(conn: sqlite3.Connection, tmp_path: Path
     dest.write_bytes(b"")
     with pytest.raises(FileExistsError):
         db.snapshot(conn, dest)
+
+
+def test_v8_rebuilds_jobs_for_card_clear_and_keeps_every_row(conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch) -> None:
+    full = list(migrations.MIGRATIONS)
+    monkeypatch.setattr(migrations, "MIGRATIONS", full[:7])
+    assert db.migrate(conn) == 7
+    conn.execute("INSERT INTO volumes VALUES ('v1','CARD','card:x',NULL,'U1',NULL,1,'/m','now','now')")
+    conn.execute("INSERT INTO jobs (job_id, kind, source_volume_id, state, created_at) VALUES (5,'card_ingest','v1','done','now')")
+    conn.execute("INSERT INTO job_items VALUES (5,1,'DCIM/a.NEF','a.NEF',NULL,NULL,NULL,'committed',NULL,'now')")
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO jobs (kind, state, created_at) VALUES ('card_clear','planned','now')")
+    monkeypatch.setattr(migrations, "MIGRATIONS", full)
+    assert db.migrate(conn) == 8
+    assert conn.execute("SELECT job_id, kind, source_volume_id, state FROM jobs").fetchall()[0][:] == (5, "card_ingest", "v1", "done")
+    assert conn.execute("SELECT COUNT(*) FROM job_items WHERE job_id = 5").fetchone()[0] == 1
+    conn.execute("INSERT INTO jobs (kind, source_volume_id, state, created_at) VALUES ('card_clear','v1','planned','now')")
+    assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+    assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+    with pytest.raises(sqlite3.IntegrityError):  # job_items still points at jobs
+        conn.execute("INSERT INTO job_items VALUES (99,1,'x',NULL,NULL,NULL,NULL,'planned',NULL,'now')")
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO jobs (kind, state, created_at) VALUES ('bogus','planned','now')")

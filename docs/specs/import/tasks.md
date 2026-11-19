@@ -91,7 +91,7 @@ target are skipped (`skipped_dup`, D-036), so a batch is never copied twice.
     the second drive → those files green.
   - Full card: dry run, then apply. Paste back timings, counts, `sync_method` and the card's tiers.
 
-- [ ] 7. **[stronger]** Safe card clear
+- [x] 7. **[stronger]** Safe card clear
   - ID: cc-1 (D-092; vault-rules 1 and 4 exceptions)
   - Migration: job kind `card_clear` (items: `src_rel` = the card file, `state` `committed` once deleted,
     `failed` with the reason). `photovault/card_clear.py`: `plan_clear(conn, cfg, mount) -> dict` (read-only:
@@ -103,6 +103,8 @@ target are skipped (`skipped_dup`, D-036), so a batch is never copied twice.
   - CLI: `cards clear <mount> [--dry-run] --confirm N` (N must equal the planned file count). Web: `card_clear`
     with a typed-count confirm; the card shows "Cleared by PhotoVault on <date>".
   - Verify: `uv run pytest tests/test_card_clear.py -q`
+  - Result (2026-11-18): `uv run pytest tests/test_card_clear.py -q` → 13 passed; `uv run pytest -q` full suite green;
+    web typecheck clean, `npm test` 123 passed, build committed. Schema V8 (cu-0 moves to V9). See D-094.
 
 ## Order
 

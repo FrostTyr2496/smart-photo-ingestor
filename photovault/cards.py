@@ -277,8 +277,11 @@ def list_cards(conn: sqlite3.Connection, drive_rows: list[dict]) -> dict:
 def _card_row(conn: sqlite3.Connection, d: dict, vid: str | None, files: list[dict]) -> dict:
     summary = card_summary(conn, vid, files=files)
     label = d.get("label") or (Path(d["mount"]).name if d.get("mount") else "Card")
+    from photovault.card_clear import cleared_at  # local import: card_clear imports this module
+
     return {"volume_id": vid, "label": label, "mount": d.get("mount"), "mounted": bool(d.get("mounted")),
-            "last_seen_at": d.get("last_seen_at"), "registered": vid is not None, **summary}
+            "last_seen_at": d.get("last_seen_at"), "registered": vid is not None,
+            "cleared_at": cleared_at(conn, vid), **summary}
 
 
 __all__ = ["EMPTY", "RANK", "TIERS", "camera_names", "camera_rows", "card_files", "card_summary", "check_card",
