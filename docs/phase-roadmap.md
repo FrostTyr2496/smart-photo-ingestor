@@ -153,6 +153,8 @@ rep-1 is replaced by bk-5; rep-0 still covers legacy content on the 12 TB.
 | P5d.11 | sp-2 iPhone locations from an osxphotos JSON export (+ V6 `geo_points` columns) (**sp-2, sp-3, rv-10 done 2026-11-18**), then sp-3 place names + rv-10 | sp-1 | **[user]** run the export in iTerm |
 | P5d.12 | sp-6 sessions over the phone track + Follow the track; sp-7 time-zone suggestions per camera (**sp-7 done 2026-11-18**) | sp-2, rv-16 | **[user]** visual check |
 | P5d.13 | sp-4 suggested shoots across cameras and the phone (then cu-2, cu-3) | sp-2 | **[user]** visual check |
+| P5d.14 | sp-8 farther suggestions (±12 h, graded), rv-18 Copy name, rv-19 Show in All Photos, rv-20 full-screen viewer (**done 2026-11-18**); rv-21 headers | sp-2 | **[user]** browser check |
+| P5d.15 | sh-0 shoot tagging: time model, planner, dry-run review, apply + undo (sh-0b, sh-1..sh-5) | sp-8 | **[user]** approve `docs/reviews/2026-11-18-sh-0-shoot-tagging.md` |
 | P5d.8 | rv-12..rv-15 file system tag, clickable tiles, drive rename, fast drive list (**done 2026-11-18**) | rv-6 | none |
 | P5d.9 | Spec `curation` (D-069): wave 1 approved fixes (idx-9, idx-14, seq-1b, rv-11 with ing-13, idx-10), rv-16, cu-0..cu-3, lr-0..lr-3, set-1, dd-0, ro-0 | — | proposals cu-0, dd-0, ro-0 need **[user]** approval |
 
