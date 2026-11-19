@@ -74,6 +74,11 @@ for a tick per warning). A dry run is never gated; it reports what the gate woul
     [--accept-warnings]`; `resume <job>` handles `replicate` jobs.
   - Fault tests (as ing-10): target unplugged mid-file, source bytes differ from the catalog hash, ingest paused
     upstream, a second job onto the same target refused, a concurrent ingest writing the catalog.
+  - **Amended (D-101):** a second source kind, a folder on any drive (LEGACY included, read only):
+    `plan_backup(..., source_folder=<rel>)` / CLI `backup --from-folder <mount>/<folder> --to <mount> [--dry-run]`.
+    Items are the folder's files; `dst_rel` mirrors `<drive label>/<folder rel>` under `working_subdir`'s parent
+    `Photography/Backups/`. Files not yet hashed on the source are hashed during the copy (read once). Targets:
+    WORKING/MASTER on exFAT or APFS only (NTFS refused). Web: `backup` command with both forms.
   - Verify: `uv run pytest tests/test_backup.py -q`
 
 - [ ] 4. **[stronger]** Card workflow in the web UI

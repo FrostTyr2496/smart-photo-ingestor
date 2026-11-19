@@ -75,7 +75,8 @@ task's commit:
 1. **[user] re-index Big Boy Old** (`uv run photovault index "/Volumes/Big Boy Old"`), then open its drive page.
    Then:
 2. **Import (spec `docs/specs/import`, D-088..D-091, D-096):** im-1..im-4 and cc-1 (safe card clear, schema V8) done; card-4 (card check skips full reads of files with no copy) done.
-   Next agent task: **bk-3** (trailing copy onto a second WORKING/MASTER drive). Until it lands nothing can turn green,
+   Next agent tasks: **bk-3** with a folder source (D-101), then im-7 (dry-run tree, D-102), rec-1 (target
+   recommendations, D-103). Then **bk-3** (trailing copy onto a second WORKING/MASTER drive). Until it lands nothing can turn green,
    because a second import onto another WORKING drive skips the files as duplicates (D-036), so Clear finds nothing.
    [user] im-5 and im-6: see "Waiting on user".
 3. **[user] idx-6:** resume the PP 1 hash with `--skip-prefix` on the damaged folder, then run `report duplicates`
@@ -118,11 +119,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-103 (user): copy-target recommendations by connected drives, file system, speed, space and copies.
+- D-102 (user): import dry run shows every planned file as a folder tree; Show in Finder after Apply.
+- D-101 (user): bk-3 also backs up a folder from any drive (read-only) onto WORKING/MASTER; no NTFS targets.
 - D-100 (agent): rv-27 Show in Photos on file rows, `GET /api/volumes/<id>/photo`, route `#/photos?photo=&day=`.
 - D-099 (agent): card-4 a card check full-reads only files that may already be elsewhere; result has `no_candidate`.
-- D-098 (agent): rv-26 file lists as a folder tree, runs of similar names collapsed, pages of 1000.
-- D-097 (agent): cc-1 details: V8 rebuilds `jobs`; frames held back whole; one copy re-hashed, a mismatch stops the run.
-- D-096 (user): safe card clear; vault-rules 1 and 4 exceptions; job kind `card_clear`.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.
