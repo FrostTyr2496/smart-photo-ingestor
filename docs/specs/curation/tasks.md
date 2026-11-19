@@ -142,10 +142,11 @@ result). Build them as written there.
 
 ## Wave 3: culling and Lightroom Classic
 
-- [ ] 10. Keep Lightroom 15 `.acr` sidecars with their raws
+- [x] 10. Keep Lightroom 15 `.acr` sidecars with their raws
   - ID: lr-0 (approved, D-069; small)
   - Add `"acr"` to `SIDECAR_EXTS` in `photovault/scan.py` (and `_CAMERA_SIBLINGS` in `usage.py` if it applies).
   - Verify: `uv run pytest tests/test_scan.py -q` with a raw + `.acr` pair.
+  - Result (2026-11-18): `acr` added to `SIDECAR_EXTS`; not added to `_CAMERA_SIBLINGS` (those belong to clips, not raws). `tests/test_scan.py` classifies `.ACR`; `tests/test_groups.py` groups raw + `.acr`.
 
 - [ ] 11. Keyboard culling in Photos
   - ID: lr-1 (after cu-0 is approved and migrated)

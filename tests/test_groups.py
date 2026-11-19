@@ -24,6 +24,11 @@ def test_pairs_sidecars_derivatives_and_orphans() -> None:
     ]
 
 
+def test_lightroom_acr_sidecar_groups_with_its_raw() -> None:
+    groups = build_groups(_entries("d/DSC_5.NEF", "d/DSC_5.acr"), {})
+    assert _roles(groups) == [{"DSC_5.NEF": "primary", "DSC_5.acr": "sidecar"}]
+
+
 def test_live_photo_and_drone_and_gopro() -> None:
     groups = build_groups(_entries("a/IMG_1.HEIC", "a/IMG_1.AAE", "a/IMG_1.MOV", "b/DJI_1.MP4", "b/DJI_1.SRT",
                                    "c/GX01.MP4", "c/GX01.LRV"), {})

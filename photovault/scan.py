@@ -17,7 +17,7 @@ HEIC_EXTS = frozenset({"heic", "heif"})
 VIDEO_EXTS = frozenset({"mov", "mp4"})
 DERIVATIVE_EXTS = frozenset({"tif", "tiff", "psd", "psb"})
 DERIVATIVE_STEM_SUFFIXES = ("-edit", "-hdr", "-pano", "-enhanced-nr")
-SIDECAR_EXTS = frozenset({"xmp", "srt", "aae"})
+SIDECAR_EXTS = frozenset({"xmp", "srt", "aae", "acr"})  # acr: Lightroom 15 sidecar (lr-0)
 PROXY_EXTS = frozenset({"lrv", "lrf"})
 
 SKIP_DIR_NAMES = frozenset(

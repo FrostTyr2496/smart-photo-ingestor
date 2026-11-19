@@ -104,6 +104,7 @@ def test_walk_is_read_only(card: Path) -> None:
         ("a.xmp", "sidecar"),
         ("a.srt", "sidecar"),
         ("a.AAE", "sidecar"),
+        ("a.ACR", "sidecar"),
         ("a.LRV", "proxy"),
         ("a.lrf", "proxy"),
         ("a.THM", "ignored"),
