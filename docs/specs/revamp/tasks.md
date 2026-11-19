@@ -254,3 +254,22 @@ Rules for every task:
     keep the current behaviour and add only the toggle. The sticky inspector and month rail must still line up after a
     toggle.
   - Verify: `cd web && npm run typecheck && npm test`; **[user]** browser check.
+
+- [ ] 23. Full-size photos when the drive is plugged in, and which drive to plug in otherwise
+  - ID: rv-23 (user ask, 2026-11-18, D-077). Builds on rv-20 (viewer) and rv-21 (`/api/groups/<id>/detail`).
+  - `GET /api/groups/<id>/preview?full=1`, read-only, nothing ever written to the drive:
+    - a JPEG or PNG primary is served as the file itself;
+    - a raw gets its full-resolution embedded JPEG (`JpgFromRaw`, then `PreviewImage`);
+    - TIFF/PSD get their embedded preview, if any, else the thumbnail.
+    It is cached under `<home>/previews/` (keyed by group id and size), and the response says the image's pixel size
+    (header or JSON sidecar) so the UI can tell full size from preview. A 409 `{needs: [{volume_id, label, role}]}`
+    means no drive holding the file is mounted, and lists the drives that hold it (WORKING first, then by last seen).
+  - Viewer (`Lightbox.tsx`): asks for `full=1`, showing the thumbnail first; a small badge reads "6048 × 4024 · full
+    size" or "1620 × 1080 · preview". On a 409 it shows a popup card over the image: "Full size is on **PP 1** (or
+    Flats 1). Plug one in to see it." with drive chips like rv-21's. While the card is open, the mounts are rechecked
+    every 5 s (or through the drives store if it already polls); when one mounts, the full image loads by itself and
+    the card goes away. Esc or ✕ dismisses the card, not the viewer.
+  - Inspector preview: under the image, one line: "Thumbnail · plug in PP 1 for full size" when not mounted, nothing
+    when mounted.
+  - Verify: `uv run pytest tests/test_web_api.py -q -k preview`; `cd web && npm run typecheck && npm test`;
+    **[user]** browser check with one drive mounted and one not.
