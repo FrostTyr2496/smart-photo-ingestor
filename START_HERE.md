@@ -114,7 +114,7 @@ task's commit:
 - D-082 (user): the map centres on the selection or its top suggestion (a faint ring until Use).
 - D-081 (user): moving a saved location also moves related photos still at the same spot (25 m).
 - D-080 (user): shoot tagging approved (two-time model, trips, tz per shoot, names, V7, catalog-only apply in a review mode).
-- D-078 (agent): rv-21..rv-23 and sp-7b judgement calls; 0 clock banners on the real catalog; full previews cached in the home.
+- D-079 (agent): rv-24 expandable map window (portal, own Leaflet map, Esc closes only it).
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.
