@@ -302,3 +302,11 @@ Rules for every task:
   - Leaflet stays lazy-loaded; the window reuses the inspector's Leaflet instance or creates its own.
   - Verify: `cd web && npm run typecheck && npm test`; **[user]** browser check.
   - Result (2026-11-18): done. Expand button on the small map and a "Refine on map" link after Use open a portal window (80 %, full screen under 640 px) with a street-level pin, click/drag, live Coord link, place search, Done / Cancel / Esc (captured, so only the window closes). OSM tiles only, loaded when the window opens; ResizeObserver handles invalidateSize. `initialView` tested; typecheck, 68 tests, build pass.
+
+- [x] 25. A persistent filter bar above the day headers
+  - ID: rv-25 (user ask, 2026-11-18)
+  - The drive and "Show" selects, the active filter chips (✕ each, Clear all) and "N photos · N selected" move into one
+    sticky bar under the app header (`top-[57px]`, 48 px). Day headers stick below it (`top-[105px]`), and the month rail
+    and inspector at `top-[117px]`, with their max heights reduced to match. The day header's own filter note is off,
+    since the bar always shows the filters.
+  - Result (2026-11-18): `cd web && npm run typecheck && npm test` → clean, 93 passed; build committed. Browser check pending.

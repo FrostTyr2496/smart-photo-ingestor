@@ -330,44 +330,44 @@ export function Photos() {
             )}
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <select value={volume} onChange={(e) => setVolume(e.target.value)} className="h-8" aria-label="Drive">
-            <option value="">All drives</option>
-            {registered.map((d) => (
-              <option key={d.volume_id} value={d.volume_id!}>
-                {driveName(d)}
-                {d.mounted ? '' : ' (not connected)'}
-              </option>
-            ))}
-          </select>
-          <select value={missing} onChange={(e) => setMissing(e.target.value as Missing)} className="h-8" aria-label="Show">
-            {(Object.keys(MISSING_LABEL) as Missing[]).map((k) => (
-              <option key={k} value={k}>
-                {MISSING_LABEL[k]}
-              </option>
-            ))}
-          </select>
-        </div>
       </div>
 
-      {chips.length > 0 && (
-        <div className="-mt-2 flex flex-wrap items-center gap-1.5" aria-label="Active filters">
-          <span className="text-xs text-muted">Filtered:</span>
-          {chips.map((c) => (
-            <span key={c.key} className="inline-flex items-center gap-1 rounded-full border border-accent/30 bg-accent/10 py-0.5 pl-2.5 pr-1 text-xs">
-              {c.label}
-              <button type="button" className="rounded-full p-0.5 text-muted hover:bg-ink/10 hover:text-ink" aria-label={`Clear filter ${c.label}`} onClick={() => (c.key === 'drive' ? setVolume('') : setMissing(''))}>
-                <Icon name="x" size={10} />
-              </button>
-            </span>
+      {/* Persistent filter bar: stays above the sticky day header while the grid scrolls. */}
+      <div className="no-scrollbar sticky top-[57px] z-20 -mx-1 flex h-12 items-center gap-2 overflow-x-auto border-b border-line bg-bg/90 px-1 backdrop-blur" aria-label="Filters">
+        <select value={volume} onChange={(e) => setVolume(e.target.value)} className="h-8 shrink-0" aria-label="Drive">
+          <option value="">All drives</option>
+          {registered.map((d) => (
+            <option key={d.volume_id} value={d.volume_id!}>
+              {driveName(d)}
+              {d.mounted ? '' : ' (not connected)'}
+            </option>
           ))}
-          {chips.length > 1 && (
-            <button type="button" className="text-xs text-muted underline hover:text-ink" onClick={clearFilters}>
-              Clear all
+        </select>
+        <select value={missing} onChange={(e) => setMissing(e.target.value as Missing)} className="h-8 shrink-0" aria-label="Show">
+          {(Object.keys(MISSING_LABEL) as Missing[]).map((k) => (
+            <option key={k} value={k}>
+              {MISSING_LABEL[k]}
+            </option>
+          ))}
+        </select>
+        {chips.map((c) => (
+          <span key={c.key} className="inline-flex shrink-0 items-center gap-1 rounded-full border border-accent/30 bg-accent/10 py-0.5 pl-2.5 pr-1 text-xs">
+            {c.label}
+            <button type="button" className="rounded-full p-0.5 text-muted hover:bg-ink/10 hover:text-ink" aria-label={`Clear filter ${c.label}`} onClick={() => (c.key === 'drive' ? setVolume('') : setMissing(''))}>
+              <Icon name="x" size={10} />
             </button>
-          )}
-        </div>
-      )}
+          </span>
+        ))}
+        {chips.length > 1 && (
+          <button type="button" className="shrink-0 text-xs text-muted underline hover:text-ink" onClick={clearFilters}>
+            Clear all
+          </button>
+        )}
+        <span className="ml-auto shrink-0 pl-2 text-xs text-muted">
+          {counts ? `${fmtInt(counts.groups)} photos` : ''}
+          {sel.size ? ` · ${fmtInt(sel.size)} selected` : ''}
+        </span>
+      </div>
 
       <div className={`grid items-start gap-4 ${sel.size ? 'xl:grid-cols-[minmax(0,1fr)_360px]' : ''}`}>
         <div className="grid min-w-0 items-start gap-3 md:grid-cols-[56px_minmax(0,1fr)]">
@@ -391,7 +391,7 @@ export function Photos() {
                   onTile={onTile}
                   onOpen={openViewer}
                   onSelectDay={() => void selectDay(d)}
-                  filterNote={note}
+                  filterNote=""
                   onClearFilters={clearFilters}
                   connected={(id) => (id ? byVolume.get(id)?.mounted ?? false : false)}
                 />
@@ -408,7 +408,7 @@ export function Photos() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: 24, transition: { duration: 0.12 } }}
               transition={{ type: 'spring', stiffness: 420, damping: 36 }}
-              className="fixed bottom-2 right-2 top-16 z-20 w-[min(380px,calc(100vw-1rem))] xl:sticky xl:top-[72px] xl:bottom-auto xl:right-auto xl:z-auto xl:w-auto xl:self-start"
+              className="fixed bottom-2 right-2 top-16 z-20 w-[min(380px,calc(100vw-1rem))] xl:sticky xl:top-[117px] xl:bottom-auto xl:right-auto xl:z-auto xl:w-auto xl:self-start"
             >
               <PhotoInspector selected={selected} pool={pool} settings={settings} windowS={windowS} onClear={clear} onSaved={onSaved} onRelated={onRelated} savedEpoch={savedEpoch} onShowInAll={showInAll} onOpenViewer={openViewer} />
             </motion.div>
@@ -427,7 +427,7 @@ function MonthRail({ rail, undated }: { rail: ReturnType<typeof monthRail>; unda
   const go = (day: string) => document.getElementById(`day-${day}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   if (!rail.length) return <div className="hidden md:block" />;
   return (
-    <nav aria-label="Jump to month" className="no-scrollbar hidden max-h-[calc(100vh-88px)] flex-col gap-2 overflow-y-auto md:sticky md:top-[72px] md:flex">
+    <nav aria-label="Jump to month" className="no-scrollbar hidden max-h-[calc(100vh-133px)] flex-col gap-2 overflow-y-auto md:sticky md:top-[117px] md:flex">
       {rail.map((y) => (
         <div key={y.year} className="flex flex-col">
           <button type="button" className="label py-1 text-left hover:text-ink" onClick={() => go(y.months[0]!.day)}>
@@ -498,7 +498,7 @@ function DaySection({
 
   return (
     <section ref={box} id={`day-${d.day}`} className="scroll-mt-[64px]">
-      <div className="sticky top-[57px] z-10 -mx-1 flex items-center justify-between gap-3 bg-bg/85 px-1 py-2 backdrop-blur">
+      <div className="sticky top-[105px] z-10 -mx-1 flex items-center justify-between gap-3 bg-bg/85 px-1 py-2 backdrop-blur">
         <div className="flex min-w-0 items-baseline gap-2">
           <h2 className="truncate font-medium">{dayLabel(d.day)}</h2>
           <span className="truncate text-xs text-muted" title={dayLine(d, groups, nSel)}>
