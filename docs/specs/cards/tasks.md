@@ -64,4 +64,4 @@ the worst tier among its files; no files gives `empty`.
     asset with a `verified` instance on a non-CARD volume are full-hashed; the rest stay `indexed` (red).
     `check_card` passes it and returns `no_candidate` (files not read in full). `hash` is unchanged.
   - Verify: `uv run pytest tests/test_cards.py tests/test_baseline_hash.py -q`
-  - Result (2026-11-18): see the commit; a file copied to a backup drive later needs a new card check to link.
+  - Result (2026-11-18): `uv run pytest tests/test_cards.py tests/test_baseline_hash.py -q` → 33 passed; full suite 720 passed. A file copied to a backup drive later needs a new card check to link.
