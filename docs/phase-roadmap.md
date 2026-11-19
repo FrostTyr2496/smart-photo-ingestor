@@ -155,7 +155,7 @@ rep-1 is replaced by bk-5; rep-0 still covers legacy content on the 12 TB.
 | P5d.13 | sp-4 suggested shoots across cameras and the phone (then cu-2, cu-3) | sp-2 | **[user]** visual check |
 | P5d.14 | sp-8 farther suggestions (±12 h, graded), rv-18 Copy name, rv-19 Show in All Photos, rv-20 full-screen viewer (**done 2026-11-18**); rv-21 headers | sp-2 | **[user]** browser check |
 | P5d.15 | sh-0 shoot tagging: time model, planner, dry-run review, apply + undo (sh-0b, sh-1..sh-5). Done: sh-0b, sh-1, sh-2, sh-3, sh-3b, sh-4; next sh-5 | sp-8 | approved (D-080); **[user]** browser check of review + Apply |
-| P5d.16 | rv-27 fix 2 (Show in Photos lands on the photo), rv-28 right-click menus on photo tiles and file rows (other surfaces proposed in the spec), rv-29 hover preview in file lists, rv-30 Recently run on Tasks (**done 2026-11-19**) | rv-27 | **[user]** browser check |
+| P5d.16 | rv-27 fix 2 (Show in Photos lands on the photo), rv-28 right-click menus on photo tiles and file rows (other surfaces proposed in the spec), rv-29 hover preview in file lists, rv-30 Recently run on Tasks, rv-33 new-device highlight and drive sort/filter (**done 2026-11-19**) | rv-27 | **[user]** browser check |
 | P5d.8 | rv-12..rv-15 file system tag, clickable tiles, drive rename, fast drive list (**done 2026-11-18**) | rv-6 | none |
 | P5d.9 | Spec `curation` (D-069): wave 1 approved fixes (idx-9, idx-14, seq-1b, rv-11 with ing-13, idx-10), rv-16, cu-0..cu-3, lr-0..lr-3, set-1, dd-0, ro-0 | — | proposals cu-0, dd-0, ro-0 need **[user]** approval |
 

@@ -6,6 +6,7 @@ import { DialogHost } from './components/DialogHost';
 import { DoneNotifier } from './components/DoneNotifier';
 import { ConfirmDialog, Toasts } from './components/Overlays';
 import { DialogsProvider } from './lib/dialogs';
+import { DriveActivityProvider } from './lib/driveActivity';
 import { useEffect, useState } from 'react';
 import { isTypingTarget, modalOpen } from './lib/keys';
 import { usePref } from './lib/prefs';
@@ -55,7 +56,7 @@ function Shell() {
   const { tasks, elsewhere } = useStore();
   const active = tasks.some((t) => !t.final) || elsewhere.length > 0;
   return (
-    <>
+    <DriveActivityProvider route={route}>
       <AmbientGlow active={active} />
       {review && <ReviewFrame />}
       <div className="relative z-[1] min-h-screen">
@@ -128,7 +129,7 @@ function Shell() {
       <ConfirmDialog />
       <ContextMenuHost />
       <DevTools />
-    </>
+    </DriveActivityProvider>
   );
 }
 

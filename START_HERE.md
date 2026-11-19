@@ -68,7 +68,7 @@ task's commit:
 ```
 
 ## Next
-0. **[user] browser check (rv-31 seen working 2026-11-19)** of Minimize on Clear/Import/Make green and the done popup + notification (rv-32, Settings switch), of the Clear dialog's "Re-read every copy" option, its bypass warning and per-drive summary (cc-2), of one block per run on Tasks, with the follow copy nested (rv-31), the Import dialog's folder tree and Show in Finder after Apply (im-7), of Recently run on Tasks (rv-30), right-click (rv-28), Show in Photos landing on the photo (rv-27 fix 2) and the file-list
+0. **[user] browser check (rv-31 seen working 2026-11-19)** of the sidebar's "New device detected" glow (plug a card in; it fades once you open or use it) and its Sort / Filter (rv-33), Minimize on Clear/Import/Make green and the done popup + notification (rv-32, Settings switch), of the Clear dialog's "Re-read every copy" option, its bypass warning and per-drive summary (cc-2), of one block per run on Tasks, with the follow copy nested (rv-31), the Import dialog's folder tree and Show in Finder after Apply (im-7), of Recently run on Tasks (rv-30), right-click (rv-28), Show in Photos landing on the photo (rv-27 fix 2) and the file-list
    hover preview (rv-29)**, after restarting `serve`. Also the **[user] visual check of the new UI (rv-1..rv-7, rv-12..15)**: restart `serve` (it picks up drive rename and the
    faster drive list). In Photos, connect a drive, check that thumbnails load, then save a location and keywords on a few photos. Also the older
    **[user] visual check (ui-5..15, card-3):** restart `uv run photovault serve` (it picks up ui-11..15), try the
@@ -122,11 +122,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-116 (user+agent): rv-33 a drive plugged in glows as New until opened, used or dismissed; sidebar Sort (recent, type, format, size, free) and Type/Format filter.
 - D-115 (user+agent): rv-32 Minimize for the Clear/Import/Make green dialogs (dock bottom right); popup + browser notification when a 20 s+ task ends; Settings switch.
 - D-114 (user+agent): cc-2 card clear re-reads every copy before deleting (default on, `--no-verify-all-copies` bypasses); baseline checks stay.
 - D-113 (agent): the UI polls `/api/generation` instead of holding `/api/events` open (six-connection limit froze loading).
 - D-112 (agent): rv-31 Tasks groups running work by run (card -> target once; follow copy nested), not by drive.
-- D-111 (user+agent): tc-1 test card mode: hide chosen drives' copies of one card's files (settings row, no schema change).
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

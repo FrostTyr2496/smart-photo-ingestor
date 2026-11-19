@@ -431,3 +431,21 @@ Rules for every task:
     `web/src/lib/notify.ts`.
   - Verify: `cd web && npm run typecheck && npm test && npm run build`.
   - Result (2026-11-19): typecheck clean; 189 web tests pass (18 files, 8 new in `notify.test.ts`); build committed. Not seen in a browser.
+
+- [x] 33. "New device detected" highlight; sort and filter the drives sidebar
+  - ID: rv-33 (user ask, 2026-11-19; D-116)
+  - A drive plugged in since the last poll (or since the page was last open), seen before or not, glows in the
+    sidebar with a "New" chip, floats to the top of its group, and is named in a "New device detected" banner above
+    the list. It fades out once the user interacts with it: opens its drive, card or setup page (or is on that page
+    when it is plugged back in), runs something on it (any UI or terminal task whose mounts include it), or clicks
+    "New" / the banner's dismiss. Unplugging clears it; the very first visit flags nothing. A drive whose key changes
+    at setup (same mount) is not re-flagged. Tracked in the shell (`DriveActivityProvider`), so it keeps watching
+    while the sidebar is hidden; stored per browser (`pv:driveSeen`), no server change.
+  - The Drives list gains Sort (Default, Recently used, Type, Format, Size, Free space, Name) and a Filter panel of
+    Type and Format chips (only values present show; any value within a facet, all facets must match). Sorting is
+    within each group (Mounted, Not connected, Ignored); a new drive ignores the filter. "Recently used" = the later
+    of an interaction this browser saw (open, task, plug-in) and the drive's last step run (`steps.at`). Choices are
+    remembered per browser. Pure rules in `web/src/lib/driveList.ts`.
+  - Verify: `cd web && npm run typecheck && npm test && npm run build`.
+  - Result (2026-11-19): typecheck clean; 215 web tests pass (20 files, 16 new in `driveList.test.ts`); build
+    committed. Not seen in a browser.
