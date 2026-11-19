@@ -87,6 +87,8 @@ task's commit:
    met-2 (web view); met-4 after bk-1.
 
 ## Waiting on user
+- **sh-0 shoot tagging (D-075):** 6 decisions in `docs/reviews/2026-11-18-sh-0-shoot-tagging.md` §7 (time model, trips, time
+  zone per shoot, names, schema V7, apply scope). No code until approved.
 - **[user] phone import (sp-2):** `uv run photovault --json meta phone "$HOME/Library/Application Support/PhotoVault/phone/photos-20261118.json"`
   (migrates the catalog to V6, about 18,995 points), then restart `serve` and check in Photos: the "Applies to" block (rv-16), phone place names and "Near this time"
   (sp-3), Copy filename (rv-10), the clock banner (sp-7), coordinates opening Google Maps (rv-17).
