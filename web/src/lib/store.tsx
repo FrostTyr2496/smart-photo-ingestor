@@ -85,15 +85,20 @@ const newTask = (id: number): TaskRec => ({
   note: '',
   error: '',
   result: null,
+  jobId: null,
 });
 
 /** Copy what a poll reported into the task record (a fresh object, so React sees the change). */
 export function absorb(t: TaskRec, d: TaskDetail): TaskRec {
   const n: TaskRec = { ...t, argv: d.argv, state: d.state, exitCode: d.exit_code, lastSeq: d.last_seq, keepAwake: Boolean(d.keep_awake) };
+  if (typeof d.job_id === 'number') n.jobId = d.job_id;
   if (d.latest_progress) n.progress = d.latest_progress;
   for (const e of d.events) {
     if (n.startMs === null && e.ts) n.startMs = Date.parse(e.ts) || null;
-    if (e.event === 'result') n.result = e as Record<string, unknown>;
+    if (e.event === 'result') {
+      n.result = e as Record<string, unknown>;
+      if (n.jobId === null && typeof e.job_id === 'number') n.jobId = e.job_id;
+    }
     else if (e.event === 'warning') n.note = e.message || e.code || '';
     else if (e.event === 'error') n.error = e.message || e.code || '';
     else if (e.event === 'progress' && e.message) n.note = e.message;
@@ -192,7 +197,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const { tasks } = await api<{ tasks: TaskSummary[] }>('GET', '/api/tasks');
             for (const s of tasks) {
               if (!map.has(s.task_id)) {
-                map.set(s.task_id, { ...newTask(s.task_id), argv: s.argv, state: s.state, exitCode: s.exit_code, final: s.state !== 'running' });
+                map.set(s.task_id, { ...newTask(s.task_id), argv: s.argv, state: s.state, exitCode: s.exit_code, final: s.state !== 'running', jobId: s.job_id ?? null });
                 changed = true;
               }
             }

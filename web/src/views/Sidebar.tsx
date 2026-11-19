@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { useState } from 'react';
+import { useState, type MouseEvent } from 'react';
 import { Disclosure, FsPill, Icon, RolePill, ROLE_DOT } from '../components/bits';
 import { RefsDialog } from './RefsDialog';
 import { ProgressBar } from '../components/ProgressBar';
@@ -170,6 +170,15 @@ function DriveList({ route }: { route: Route }) {
   );
 }
 
+const TASKS_HREF = hrefFor({ view: 'home' });
+
+/** A click anywhere on a sidebar task opens the Tasks page, except on its own controls (Pause, Details) or while selecting text. */
+function openTasks(e: MouseEvent) {
+  if ((e.target as HTMLElement).closest('button, a, input, code')) return;
+  if (window.getSelection()?.toString()) return;
+  window.location.hash = TASKS_HREF;
+}
+
 function TaskList() {
   const { tasks, elsewhere, stale, drives, now, driveFiles } = useStore();
   const [earlierOpen, setEarlierOpen] = useState(false);
@@ -181,7 +190,11 @@ function TaskList() {
   return (
     <section className="card p-3" aria-label="Tasks">
       <div className="flex items-center justify-between px-1 pb-2">
-        <h2 className="label">Tasks</h2>
+        <h2 className="label">
+          <a href={TASKS_HREF} className="hover:text-ink">
+            Tasks
+          </a>
+        </h2>
         {nRunning > 0 && (
           <span className="flex items-center gap-1.5 font-mono text-2xs text-accent">
             <span className="live-dot h-1.5 w-1.5 rounded-full bg-accent" />
@@ -192,12 +205,12 @@ function TaskList() {
       <div className="flex flex-col gap-2">
         <AnimatePresence initial={false}>
           {running.map((t) => (
-            <motion.div key={`t${t.id}`} {...rise()}>
+            <motion.div key={`t${t.id}`} {...rise()} onClick={openTasks} className="cursor-pointer" title="Open Tasks">
               <RunningCard vm={taskVM(t, drives, now, driveFiles)} compact />
             </motion.div>
           ))}
           {elsewhere.map((e) => (
-            <motion.div key={`p${e.pid}`} {...rise()}>
+            <motion.div key={`p${e.pid}`} {...rise()} onClick={openTasks} className="cursor-pointer" title="Open Tasks">
               <RunningCard vm={extVM(e, drives, now, driveFiles)} compact />
             </motion.div>
           ))}
@@ -206,14 +219,18 @@ function TaskList() {
         {finished.length > 0 && (
           <div className="flex flex-col">
             {finished.slice(0, RECENT_FINISHED).map((t) => (
-              <FinishedRow key={t.id} t={t} drives={drives} />
+              <a key={t.id} href={TASKS_HREF} className="rounded-lg hover:bg-raised/60" title="Open Tasks">
+                <FinishedRow t={t} drives={drives} />
+              </a>
             ))}
           </div>
         )}
         {finished.length > RECENT_FINISHED && (
           <Disclosure summary={`Earlier (${finished.length - RECENT_FINISHED})`} open={earlierOpen} onToggle={setEarlierOpen} className="px-1">
             {finished.slice(RECENT_FINISHED).map((t) => (
-              <FinishedRow key={t.id} t={t} drives={drives} />
+              <a key={t.id} href={TASKS_HREF} className="block rounded-lg hover:bg-raised/60" title="Open Tasks">
+                <FinishedRow t={t} drives={drives} />
+              </a>
             ))}
           </Disclosure>
         )}

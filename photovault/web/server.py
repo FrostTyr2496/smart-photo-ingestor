@@ -112,11 +112,18 @@ class _Task:
         self.events: deque[dict] = deque(maxlen=EVENTS_KEPT)
         self.next_seq = 0
         self.keep_awake = False
+        # The first job id a result reports (an import's plan), kept apart from `events`: on a long run that event
+        # leaves the last-EVENTS_KEPT window, and the UI still needs it to nest a `--follow` copy under its import.
+        self.job_id: int | None = None
 
     def add(self, event: dict) -> None:
         event = {**event, "seq": self.next_seq}
         self.next_seq += 1
         self.events.append(event)
+        job_id = event.get("job_id")
+        if self.job_id is None and event.get("event") == "result" and isinstance(job_id, int) \
+                and not isinstance(job_id, bool):
+            self.job_id = job_id
 
     def finish(self, state: str, exit_code: int | None) -> None:
         self.state = state
@@ -124,7 +131,7 @@ class _Task:
 
     def summary(self) -> dict:
         return {"task_id": self.task_id, "state": self.state, "exit_code": self.exit_code, "argv": self.argv,
-                "last_seq": self.next_seq - 1, "keep_awake": self.keep_awake}
+                "last_seq": self.next_seq - 1, "keep_awake": self.keep_awake, "job_id": self.job_id}
 
     def detail(self, since: int) -> dict:
         events = [e for e in self.events if e["seq"] > since]

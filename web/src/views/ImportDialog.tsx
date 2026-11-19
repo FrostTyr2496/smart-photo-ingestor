@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { TierPill } from '../components/FileList';
 import { Field, Modal } from '../components/Modal';
 import { api } from '../lib/api';
-import { driveName, mountName, roleKey } from '../lib/labels';
+import { displayLabel, driveName, mountName, roleKey } from '../lib/labels';
 import {
   batchLimit,
   batchLine,
@@ -161,7 +161,7 @@ export function ImportDialog({ card, onClose }: { card: { mount: string; label: 
     const ok = await ask({
       title: 'Start the import?',
       lines: [
-        `Copy ${batchLine(plan)} (${plan.planned}) from "${card.label}" onto "${mountName(target, drives)}".`,
+        `Copy ${batchLine(plan)} (${plan.planned}) from "${displayLabel(card.label)}" onto "${mountName(target, drives)}".`,
         name.trim() ? `Shoot name: ${name.trim()}.` : 'Shoot name: chosen from the photo dates.',
         'Each file is copied and checked by checksum. The card is left as it is.',
         ...(inputs.second ? [`Each file is then copied from "${mountName(target, drives)}" onto "${mountName(inputs.second, drives)}" as it arrives.`] : []),

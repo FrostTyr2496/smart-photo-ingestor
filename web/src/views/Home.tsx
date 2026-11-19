@@ -176,7 +176,7 @@ export function Home() {
       for (const m of mounts) devOf(m).finished.push(t);
       continue;
     }
-    const jid = t.result && typeof t.result.job_id === 'number' ? t.result.job_id : undefined;
+    const jid = t.jobId ?? (t.result && typeof t.result.job_id === 'number' ? t.result.job_id : undefined);
     entries.push({ key: `t${t.id}`, mounts, jobId: jid, follow: followOf(words), vm: taskVM(t, drives, now, driveFiles) });
   }
   for (const e of elsewhere) {

@@ -46,6 +46,8 @@ export interface TaskSummary {
   argv: string[];
   last_seq: number;
   keep_awake?: boolean;
+  /** The first job id a result reported (rv-31); kept by the server after that event leaves its window. */
+  job_id?: number | null;
 }
 
 export interface TaskDetail extends TaskSummary {
@@ -67,6 +69,8 @@ export interface TaskRec {
   note: string;
   error: string;
   result: Record<string, unknown> | null;
+  /** The run's job id once known: from the server's summary, or a result event. */
+  jobId: number | null;
 }
 
 export interface ExtJob {

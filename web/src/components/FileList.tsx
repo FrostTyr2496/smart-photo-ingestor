@@ -6,7 +6,7 @@ import { allKeys, buildTree, visibleRows, type FolderNode, type RunNode } from '
 import { fmtInt } from '../lib/format';
 import { openMenu, placeMenu } from '../lib/menu';
 import { copyText } from '../lib/photos';
-import { roleKey, roleLabel } from '../lib/labels';
+import { displayLabel, roleKey, roleLabel } from '../lib/labels';
 import { springs } from '../lib/motion';
 import { usePref } from '../lib/prefs';
 import { hrefFor } from '../lib/route';
@@ -17,10 +17,11 @@ import { Icon, RolePill } from './bits';
 // ---------------------------------------------------------------- tier bar and pill
 
 /** A card's files as one bar of tier segments, worst first; each segment grows to its share. */
-export function TierBar({ counts, total, className = '' }: { counts: TierCounts; total: number; className?: string }) {
+/** `live` (a copy is running): a pulse flows left to right, from "only on this card" towards "backed up". */
+export function TierBar({ counts, total, live = false, className = '' }: { counts: TierCounts; total: number; live?: boolean; className?: string }) {
   const label = TIER_ORDER.map((t) => `${fmtInt(counts[t].files)} ${TIER[t].label.toLowerCase()}`).join(', ');
   return (
-    <div role="img" aria-label={label} className={`flex h-2 w-full gap-[2px] overflow-hidden rounded-full bg-ink/[0.07] ${className}`}>
+    <div role="img" aria-label={label} className={`relative flex h-2 w-full gap-[2px] overflow-hidden rounded-full bg-ink/[0.07] ${live ? 'bar-flow' : ''} ${className}`}>
       {total > 0 &&
         TIER_ORDER.filter((t) => counts[t].files).map((t) => (
           <motion.span
@@ -213,7 +214,7 @@ function CopiesRow({ assetId, volumeId, relPath, cols }: { assetId: number; volu
               return (
                 <li key={`${c.volume_id}:${c.rel_path}`} className="flex flex-wrap items-center gap-2 text-xs">
                   <RolePill role={c.role} />
-                  <span className="font-medium">{c.label}</span>
+                  <span className="font-medium">{displayLabel(c.label)}</span>
                   <span className="min-w-0 flex-1 truncate font-mono text-2xs text-muted" title={c.rel_path}>
                     {c.rel_path}
                   </span>

@@ -16,6 +16,7 @@ import {
   summarize,
   taskMounts,
   taskTitle,
+  displayLabel,
   workflowSteps,
 } from './labels';
 import { Palette } from './palette';
@@ -54,6 +55,7 @@ const task = (over: Partial<TaskRec> = {}): TaskRec => ({
   note: '',
   error: '',
   result: null,
+  jobId: null,
   ...over,
 });
 
@@ -122,6 +124,11 @@ describe('progress', () => {
     expect(t.startMs).toBe(Date.parse('2026-11-18T10:00:00Z'));
     expect(t.progress).toEqual({ current: 2, total: 2 });
     expect(summarize({ ...t, final: true }).text).toBe('Hashed 2 files (1 GB). 0 already done, 0 unreadable, 0 deferred.');
+  });
+  it('keeps the job id the server remembers, after its result event is gone (rv-31)', () => {
+    const base = { task_id: 1, state: 'running', exit_code: null, argv: task().argv, last_seq: 900, latest_progress: null };
+    expect(absorb(task(), { ...base, job_id: 41, events: [{ event: 'progress', current: 750 }] }).jobId).toBe(41);
+    expect(absorb(task(), { ...base, events: [{ event: 'result', job_id: 7 }] }).jobId).toBe(7);
   });
 });
 
@@ -238,5 +245,24 @@ describe('taskTitle covers every task command (rv-30)', () => {
     expect(t('previews', 'cache', '/mnt/small')).toBe('Saving previews from SMALL 1TB');
     expect(t('report', 'duplicates')).toBe('Finding duplicates across drives');
     expect(t('something', 'new', '--x')).toBe('Running something new');
+  });
+  it('names the card an import reads, without the catalog\'s card: prefix', () => {
+    const cardDrives = [{ volume_id: 'card-1', label: 'card:NIKON Z 6_2', mount: '/mnt/card' }, { volume_id: 'w', label: 'SMALL 1TB', mount: '/mnt/small' }] as never;
+    const title = (...w: string[]) => taskTitle(['--json', ...w], cardDrives);
+    expect(title('ingest', '--source', '/mnt/card', '--target', '/mnt/small')).toBe('Importing NIKON Z 6_2 → SMALL 1TB');
+    expect(title('backup', '--card', 'card-1', '--to', '/mnt/small')).toBe('Backing up NIKON Z 6_2 → SMALL 1TB');
+    // A follow copy reads the import's target: card → SMALL 1TB, then SMALL 1TB → the second drive.
+    expect(title('backup', '--card', 'card-1', '--from', '/mnt/small', '--to', '/mnt/plus', '--follow', '7')).toBe('Backing up NIKON Z 6_2 from SMALL 1TB → plus');
+    expect(title('backup', '--card', 'card-1', '--from', '/mnt/card', '--to', '/mnt/small')).toBe('Backing up NIKON Z 6_2 → SMALL 1TB');
+    expect(title('ingest', '--source', '/mnt/EOS_DIGITAL', '--target', '/mnt/small', '--dry-run')).toBe('Importing EOS_DIGITAL → SMALL 1TB (dry run)');
+  });
+});
+
+describe('displayLabel', () => {
+  it('drops the card: prefix only', () => {
+    expect(displayLabel('card:NIKON Z 6_2')).toBe('NIKON Z 6_2');
+    expect(displayLabel('Card: X')).toBe('X');
+    expect(displayLabel('Backup Plus')).toBe('Backup Plus');
+    expect(displayLabel(null)).toBe('');
   });
 });

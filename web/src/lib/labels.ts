@@ -32,7 +32,9 @@ export const roleLabel = (role: string | null | undefined): string => (role && R
 export const isCardDrive = (d: Drive): boolean => roleKey(d.role) === 'card' || d.looks_like_card;
 
 export const baseName = (path: string | null | undefined): string => String(path || '').split('/').filter(Boolean).pop() || '';
-export const driveName = (d: Drive): string => d.label || baseName(d.mount) || d.volume_id || 'Unnamed drive';
+/** A card's catalog label defaults to `card:<volume name>` (volumes.py); people know it by the volume name alone. */
+export const displayLabel = (label: string | null | undefined): string => (label || '').replace(/^card:\s*/i, '');
+export const driveName = (d: Drive): string => displayLabel(d.label) || baseName(d.mount) || d.volume_id || 'Unnamed drive';
 export const sameMount = (a?: string | null, b?: string | null): boolean =>
   Boolean(a && b) && a!.replace(/\/+$/, '') === b!.replace(/\/+$/, '');
 
@@ -74,7 +76,7 @@ export function taskTitle(argv: string[], drives: Drive[]): string {
     case 'assign':
       return `Assigning ${name(w[2])} as ${ROLE_WORD[flagValue(w, '--role') ?? ''] || 'drive'}`;
     case 'ingest':
-      return `Importing card → ${name(flagValue(w, '--target'))}${dry ? ' (dry run)' : ''}`;
+      return `Importing ${name(flagValue(w, '--source'))} → ${name(flagValue(w, '--target'))}${dry ? ' (dry run)' : ''}`;
     case 'resume':
       return 'Resuming an import';
     case 'card-status':
@@ -100,8 +102,11 @@ export function taskTitle(argv: string[], drives: Drive[]): string {
       const card = id ? drives.find((d) => d.volume_id === id) : undefined;
       const cardName = card ? driveName(card) : 'a card';
       const to = flagValue(w, '--to');
+      const from = flagValue(w, '--from');
       const folder = flagValue(w, '--from-folder');
-      const tail = `${to ? ` → ${name(to)}` : ''}${dry ? ' (dry run)' : ''}`;
+      // A copy that trails an import reads the import's target, not the card: name that hop (card → A, then A → B).
+      const via = from && !(card && sameMount(card.mount, from)) ? `${name(from)} ` : '';
+      const tail = `${to ? ` ${via ? `from ${via}` : ''}→ ${name(to)}` : ''}${dry ? ' (dry run)' : ''}`;
       if (w.includes('--make-green')) return `Making ${cardName} green${tail}`;
       if (folder) return `Copying folder ${baseName(folder) || folder}${tail}`;
       return `Backing up ${cardName}${tail}`;
@@ -314,6 +319,7 @@ export function recentTask(r: RecentRun, i: number): TaskRec {
     note: '',
     error: r.error || '',
     result: r.result,
+    jobId: null,
   };
 }
 

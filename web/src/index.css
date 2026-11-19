@@ -138,6 +138,25 @@
   animation: bar-sheen 1.8s ease-in-out infinite;
 }
 
+/* A card being backed up: a pulse flows across the whole tier bar, from red towards green. */
+@keyframes bar-flow {
+  from {
+    transform: translateX(-60%);
+  }
+  to {
+    transform: translateX(260%);
+  }
+}
+.bar-flow::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 30%;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.45), transparent);
+  animation: bar-flow 2.4s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+  pointer-events: none;
+}
+
 /* A bar with no total yet: a segment slides back and forth. */
 @keyframes bar-indet {
   0% {
@@ -199,6 +218,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .bar-sheen::after,
+  .bar-flow::after,
   .ring-pulse,
   .live-dot,
   .glow-drift {

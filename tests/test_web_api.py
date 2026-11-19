@@ -951,6 +951,19 @@ def test_runner_keeps_the_mac_awake_until_the_task_exits(tmp_path: Path) -> None
     assert re.fullmatch(r"-w \d+", seen.read_text())
 
 
+def test_task_keeps_its_job_id_after_the_event_leaves_the_window() -> None:
+    """rv-31: an import reports its job id once, early; the UI nests a --follow copy under it by that id."""
+    task = web._Task(1, ["ingest"])
+    assert task.summary()["job_id"] is None
+    task.add({"event": "result", "job_id": 41, "planned": 10})
+    for i in range(web.EVENTS_KEPT + 5):
+        task.add({"event": "progress", "current": i})
+    task.add({"event": "result", "job_id": 99})  # a later result does not replace the first
+    assert all(e.get("job_id") != 41 for e in task.events)
+    assert task.summary()["job_id"] == 41
+    assert task.detail(-1)["job_id"] == 41
+
+
 def test_runner_awake_defaults() -> None:
     assert web.TaskRunner([sys.executable]).awake_argv is None  # custom engine (tests): off
     assert web.TaskRunner(awake_argv=None).awake_argv is None
