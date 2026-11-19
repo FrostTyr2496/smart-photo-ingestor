@@ -2,6 +2,9 @@ import { AnimatePresence, MotionConfig, motion } from 'framer-motion';
 import { AmbientGlow } from './components/AmbientGlow';
 import { DevTools } from './components/DevTools';
 import { ConfirmDialog, Toasts } from './components/Overlays';
+import { useEffect, useState } from 'react';
+import { isTypingTarget, modalOpen } from './lib/keys';
+import { usePref } from './lib/prefs';
 import { routeKey, useRoute } from './lib/route';
 import { Cards } from './views/Cards';
 import { StoreProvider, useStore } from './lib/store';
@@ -14,18 +17,70 @@ import { Photos } from './views/Photos';
 import { Settings } from './views/Settings';
 import { Sidebar } from './views/Sidebar';
 
+const WIDE = '(min-width: 1024px)';
+
+function useWide(): boolean {
+  const [wide, setWide] = useState(() => window.matchMedia(WIDE).matches);
+  useEffect(() => {
+    const m = window.matchMedia(WIDE);
+    const on = () => setWide(m.matches);
+    m.addEventListener('change', on);
+    return () => m.removeEventListener('change', on);
+  }, []);
+  return wide;
+}
+
 function Shell() {
   const route = useRoute();
+  const [hidden, setHidden] = usePref('shell.sidebarHidden', false);
+  const wide = useWide();
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => {
+      if (e.key !== '[' || e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
+      if (isTypingTarget(e.target) || modalOpen()) return;
+      setHidden((h) => !h);
+    };
+    window.addEventListener('keydown', on);
+    return () => window.removeEventListener('keydown', on);
+  }, [setHidden]);
   const { tasks, elsewhere } = useStore();
   const active = tasks.some((t) => !t.final) || elsewhere.length > 0;
   return (
     <>
       <AmbientGlow active={active} />
       <div className="relative z-[1] min-h-screen">
-        <Header route={route} />
-        <main className="mx-auto grid max-w-[1600px] gap-5 px-4 py-5 lg:grid-cols-[340px_minmax(0,1fr)]">
-          <Sidebar route={route} />
-          <div className="min-w-0">
+        <Header route={route} sidebarHidden={hidden} onToggleSidebar={() => setHidden((h) => !h)} />
+        <main className="mx-auto flex max-w-[1600px] flex-col gap-5 px-4 py-5 lg:flex-row lg:gap-0">
+          {wide ? (
+            // overflow: clip (not hidden) keeps the sidebar's own sticky positioning working.
+            <motion.div
+              initial={false}
+              animate={{ width: hidden ? 0 : 360, opacity: hidden ? 0 : 1 }}
+              transition={{ type: 'spring', stiffness: 420, damping: 38 }}
+              style={{ overflow: 'clip' }}
+              className="shrink-0"
+              aria-hidden={hidden}
+              {...(hidden ? ({ inert: '' } as object) : {})}
+            >
+              <div className="w-[340px]">
+                <Sidebar route={route} />
+              </div>
+            </motion.div>
+          ) : (
+            !hidden && <Sidebar route={route} />
+          )}
+          {wide && hidden && (
+            <button
+              type="button"
+              onClick={() => setHidden(false)}
+              title="Show the drives sidebar ( [ )"
+              className="fixed left-0 top-1/2 z-20 -translate-y-1/2 rounded-r-lg border border-l-0 border-line bg-surface/90 py-3 pl-1 pr-1.5 text-2xs text-muted hover:text-ink"
+              style={{ writingMode: 'vertical-rl' }}
+            >
+              Drives
+            </button>
+          )}
+          <div className="min-w-0 flex-1">
             <AnimatePresence mode="wait" initial={false}>
               <motion.div
                 key={route.view === 'cards' ? 'cards' : routeKey(route)}

@@ -245,7 +245,7 @@ Rules for every task:
     **[user]** browser check.
   - Result (2026-11-18): `GET /api/groups/<id>/detail` (instances with mounted, `preview_from` via `_thumb_source_from`, exif through `metadata.read_metadata`, cached in `<home>/exif/`); inspector header is stem + icon buttons, body · time · exposure, and drive chips; day header line adds time span and located count (`+` while the day is partly loaded); filter chips under the title and a note in the day header, sharing `clearFilters` with Show in All. Pure helpers tested in `photos.test.ts`; 2 API tests. Not seen in a browser.
 
-- [ ] 22. Hideable left sidebar
+- [x] 22. Hideable left sidebar
   - ID: rv-22 (user ask, 2026-11-18)
   - The drives sidebar (`web/src/views/Sidebar.tsx`, laid out in `App.tsx`) collapses to nothing, giving the page its full
     width. Ways to toggle it: a button in the header, `[` as a keyboard shortcut (ignored while typing in a field), and a
@@ -254,6 +254,9 @@ Rules for every task:
     keep the current behaviour and add only the toggle. The sticky inspector and month rail must still line up after a
     toggle.
   - Verify: `cd web && npm run typecheck && npm test`; **[user]** browser check.
+  - Result (2026-11-18): header toggle, `[` shortcut (skips fields, contenteditable, open dialogs), left-edge "Drives"
+    handle, `shell.sidebarHidden` pref, spring width/opacity (instant under reduced motion). Sticky offsets are
+    viewport-based, so Photos is unchanged. Browser check pending.
 
 - [ ] 23. Full-size photos when the drive is plugged in, and which drive to plug in otherwise
   - ID: rv-23 (user ask, 2026-11-18, D-077). Builds on rv-20 (viewer) and rv-21 (`/api/groups/<id>/detail`).

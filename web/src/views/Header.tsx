@@ -72,12 +72,26 @@ function NavItem({ label, href, active, external, dot, title }: { label: string;
   );
 }
 
-export function Header({ route }: { route: Route }) {
+export function Header({ route, sidebarHidden, onToggleSidebar }: { route: Route; sidebarHidden: boolean; onToggleSidebar: () => void }) {
   const { cards } = useStore();
   const worst = worstTier(cards);
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-bg/70 backdrop-blur-xl">
       <div className="mx-auto flex h-14 max-w-[1600px] items-center gap-4 px-4">
+        <button
+          type="button"
+          onClick={onToggleSidebar}
+          aria-pressed={!sidebarHidden}
+          aria-label={sidebarHidden ? 'Show drives sidebar' : 'Hide drives sidebar'}
+          title={sidebarHidden ? 'Show the drives sidebar ( [ )' : 'Hide the drives sidebar ( [ )'}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted hover:bg-ink/5 hover:text-ink"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="2" y="3" width="12" height="10" rx="2" />
+            <path d="M6 3v10" />
+            {!sidebarHidden && <path d="M3.6 5.5v5" strokeWidth="2" />}
+          </svg>
+        </button>
         <a href="#/" className="flex shrink-0 items-center gap-2.5">
           <Logo />
           <span className="hidden text-[1.05rem] font-semibold tracking-tight sm:inline">PhotoVault</span>
