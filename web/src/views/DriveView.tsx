@@ -25,6 +25,7 @@ import {
 import { rise, springs } from '../lib/motion';
 import { hrefFor } from '../lib/route';
 import { UnpluggedStrip, useUnpluggedEdge } from '../components/Unplugged';
+import { RenameTitle } from '../components/RenameTitle';
 import { useStore } from '../lib/store';
 import type { Drive, DriveSummary, DriveUsage } from '../lib/types';
 
@@ -305,98 +306,19 @@ function Tile({
   );
 }
 
-/**
- * The drive's name, editable in place. Renaming changes only the nickname in the catalog, so it is safe at any time:
- * the volume on disk, its files and any Lightroom paths stay as they are. The volume's own name shows underneath
- * when the two differ (vn-1).
- */
+/** The drive's name (renameable, rv-40) with its role, and the volume's own name on disk when it differs. */
 function DriveTitle({ drive }: { drive: Drive }) {
-  const { renameDrive } = useStore();
-  const [editing, setEditing] = useState(false);
-  const [text, setText] = useState('');
-  const [saving, setSaving] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
   const name = driveName(drive);
   const volName = drive.local ? '' : baseName(drive.mount);
-  const canRename = Boolean(drive.volume_id);
-
-  useEffect(() => {
-    if (editing) inputRef.current?.select();
-  }, [editing]);
-  useEffect(() => setEditing(false), [drive.volume_id]);
-
-  const start = () => {
-    if (!canRename) return;
-    setText(name);
-    setEditing(true);
-  };
-  const save = async () => {
-    const next = text.trim();
-    if (!next || next === name) {
-      setEditing(false);
-      return;
-    }
-    setSaving(true);
-    const ok = await renameDrive(drive, next);
-    setSaving(false);
-    if (ok) setEditing(false);
-  };
-
   return (
     <div>
-      <div className="flex items-center gap-2.5">
-        {editing ? (
-          <form
-            className="flex min-w-0 flex-1 items-center gap-1.5"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void save();
-            }}
-          >
-            <input
-              ref={inputRef}
-              value={text}
-              maxLength={64}
-              disabled={saving}
-              aria-label="Drive name"
-              onChange={(e) => setText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') setEditing(false);
-              }}
-              className="h-9 min-w-0 max-w-md flex-1 text-lg font-semibold"
-            />
-            <button type="submit" className="btn-primary h-8" disabled={saving || !text.trim()}>
-              <Icon name="check" size={12} /> {saving ? 'Saving…' : 'Save'}
-            </button>
-            <button type="button" className="btn-ghost h-8" disabled={saving} onClick={() => setEditing(false)}>
-              Cancel
-            </button>
-          </form>
-        ) : (
-          <>
-            <h1 className="truncate text-2xl font-semibold tracking-tight" onDoubleClick={start} title={canRename ? 'Double-click to rename' : undefined}>
-              {name}
-            </h1>
-            {canRename && (
-              <button type="button" className="btn-ghost h-7 shrink-0 px-2 text-xs" onClick={start} title="Rename this drive in PhotoVault">
-                <Icon name="edit" size={12} /> Rename
-              </button>
-            )}
-          </>
-        )}
+      <RenameTitle drive={drive}>
         <RolePill role={drive.role} />
-      </div>
-      {editing ? (
-        <p className="mt-1 text-xs text-faint">
-          Changes the name PhotoVault shows. The drive itself, its files and Lightroom's paths are not touched. Enter saves, Esc cancels.
+      </RenameTitle>
+      {volName && volName !== name && (
+        <p className="mt-0.5 text-xs text-faint" title="The name macOS shows in Finder">
+          Volume name on disk: <span className="font-mono text-muted">{volName}</span>
         </p>
-      ) : (
-        volName &&
-        volName !== name && (
-          <p className="mt-0.5 text-xs text-faint" title="The name macOS shows in Finder">
-            Volume name on disk: <span className="font-mono text-muted">{volName}</span>
-          </p>
-        )
       )}
     </div>
   );

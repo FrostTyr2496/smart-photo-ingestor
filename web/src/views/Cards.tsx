@@ -9,7 +9,9 @@ import { fmtBytes, fmtDate, fmtInt, plural, relTime } from '../lib/format';
 import { argvWords, commandKey, displayLabel, mountName } from '../lib/labels';
 import { rise, springs } from '../lib/motion';
 import { hrefFor } from '../lib/route';
+import type { Drive } from '../lib/types';
 import { UnpluggedStrip, useUnpluggedEdge } from '../components/Unplugged';
+import { RenameTitle } from '../components/RenameTitle';
 import { useDialogs } from '../lib/dialogs';
 import { useStore } from '../lib/store';
 import { cardHeadline, cardHint, TIER, TIER_HINT, TIER_ORDER, TIER_TONE, type Card, type CardCamera, type Tier } from '../lib/tiers';
@@ -436,12 +438,15 @@ function CardDetail({ id, onImport, onClear, onGreen }: { id: string; onImport: 
       <section className={`card p-5 ${edge}`}>
         <div className="flex flex-wrap items-start gap-3">
           <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2.5">
-              <h1 className="truncate text-2xl font-semibold tracking-tight">{displayLabel(c.label)}</h1>
+            {/* Renameable like a drive (rv-40); a remembered card not in the drive list is renamed by its id. */}
+            <RenameTitle
+              drive={cardDrive ?? (c.volume_id ? ({ volume_id: c.volume_id, label: c.label, mount: '', mounted: false } as Drive) : null)}
+              fallback={displayLabel(c.label)}
+            >
               {c.test_card && <TestBadge c={c} />}
               {!mounted && <NotConnected />}
               {kind ? <LivePill kind={kind} /> : <TierPill tier={c.tier} />}
-            </div>
+            </RenameTitle>
             <p className={`mt-2 ${kind ? 'text-accent' : TIER_TONE[c.tier].text}`}>{kind ? liveHeadline(c, kind, runs, (m) => mountName(m, drives)) : cardHeadline(c)}</p>
             <p className="mt-1 text-sm text-muted">
               {[

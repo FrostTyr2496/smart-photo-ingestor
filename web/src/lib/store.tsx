@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api } from './api';
 import { readPref, writePref } from './prefs';
-import { argvWords, driveName, isHash, parseRoute, workflowSteps, liveStep, STEP_NAME, type WorkflowStep } from './labels';
+import { argvWords, displayLabel, driveName, isHash, parseRoute, workflowSteps, liveStep, STEP_NAME, type WorkflowStep } from './labels';
 import type { Drive, ExtRun, RecentRun, StaleJob, TaskDetail, TaskRec, TaskSummary, CardInfo, FileEvt } from './types';
 
 /** Files a running task's card lists (rv-34). */
@@ -491,7 +491,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       try {
         const r = await api<{ label: string }>('POST', `/api/volumes/${encodeURIComponent(d.volume_id)}/label`, { label });
         setDrives((list) => list.map((x) => (x.volume_id === d.volume_id ? { ...x, label: r.label } : x)));
-        toast(`Renamed to ${r.label}. Only the name in PhotoVault changed; the drive itself is untouched.`);
+        setEpoch((n) => n + 1); // pages that loaded the old name (a card's page, Cards) reload it (rv-40)
+        toast(`Renamed to ${displayLabel(r.label)}. Only the name in PhotoVault changed; the drive itself is untouched.`);
         return true;
       } catch (err) {
         toast((err as Error).message, 'err');

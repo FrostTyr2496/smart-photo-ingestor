@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, type MouseEvent } from 'react';
 import { Disclosure, FsPill, Icon, RolePill, ROLE_DOT } from '../components/bits';
 import { RefsDialog } from './RefsDialog';
 import { PULLED_MS } from '../components/Unplugged';
+import { renameFromAnywhere } from '../components/RenameTitle';
 import { ProgressBar } from '../components/ProgressBar';
 import { extVM, FinishedRow, RunningCard, taskVM } from '../components/TaskCard';
 import { useDriveActivity } from '../lib/driveActivity';
@@ -124,6 +125,20 @@ function DriveRow({
             </motion.button>
           )}
         </AnimatePresence>
+        {d.volume_id && (
+          <button
+            type="button"
+            title={`Rename ${driveName(d)} in PhotoVault`}
+            className="shrink-0 rounded px-1 text-2xs text-muted opacity-0 hover:text-ink focus:opacity-100 group-hover:opacity-100"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              renameFromAnywhere(d.volume_id!, driveHref(d));
+            }}
+          >
+            Rename
+          </button>
+        )}
         <button
           type="button"
           title={d.ignored ? 'Show this drive in the list again' : 'Hide this drive under Ignored'}

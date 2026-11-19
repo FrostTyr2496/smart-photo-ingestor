@@ -527,3 +527,15 @@ Rules for every task:
     chip opens a legend drawn with the real styles. Reduced motion stops the shimmer, landing and pulses.
   - Verify: `cd web && npm run typecheck && npm test && npm run build`.
   - Result (2026-11-19): as rv-38. Not seen in a browser.
+
+- [x] 40. Rename is visible on cards, drives and the sidebar
+  - ID: rv-40 (user report, 2026-11-19; D-123)
+  - Rename existed only on a set-up drive's page, as a faint ghost button; cards had none. Now one `RenameTitle`
+    (`web/src/components/RenameTitle.tsx`) titles both the drive page and a card's page: the name, a bordered
+    "Rename" button (double-click the name works too), inline Save / Cancel. The sidebar shows "Rename" on hover
+    beside "Ignore" for every set-up drive or card; it opens that page with the name already editing. A card keeps
+    its hidden `card:` prefix (`labelToSave`). After a rename, pages reload (epoch) so a card's headline and the
+    Cards list pick up the new name; the popup shows the name without the prefix. Same server endpoint
+    (`POST /api/volumes/<id>/label`, catalog nickname only; the volume on disk is not renamed).
+  - Verify: `cd web && npm run typecheck && npm test && npm run build`.
+  - Result (2026-11-19): typecheck clean; 232 web tests pass (2 new); build committed. Not seen in a browser.
