@@ -24,7 +24,8 @@ import subprocess
 import sys
 import threading
 from collections import Counter, deque
-from datetime import UTC, datetime
+import time
+from datetime import UTC, datetime, timedelta
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -33,7 +34,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from PIL import Image
 
-from photovault import activity, cards, clock, metadata, naming, preview, timemodel, usage, volumes
+from photovault import actions, activity, cards, clock, metadata, naming, preview, timemodel, usage, volumes
 from photovault.catalog import db, repo
 from photovault.config import ConfigError, load_config
 from photovault.drives import DEFAULT_MAC_FOLDER, VOLUMES_ROOT, scan_mounts
@@ -849,6 +850,12 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
             return 405, {"error": "method not allowed"}
         return 200, cards.list_cards(conn, _drive_list(conn, app.volumes_root))
 
+    m = re.fullmatch(r"/api/actions/([^/]+)/(dismiss|snooze|restore)", path)
+    if m:
+        if method != "POST":
+            return 405, {"error": "method not allowed"}
+        return 200, _action_state(app, conn, unquote(m.group(1)), m.group(2), body)
+
     m = re.fullmatch(r"/api/cards/([^/]+)/files", path)
     if m:
         if method != "GET":
@@ -869,6 +876,7 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
         ("POST", "/api/run"): lambda: _run(app, body),
         ("GET", "/api/tasks"): lambda: {"tasks": app.runner.summaries()},
         ("GET", "/api/activity"): lambda: activity.snapshot(conn, app.home, server_pid=os.getpid()),
+        ("GET", "/api/actions"): lambda: _actions(app, conn, query),
         ("GET", "/api/shoots/plan"): lambda: _shoots_plan(app),
         ("GET", "/api/shoots"): lambda: {"shoots": [dict(r) for r in repo.list_shoots(conn)]},
         ("GET", "/api/groups"): lambda: _groups(conn, query, app),
@@ -886,6 +894,62 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
     if any(p == path for _, p in routes):
         return 405, {"error": "method not allowed"}
     return 404, {"error": "unknown endpoint"}
+
+
+ACTIONS_TTL_S = 30.0
+_ACTIONS_CACHE: dict[str, tuple[float, tuple, list[dict]]] = {}  # catalog path -> (computed at, key, actions)
+
+
+def _mounted_paths(app: WebApp, conn) -> dict[str, str]:
+    """``volume_id -> mount path`` of every registered drive plugged in now (a read-only scan)."""
+    try:
+        rows = scan_mounts(conn, app.volumes_root, _NullEmitter())
+    except OSError:
+        return {}
+    return {m["volume_id"]: m["mount"] for m in rows if m["volume_id"]}
+
+
+def _actions(app: WebApp, conn, query: dict) -> dict:
+    """``GET /api/actions`` (act-1, D-084). The computed list is cached for 30 s and dropped when the mounted drives
+    change or a job starts, ends or changes state; dismiss and snooze are applied on every read."""
+    now = datetime.now(UTC)
+    mounted = _mounted_paths(app, conn)
+    jobs = tuple(conn.execute(
+        "SELECT COUNT(*), MAX(job_id), MAX(finished_at), SUM(state = 'running'), SUM(state = 'paused'), "
+        "SUM(state = 'failed') FROM jobs").fetchone())
+    key = (tuple(sorted(mounted.items())), jobs)
+    hit = _ACTIONS_CACHE.get(str(app.catalog_path))
+    if hit and hit[1] == key and time.monotonic() - hit[0] < ACTIONS_TTL_S:
+        found = hit[2]
+    else:
+        found = actions.compute(conn, now=now, mounted=mounted, home=app.home)
+        _ACTIONS_CACHE[str(app.catalog_path)] = (time.monotonic(), key, found)
+    return actions.build_response(found, actions.load_state(conn), now)
+
+
+def _action_state(app: WebApp, conn, action_id: str, verb: str, body: Any) -> dict:
+    """Dismiss, snooze or restore one action. Stored in the `actions_state` setting only."""
+    state = actions.load_state(conn)
+    if verb == "restore":
+        state.pop(action_id, None)
+    else:
+        known = _ACTIONS_CACHE.get(str(app.catalog_path))
+        if known is None or all(a["id"] != action_id for a in known[2]):
+            known = (0.0, (), actions.compute(conn, now=datetime.now(UTC), mounted=_mounted_paths(app, conn),
+                                              home=app.home))
+        if all(a["id"] != action_id for a in known[2]):
+            raise NotFound(f"no action {action_id!r}")
+        if verb == "dismiss":
+            state[action_id] = {"dismissed": True}
+        else:
+            days = _body_dict(body or {}).get("days", 7)
+            if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= 365:
+                raise BadRequest("days must be a whole number from 1 to 365")
+            state[action_id] = {"dismissed": False,
+                                "until": (datetime.now(UTC) + timedelta(days=days)).isoformat(timespec="seconds")}
+    with repo.transaction(conn):
+        actions.save_state(conn, state)
+    return {"id": action_id, "state": state.get(action_id)}
 
 
 def _shoots_plan(app: WebApp) -> dict:

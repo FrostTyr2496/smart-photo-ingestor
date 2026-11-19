@@ -28,13 +28,16 @@ Rules for every task:
      "do": {"label": "Back up", "kind": "ui", "href": "#/cards/<volume_id>"},
      "cli": "uv run photovault --json ingest \"/Volumes/<card>\" --dry-run",
      "evidence": {"files": 412, "bytes": 19541000000},
-     "snoozed_until": null}
+     "snoozed_until": null, "dismissed": false}
   ]
 }
 ```
 
 - `id` is stable for the same subject, so dismiss and snooze survive.
 - `severity` is one of critical | high | normal | low. Sort by severity, then by bytes at risk, then by age.
+- `actions` lists every action, including snoozed and dismissed ones, each with `dismissed` (bool) and
+  `snoozed_until` (iso or null); the pane folds them into a "Snoozed & dismissed" section with Restore. The severity
+  counts cover visible actions only; `snoozed` and `dismissed` count the hidden ones.
 - `do.kind` is one of `ui` (a link to the page that does it), `run` (`{endpoint, body}`: a POST to an existing
   task-starting endpoint, shown with a confirm), or `none` (a manual step).
 - `POST /api/actions/<id>/dismiss`, `POST /api/actions/<id>/snooze {days}`, `POST /api/actions/<id>/restore`.
@@ -70,7 +73,11 @@ Housekeeping (low):
 
 ## Tasks
 
-- [ ] 1. **[stronger]** The actions engine and API
+- [x] 1. **[stronger]** The actions engine and API
+  - Result (2026-11-18): `photovault/actions.py` + `GET /api/actions`, `POST /api/actions/<id>/dismiss|snooze|restore`.
+    Real catalog (read-only, 1.3 s): 23 actions: card_unbacked 1 critical; single_copy 1 critical + 5 high;
+    card_unindexed 2 high; drive_errors 1 high; hash_incomplete 2, job_paused 1, sidecars_dirty 1 (normal);
+    metadata_stale 6, locations_suggested 1, shoots_review 1, duplicates_reclaimable 1 (low); drive_stale 0.
   - ID: act-1. `photovault/actions.py`: `compute(conn, *, now, mounted) -> list[dict]`, one function per rule, each
     cheap (aggregate SQL, no per-file loops in Python over 65k rows). Rules that need data the catalog lacks are
     skipped quietly. The API is as in the contract; results are cached for 30 s and refreshed when a job ends or a drive
