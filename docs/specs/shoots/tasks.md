@@ -7,7 +7,7 @@ answers:
 - 2: a time zone per shoot.
 - 3: names from a dated folder, then the phone's place, then other folders (with a stoplist), then a fallback. An LLM title
   from the images is a later step (sh-7).
-- 4: schema V7 (landed: `fd1ce3e`, `system-design.md` §5g).
+- 4: schema V7 (landed: `fa052a2`, `system-design.md` §5g).
 - 5: Apply changes the catalog only; review happens in its own dry-run mode, and XMP writes of reviewed data come later
   from there (sh-6).
 - 6: subsec stored.
