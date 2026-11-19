@@ -145,3 +145,15 @@ for a tick per warning). A dry run is never gated; it reports what the gate woul
   - ID: vn-4 (after vn-2, vn-3, and only on a drive whose every file is green)
   - Rename a fully backed-up drive that a Lightroom catalog references, confirm Lightroom shows it missing,
     relink with the vn-3 method, confirm the photos open. Paste back what happened.
+
+- [x] 11. **[stronger]** Make green: copy a card's one-copy (yellow) files onto a connected second drive
+  - ID: bk-7 (D-107; after bk-3, rec-1)
+  - `backup.plan_make_green(conn, cfg, *, card_volume_id, mounted, home)` (read-only) groups the card's yellow files by
+    the drive holding their one copy and picks a target per group with `targets.recommend(exclude=<holders>)`, or says why
+    not. Card-mode backup accepts a source of any role (LEGACY read-only). CLI `backup --card <id> --make-green
+    [--dry-run]` (one job per source, in turn); `GET /api/cards/<id>/make-green`; "Make green..." button and dialog on
+    card tiles and detail; a `card_one_copy` action. Also fixes the trailing-copy gap: a `--follow` job now also copies
+    every card asset verified on the source and missing on the target once the import has finished.
+  - Verify: `uv run pytest tests/test_backup.py tests/test_targets.py tests/test_actions.py tests/test_web_api.py -q`
+  - Result (2026-11-19): those -> 141 passed; `uv run pytest -q` -> 761 passed, 9 skipped; web typecheck, 149 tests, build done.
+    Not seen in a browser yet.

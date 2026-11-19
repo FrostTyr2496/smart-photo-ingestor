@@ -11,6 +11,8 @@ import { useStore } from '../lib/store';
 import { cardHeadline, cardHint, TIER, TIER_HINT, TIER_ORDER, TIER_TONE, type Card, type CardCamera, type Tier } from '../lib/tiers';
 import { ClearDialog } from './ClearDialog';
 import { ImportDialog } from './ImportDialog';
+import { MakeGreenDialog } from './MakeGreenDialog';
+import { greenButton, type GreenPlan } from '../lib/makeGreen';
 
 const CARD_PAGE = 1000;
 
@@ -33,7 +35,31 @@ function useChecking() {
     Boolean(mount) && tasks.some((t) => !t.final && commandKey(argvWords(t.argv)) === 'card_check' && argvWords(t.argv)[2] === mount);
 }
 
-function CardActions({ c, onImport, onClear, showFiles }: { c: Card; onImport: (c: Card) => void; onClear: (c: Card) => void; showFiles: boolean }) {
+/** "Make green…" (bk-7, D-107): shown when some files have one copy; enabled only when a connected drive can take a second one. */
+function MakeGreenButton({ c, onGreen }: { c: Card; onGreen: (c: Card) => void }) {
+  const { epoch } = useStore();
+  const [plan, setPlan] = useState<GreenPlan | null>(null);
+  const yellow = c.counts.needs_backup.files;
+  useEffect(() => {
+    if (!c.volume_id || !yellow) return undefined;
+    let live = true;
+    api<GreenPlan>('GET', `/api/cards/${encodeURIComponent(c.volume_id)}/make-green`)
+      .then((p) => live && setPlan(p))
+      .catch(() => live && setPlan(null));
+    return () => {
+      live = false;
+    };
+  }, [c.volume_id, yellow, epoch]);
+  if (!c.volume_id || !yellow) return null;
+  const g = greenButton(plan);
+  return (
+    <button type="button" className="btn h-7 text-xs" disabled={!g.enabled} title={g.title} onClick={() => onGreen(c)}>
+      Make green…
+    </button>
+  );
+}
+
+function CardActions({ c, onImport, onClear, onGreen, showFiles }: { c: Card; onImport: (c: Card) => void; onClear: (c: Card) => void; onGreen: (c: Card) => void; showFiles: boolean }) {
   const { startTask } = useStore();
   const checking = useChecking()(c.mount);
   return (
@@ -77,6 +103,7 @@ function CardActions({ c, onImport, onClear, showFiles }: { c: Card; onImport: (
           </button>
         </>
       )}
+      <MakeGreenButton c={c} onGreen={onGreen} />
       {showFiles && c.volume_id && (
         <a href={hrefFor({ view: 'cards', id: c.volume_id })} className="btn h-7 text-xs">
           Show files
@@ -90,7 +117,7 @@ function NotConnected() {
   return <span className="chip border-line-strong text-muted">Not connected</span>;
 }
 
-function CardTile({ c, onImport, onClear }: { c: Card; onImport: (c: Card) => void; onClear: (c: Card) => void }) {
+function CardTile({ c, onImport, onClear, onGreen }: { c: Card; onImport: (c: Card) => void; onClear: (c: Card) => void; onGreen: (c: Card) => void }) {
   const when = c.mounted
     ? c.checked_at
       ? `Checked ${relTime(c.checked_at)}`
@@ -117,7 +144,7 @@ function CardTile({ c, onImport, onClear }: { c: Card; onImport: (c: Card) => vo
         </div>
       )}
       {c.cleared_at && <p className="text-xs text-muted">Cleared by PhotoVault on {fmtDate(c.cleared_at)}</p>}
-      <CardActions c={c} onImport={onImport} onClear={onClear} showFiles />
+      <CardActions c={c} onImport={onImport} onClear={onClear} onGreen={onGreen} showFiles />
     </motion.article>
   );
 }
@@ -172,7 +199,7 @@ function CameraTable({ cameras }: { cameras: CardCamera[] }) {
 
 // ---------------------------------------------------------------- list
 
-function CardList({ onImport, onClear }: { onImport: (c: Card) => void; onClear: (c: Card) => void }) {
+function CardList({ onImport, onClear, onGreen }: { onImport: (c: Card) => void; onClear: (c: Card) => void; onGreen: (c: Card) => void }) {
   const { epoch } = useStore();
   const [data, setData] = useState<{ cards: Card[]; cameras: CardCamera[] } | null>(null);
   const [error, setError] = useState('');
@@ -201,7 +228,7 @@ function CardList({ onImport, onClear }: { onImport: (c: Card) => void; onClear:
         <div className="grid gap-4 lg:grid-cols-2">
           {connected.map((c, i) => (
             <motion.div key={c.volume_id ?? c.mount ?? c.label} {...rise(i)}>
-              <CardTile c={c} onImport={onImport} onClear={onClear} />
+              <CardTile c={c} onImport={onImport} onClear={onClear} onGreen={onGreen} />
             </motion.div>
           ))}
         </div>
@@ -220,7 +247,7 @@ function CardList({ onImport, onClear }: { onImport: (c: Card) => void; onClear:
           <p className="pb-3 text-xs text-faint">As last checked. A card that was formatted since keeps its old record here.</p>
           <div className="grid gap-4 lg:grid-cols-2">
             {remembered.map((c) => (
-              <CardTile key={c.volume_id ?? c.label} c={c} onImport={onImport} onClear={onClear} />
+              <CardTile key={c.volume_id ?? c.label} c={c} onImport={onImport} onClear={onClear} onGreen={onGreen} />
             ))}
           </div>
         </Disclosure>
@@ -231,7 +258,7 @@ function CardList({ onImport, onClear }: { onImport: (c: Card) => void; onClear:
 
 // ---------------------------------------------------------------- one card
 
-function CardDetail({ id, onImport, onClear }: { id: string; onImport: (c: Card) => void; onClear: (c: Card) => void }) {
+function CardDetail({ id, onImport, onClear, onGreen }: { id: string; onImport: (c: Card) => void; onClear: (c: Card) => void; onGreen: (c: Card) => void }) {
   const { epoch } = useStore();
   const [filter, setFilter] = useState({ tier: '', copies: '', other: '', camera: '', offset: 0 });
   const [data, setData] = useState<{ card: Card; files: CardFile[]; total: number } | null>(null);
@@ -310,7 +337,7 @@ function CardDetail({ id, onImport, onClear }: { id: string; onImport: (c: Card)
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <CardActions c={c} onImport={onImport} onClear={onClear} showFiles={false} />
+            <CardActions c={c} onImport={onImport} onClear={onClear} onGreen={onGreen} showFiles={false} />
             <a href={hrefFor({ view: 'cards', id: null })} className="btn h-7 text-xs">
               <Icon name="back" size={12} /> All cards
             </a>
@@ -381,9 +408,12 @@ export function Cards({ id }: { id: string | null }) {
   const onImport = (c: Card) => c.mount && setImporting({ mount: c.mount, label: c.label, volume_id: c.volume_id });
   const [clearing, setClearing] = useState<{ mount: string; label: string } | null>(null);
   const onClear = (c: Card) => c.mount && setClearing({ mount: c.mount, label: c.label });
+  const [greening, setGreening] = useState<{ volume_id: string; label: string } | null>(null);
+  const onGreen = (c: Card) => c.volume_id && setGreening({ volume_id: c.volume_id, label: c.label });
   return (
     <>
-      {id ? <CardDetail id={id} onImport={onImport} onClear={onClear} /> : <CardList onImport={onImport} onClear={onClear} />}
+      {id ? <CardDetail id={id} onImport={onImport} onClear={onClear} onGreen={onGreen} /> : <CardList onImport={onImport} onClear={onClear} onGreen={onGreen} />}
+      <MakeGreenDialog card={greening} onClose={() => setGreening(null)} />
       <ImportDialog card={importing} onClose={() => setImporting(null)} />
       <ClearDialog card={clearing} onClose={() => setClearing(null)} />
     </>

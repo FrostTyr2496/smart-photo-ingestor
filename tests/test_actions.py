@@ -110,6 +110,38 @@ def test_card_unbacked_names_the_recommended_pair(conn, tmp_path: Path, monkeypa
     assert f'--target "{tmp_path / "w"}"' in a["cli"]
 
 
+def test_card_one_copy_offers_make_green_or_names_what_to_plug_in(conn, tmp_path: Path, monkeypatch) -> None:
+    from photovault import targets
+    monkeypatch.setattr(targets, "is_solid_state", lambda mount, run=None: True)
+    for name in ("w", "m"):
+        (tmp_path / name).mkdir()
+    vol(conn, "card", "CARD", "Card A")
+    vol(conn, "w", "WORKING", "Travel SSD")
+    vol(conn, "m", "MASTER", "Backup")
+    a1 = asset(conn)
+    inst(conn, "card", a1, size=500)
+    inst(conn, "w", a1, size=500)                                  # yellow: one copy
+    only_w = {"card": "/mnt/card", "w": str(tmp_path / "w")}
+    a = only(run(conn, only_w), "card_one_copy")
+    assert a["do"]["kind"] == "ui" and any("Plug in a second working" in w for w in a["why"] + a["steps"])
+    assert a["title"].startswith("1 file on Card A has one copy")
+    both = {**only_w, "m": str(tmp_path / "m")}
+    a = only(run(conn, both), "card_one_copy")
+    assert a["do"] == {"label": "Make green", "kind": "run", "endpoint": "/api/run",
+                       "body": {"cmd": "backup", "args": {"card": "card", "make_green": True}}}
+    assert "copy them to Backup to make them green" in a["title"]
+    assert "--make-green --dry-run" in a["cli"]
+
+
+def test_card_one_copy_quiet_when_green(conn) -> None:
+    vol(conn, "card", "CARD", "Card A")
+    vol(conn, "m", "MASTER", "Backup")
+    a1 = asset(conn)
+    inst(conn, "card", a1)
+    inst(conn, "m", a1)
+    assert "card_one_copy" not in kinds(run(conn, {"m": "/mnt/m"}))
+
+
 def test_single_copy_names_the_best_other_drive(conn, tmp_path: Path, monkeypatch) -> None:
     from photovault import targets
     monkeypatch.setattr(targets, "is_solid_state", lambda mount, run=None: True)

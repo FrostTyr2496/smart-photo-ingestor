@@ -197,6 +197,48 @@ def card_unbacked(conn, now, mounted, home, vols) -> list[dict]:
     return out
 
 
+def card_make_green(conn, now, mounted, home, vols) -> list[dict]:
+    """Yellow files (one verified copy, D-089): copy them onto a connected second drive (bk-7, D-107)."""
+    from photovault import backup  # local import: backup imports cards and targets
+
+    out = []
+    for vol in vols.values():
+        if vol["role"] != "CARD":
+            continue
+        plan = backup.plan_make_green(conn, None, card_volume_id=vol["volume_id"], mounted=dict(mounted), home=home)
+        if not plan["files"]:
+            continue
+        label = vol["label"]
+        ok = [r for r in plan["sources"] if r["ok"]]
+        stuck = [r for r in plan["sources"] if not r["ok"]]
+        targets_ = list(dict.fromkeys(r["target"]["label"] for r in ok))
+        title = f"{_files(plan['files'])} on {label} {'has' if plan['files'] == 1 else 'have'} one copy"
+        if ok:
+            title += f": copy them to {_list_names(targets_)} to make them green"
+        why = [f"{_n(plan['files'])} files ({human_bytes(plan['bytes'])}) on {label} are on one drive, so the card shows "
+               "yellow (green needs a backup drive, or two working drives)"]
+        why += [f"{r['source']['label']}: {r['reason']}" for r in stuck]
+        why += [f"{r['source']['label']} -> {r['target']['label']}: {_n(r['files'])} files, {human_bytes(r['bytes'])}"
+                for r in ok]
+        needs = []
+        for r in ok:
+            needs += [_need(vols[r["source"]["volume_id"]], mounted), _need(vols[r["target"]["volume_id"]], mounted)]
+        steps = ([f"Copy onto {_list_names(targets_)}"] if ok else ["Plug in a second working or backup drive"]) + \
+            (["Plug in the drives that hold the other files"] if ok and stuck else []) + \
+            [f"Check {label} shows green"]
+        do = _run("Make green", "backup", {"card": vol["volume_id"], "make_green": True}) if ok \
+            else _ui("Open card", f"#/cards/{vol['volume_id']}")
+        out.append(_action(
+            f"card-one-copy:{vol['volume_id']}", "card_one_copy", "high", title, why, needs, steps, do,
+            f"uv run photovault backup --card {vol['volume_id']} --make-green --dry-run",
+            files=plan["files"], nbytes=plan["bytes"], age=_age_days(now, vol["last_seen_at"])))
+    return out
+
+
+def _list_names(names: list[str]) -> str:
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+
+
 def card_unindexed(conn, now, mounted, home, vols) -> list[dict]:
     stats = {r["volume_id"]: r for r in conn.execute(
         """
@@ -659,6 +701,7 @@ def compute(conn: sqlite3.Connection, *, now: datetime | None = None,
     singles = _single_copy_rows(conn)
     rules: list[Callable[[], list[dict]]] = [
         lambda: card_unbacked(conn, now, mount_map, home, vols),
+        lambda: card_make_green(conn, now, mount_map, home, vols),
         lambda: card_unindexed(conn, now, mount_map, home, vols),
         lambda: single_copy(conn, now, mount_map, home, vols, singles),
         lambda: drive_errors(conn, now, mount_map, home, vols),

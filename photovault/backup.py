@@ -20,7 +20,7 @@ from collections import Counter
 from pathlib import Path, PurePosixPath
 from typing import Callable
 
-from photovault import volumes
+from photovault import cards, targets, volumes
 from photovault.catalog import repo
 from photovault.config import Config
 from photovault.copy_engine import CopyError, SourceMismatch, _hash_uncached, copy_verified
@@ -172,7 +172,8 @@ def plan_backup(
 ) -> int:
     """Plan a backup onto `target` (a mounted WORKING/MASTER drive); returns the job id. Does not commit.
 
-    Card source: `card_volume_id` and `source` (the WORKING drive's mount); `follow_job` trails an import.
+    Card source: `card_volume_id` and `source` (the mount of the drive that holds the card's files: WORKING or
+    MASTER, or a read-only LEGACY drive, D-107); `follow_job` trails an import.
     Folder source: `source` is the drive's mount and `source_folder` the folder inside it (may be "").
     """
     source, target = Path(source), Path(target)
@@ -199,9 +200,6 @@ def plan_backup(
         card = repo.get_volume(conn, card_volume_id)
         if card is None or card["role"] != "CARD":
             raise BackupRefused(f"{card_volume_id} is not a card in this catalog")
-        if svol["role"] not in TARGET_ROLES:
-            raise BackupRefused(f"{source} is {svol['role']}: a card is backed up from the WORKING or MASTER drive "
-                                "that holds its imported files")
         if follow_job is not None:
             ingest = repo.get_job(conn, follow_job)
             if ingest is None or ingest["kind"] != "card_ingest":
@@ -215,7 +213,8 @@ def plan_backup(
 
     check_unique(it["dst_rel"] for it in items)
     params = {"mode": mode, "source_mount": str(source), "target_mount": str(target), "target_fs": fs,
-              "card_volume_id": card_volume_id, "follow_job": follow_job, "folder_rel": source_folder}
+              "card_volume_id": card_volume_id, "follow_job": follow_job, "folder_rel": source_folder,
+              "follow_items": len(items) if follow_job is not None else None}
     job_id = repo.create_job(conn, kind="replicate", source_volume_id=svol["volume_id"],
                              target_volume_id=tvol["volume_id"], params=params)
     repo.add_job_items(conn, job_id, [{**{k: it[k] for k in ("src_rel", "dst_rel", "group_id", "role")}, "seq": n}
@@ -244,6 +243,117 @@ def plan_backup(
         sample=[f"{it['src_rel']} -> {it['dst_rel']}" for it in items[:5]],
     )
     return job_id
+
+
+# --------------------------------------------------------------------------- make green (bk-7, D-107)
+
+
+def _vol_info(vol: sqlite3.Row, mounted: dict) -> dict:
+    return {"volume_id": vol["volume_id"], "label": vol["label"], "role": vol["role"],
+            "mount": mounted.get(vol["volume_id"]), "connected": bool(mounted.get(vol["volume_id"]))}
+
+
+def _list_names(names: list[str]) -> str:
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+
+
+def plan_make_green(conn: sqlite3.Connection, cfg: Config | None, *, card_volume_id: str, mounted: dict,
+                    home: Path | None, run=None) -> dict:
+    """Read-only plan to turn a card's yellow files green (bk-7, D-107): each yellow file has one verified copy
+    (a WORKING drive, or LEGACY drives only). Files are grouped by the connected drive that holds their copy, and
+    each group gets the best connected WORKING/MASTER exFAT/APFS drive that holds none of them and has room
+    (`targets.recommend`). A group with no possible copy says why. Nothing is written."""
+    card = repo.get_volume(conn, card_volume_id)
+    if card is None or card["role"] != "CARD":
+        raise BackupRefused(f"{card_volume_id} is not a card in this catalog")
+    mounted = {k: v for k, v in mounted.items() if v}
+    vols = {v["volume_id"]: v for v in repo.list_volumes(conn)}
+    yellow = [f for f in cards.card_files(conn, card_volume_id) if f["tier"] == "needs_backup"]
+    groups: dict[str, dict] = {}
+    for f in yellow:
+        holders = sorted({c["volume_id"] for c in f["copies"]})
+        live = sorted((h for h in holders if h in mounted),
+                      key=lambda h: (vols[h]["role"] not in TARGET_ROLES, vols[h]["label"].lower()))
+        key = live[0] if live else "offline:" + ",".join(holders)
+        g = groups.setdefault(key, {"source_id": live[0] if live else None, "holders": set(), "files": 0, "bytes": 0})
+        g["holders"].update(holders)
+        g["files"] += 1
+        g["bytes"] += f["size"]
+    assigned: dict[str, int] = {}
+    sources = []
+    for g in sorted(groups.values(), key=lambda g: (g["source_id"] is None, -g["bytes"])):
+        names = sorted(vols[h]["label"] for h in g["holders"])
+        row = {"files": g["files"], "bytes": g["bytes"], "target": None, "ok": False, "reason": None}
+        if g["source_id"] is None:
+            row["source"] = {"volume_id": None, "label": _list_names(names), "role": None, "mount": None,
+                             "connected": False}
+            row["reason"] = (f"the only copy is on {names[0]}, which isn't connected" if len(names) == 1 else
+                             f"the copies are on {_list_names(names)}, none of which is connected")
+            sources.append(row)
+            continue
+        row["source"] = _vol_info(vols[g["source_id"]], mounted)
+        kw = {"run": run} if run is not None else {}
+        rec = targets.recommend(conn, home, mounted, planned_bytes=g["bytes"], source_volume_id=card_volume_id,
+                                exclude=set(g["holders"]), **kw)
+        pick = None
+        for c in rec["candidates"]:
+            if c["usable"] and (c["free_bytes"] is None or
+                                c["free_bytes"] >= (assigned.get(c["volume_id"], 0) + g["bytes"]) * targets.HEADROOM):
+                pick = c
+                break
+        if pick is None:
+            if not rec["candidates"]:
+                row["reason"] = "Plug in a second working drive"
+            else:
+                c = rec["candidates"][0]
+                row["reason"] = (f"{c['label']} is full: {c['reasons'][0]}" if c["fs"] in WRITABLE_FS
+                                 else f"{c['label']}: {c['reasons'][0]}")
+        else:
+            assigned[pick["volume_id"]] = assigned.get(pick["volume_id"], 0) + g["bytes"]
+            row["ok"] = True
+            row["target"] = {k: pick[k] for k in ("volume_id", "label", "role", "mount", "fs", "free_bytes", "reasons")}
+        sources.append(row)
+    possible = any(r["ok"] for r in sources)
+    reasons = list(dict.fromkeys(r["reason"] for r in sources if r["reason"]))
+    return {"card_volume_id": card_volume_id, "label": card["label"], "files": len(yellow),
+            "bytes": sum(f["size"] for f in yellow), "possible": possible, "sources": sources,
+            "reason": None if possible else (
+                "Nothing to copy: no file on this card has just one copy" if not yellow else "; ".join(reasons))}
+
+
+def run_make_green(conn: sqlite3.Connection, cfg: Config, plan: dict, emit: Emitter,
+                   should_stop: Callable[[], bool] = lambda: False) -> dict:
+    """Run a make-green plan: one card-mode `replicate` job per possible source, one after another (one writer per
+    target). Returns ``{"copied", "failed", "paused", "jobs"}``. A refused or failed job does not stop the others."""
+    out = {"copied": 0, "failed": 0, "paused": False, "jobs": []}
+    for row in plan["sources"]:
+        if not row["ok"]:
+            emit.emit("warning", code="make_green_skipped",
+                      message=f"{row['source']['label']}: {row['files']} file(s) not copied: {row['reason']}")
+            continue
+        src, dst = Path(row["source"]["mount"]), Path(row["target"]["mount"])
+        emit.emit("progress", phase="make_green", message=f"copying {row['files']} file(s) from "
+                  f"{row['source']['label']} to {row['target']['label']}")
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                job_id = plan_backup(conn, cfg, source=src, target=dst, card_volume_id=plan["card_volume_id"], emit=emit)
+            except BaseException:
+                conn.execute("ROLLBACK")
+                raise
+            conn.execute("COMMIT")
+            summary = run_backup(conn, cfg, job_id, emit, should_stop)
+        except BackupRefused as exc:
+            emit.emit("error", code="backup_refused", message=str(exc))
+            out["failed"] += row["files"]
+            continue
+        out["jobs"].append(job_id)
+        out["copied"] += summary.copied
+        out["failed"] += summary.failed
+        if summary.paused:
+            out["paused"] = True
+            break
+    return out
 
 
 # --------------------------------------------------------------------------- run
@@ -304,11 +414,16 @@ def run_backup(
 
     current: int | None = None
     waited = 0.0
+    n_follow = params.get("follow_items")      # items past this seq are the tail (D-107): never looked up upstream
+    if follow and n_follow is None:
+        n_follow = conn.execute("SELECT COALESCE(MAX(seq), 0) FROM job_items WHERE job_id = ?", (job_id,)).fetchone()[0]
+    tail_planned = False
     try:
         while True:
             ready, waiting = [], []
             for it in repo.pending_items(conn, job_id):
-                up = _upstream_state(conn, follow, it["src_rel"]) if follow else "committed"
+                up = (_upstream_state(conn, follow, it["src_rel"]) if follow and it["seq"] <= n_follow
+                      else "committed")
                 if up == "committed":
                     ready.append(it)
                 elif up == "skipped_dup":
@@ -328,6 +443,13 @@ def run_backup(
                     waiting.append(it)
             if not ready:
                 if not waiting:
+                    if follow and not tail_planned:
+                        # D-107: files the import skipped as already on the source, but missing on this target
+                        tail_planned = True
+                        added = _plan_tail(conn, job, params, n_follow)
+                        if added:
+                            total += added
+                            continue
                     break
                 ing = repo.get_job(conn, follow)
                 if ing["state"] in ("paused", "failed", "done") or (ing["state"] == "planned" and waited >= planned_grace_s):
@@ -407,6 +529,22 @@ def run_backup(
               copied_size=human_bytes(bytes_copied), elapsed_s=round(elapsed, 1),
               sync_method=dict(sync_methods) or "none")
     return JobSummary(copied, skipped, failed, bytes_copied, elapsed, False)
+
+
+def _plan_tail(conn: sqlite3.Connection, job: sqlite3.Row, params: dict, n_follow: int) -> int:
+    """After a followed import has finished: add every asset of the card that is verified on the source and missing
+    on the target (card-mode rules). Returns how many items were added."""
+    have = {r[0] for r in conn.execute("SELECT src_rel FROM job_items WHERE job_id = ? AND seq > ?",
+                                       (job["job_id"], n_follow))}
+    items = [it for it in _card_items(conn, params["card_volume_id"], job["source_volume_id"], job["target_volume_id"])
+             if it["src_rel"] not in have]
+    if not items:
+        return 0
+    start = conn.execute("SELECT COALESCE(MAX(seq), 0) FROM job_items WHERE job_id = ?", (job["job_id"],)).fetchone()[0]
+    with repo.transaction(conn):
+        repo.add_job_items(conn, job["job_id"], [{**{k: it[k] for k in ("src_rel", "dst_rel", "group_id", "role")},
+                                                  "seq": start + n} for n, it in enumerate(items, 1)])
+    return len(items)
 
 
 def _copy_item(conn: sqlite3.Connection, job: sqlite3.Row, item: sqlite3.Row, source: Path, target: Path,

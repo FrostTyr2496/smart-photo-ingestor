@@ -326,3 +326,143 @@ def test_apfs_target_is_allowed_and_card_source_must_be_a_card(env, capsys, monk
     assert code == 0 and result(lines)["target_fs"] == "apfs"
     code, lines = backup(capsys, env, "--card", "not-a-card", "--from", str(env["work"]), "--dry-run")
     assert code == 2
+
+
+# --------------------------------------------------------------------------- make green (bk-7, D-107)
+
+
+def mounts(env) -> dict:
+    with catalog() as conn:
+        by_label = {r["label"]: r["volume_id"] for r in conn.execute("SELECT volume_id, label FROM volumes")}
+    return {by_label[k]: str(env[v]) for k, v in (("WORK", "work"), ("BACK", "back"), ("LEG", "leg"), ("CARD1", "card"))
+            if k in by_label}
+
+
+@pytest.fixture(autouse=True)
+def _no_diskutil(monkeypatch: pytest.MonkeyPatch) -> None:
+    from photovault import targets
+    monkeypatch.setattr(targets, "is_solid_state", lambda mount, run=None: None)
+
+
+def plan_green(env, card_id: str) -> dict:
+    with catalog() as conn:
+        return backup_mod.plan_make_green(conn, None, card_volume_id=card_id, mounted=mounts(env), home=None)
+
+
+def test_make_green_turns_working_only_yellows_green(env, capsys) -> None:
+    card_id = setup(capsys, env)
+    assert card_tiers(env) == {"needs_backup"}
+    plan = plan_green(env, card_id)
+    assert plan["possible"] and plan["files"] == N
+    [row] = plan["sources"]
+    assert row["source"]["label"] == "WORK" and row["target"]["label"] == "BACK" and row["files"] == N and row["ok"]
+    root = str(env["card"].parent)
+    code, lines = run(capsys, "backup", "--card", card_id, "--make-green", "--dry-run", "--root", root)
+    assert code == 0 and result(lines)["dry_run"] is True and media_files(env["back"]) == []
+    with catalog() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM jobs WHERE kind = 'replicate'").fetchone()[0] == 0
+    code, lines = run(capsys, "backup", "--card", card_id, "--make-green", "--root", root)
+    assert code == 0, lines
+    assert result(lines)["copied"] == N and result(lines)["yellow_left"] == 0
+    assert card_tiers(env) == {"backed_up"} and len(media_files(env["back"])) == N
+    assert not plan_green(env, card_id)["files"]
+
+
+def test_make_green_copies_from_a_legacy_drive_read_only(env, capsys) -> None:
+    card_id = setup(capsys, env)
+    with catalog() as conn:           # the imported-to drive is a LEGACY one now (there is no CLI path for that)
+        conn.execute("UPDATE volumes SET role = 'LEGACY' WHERE label = 'WORK'")
+        conn.commit()
+    before = tree_hashes(env["work"])
+    assert card_tiers(env) == {"needs_backup"}                      # LEGACY alone is yellow (D-089)
+    plan = plan_green(env, card_id)
+    [row] = plan["sources"]
+    assert row["source"]["role"] == "LEGACY" and row["target"]["label"] == "BACK" and plan["possible"]
+    code, lines = run(capsys, "backup", "--card", card_id, "--make-green", "--root", str(env["card"].parent))
+    assert code == 0, lines
+    assert result(lines)["copied"] == N and card_tiers(env) == {"backed_up"}
+    assert tree_hashes(env["work"]) == before                       # the LEGACY source is unchanged
+
+
+def test_make_green_says_why_not_possible(env, capsys, monkeypatch) -> None:
+    from photovault import targets
+    card_id = setup(capsys, env)
+    # a second WORKING drive that is not plugged in is not a candidate
+    mount_map = mounts(env)
+    with catalog() as conn:
+        back_id = conn.execute("SELECT volume_id FROM volumes WHERE label = 'BACK'").fetchone()[0]
+    only_work = {k: v for k, v in mount_map.items() if k != back_id}
+    with catalog() as conn:
+        plan = backup_mod.plan_make_green(conn, None, card_volume_id=card_id, mounted=only_work, home=None)
+        assert not plan["possible"] and plan["reason"] == "Plug in a second working drive"
+        # the only copy's drive is not connected
+        work_id = conn.execute("SELECT volume_id FROM volumes WHERE label = 'WORK'").fetchone()[0]
+        off = backup_mod.plan_make_green(conn, None, card_volume_id=card_id, home=None,
+                                         mounted={k: v for k, v in mount_map.items() if k != work_id})
+        assert off["sources"][0]["reason"] == "the only copy is on WORK, which isn't connected"
+        # NTFS and full targets are not candidates
+        conn.execute("UPDATE volumes SET fs_type = 'ntfs' WHERE label = 'BACK'")
+        conn.commit()
+        ntfs = backup_mod.plan_make_green(conn, None, card_volume_id=card_id, mounted=mount_map, home=None)
+        assert not ntfs["possible"] and "NTFS" in ntfs["reason"]
+        conn.execute("UPDATE volumes SET fs_type = 'exfat' WHERE label = 'BACK'")
+        conn.commit()
+        monkeypatch.setattr(targets, "_free_bytes", lambda mount: 10)
+        full = backup_mod.plan_make_green(conn, None, card_volume_id=card_id, mounted=mount_map, home=None)
+        assert not full["possible"] and "BACK is full" in full["reason"]
+    code, lines = run(capsys, "backup", "--card", card_id, "--make-green", "--root", str(env["card"].parent))
+    assert code == 2 and lines[-1]["event"] == "error" and media_files(env["back"]) == []
+
+
+def test_make_green_runs_two_sources_one_job_after_another(env, capsys) -> None:
+    card_id = setup(capsys, env)
+    work2 = env["work"].parent / "WORK2"           # half the card's files have their only copy here instead
+    work2.mkdir()
+    assert run(capsys, "volumes", "assign", str(work2), "--role", "WORKING", "--label", "WORK2")[0] == 0
+    with catalog() as conn:
+        work_id, work2_id = (conn.execute("SELECT volume_id FROM volumes WHERE label = ?", (n,)).fetchone()[0]
+                             for n in ("WORK", "WORK2"))
+        rows = conn.execute("SELECT instance_id FROM instances WHERE volume_id = ? AND kind = 'raw' ORDER BY rel_path",
+                            (work_id,)).fetchall()
+        for r in rows[:3]:
+            conn.execute("UPDATE instances SET volume_id = ? WHERE instance_id = ?", (work2_id, r["instance_id"]))
+        conn.commit()
+    for f in sorted(env["work"].rglob("*.NEF"))[:3]:
+        dst = work2 / f.relative_to(env["work"])
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        f.rename(dst)
+    with catalog() as conn:
+        plan = backup_mod.plan_make_green(conn, None, card_volume_id=card_id, home=None,
+                                          mounted={**mounts(env), work2_id: str(work2)})
+    assert {r["source"]["label"] for r in plan["sources"]} == {"WORK", "WORK2"}
+    assert all(r["ok"] and r["target"]["label"] != r["source"]["label"] for r in plan["sources"]) and plan["possible"]
+    code, lines = run(capsys, "backup", "--card", card_id, "--make-green", "--root", str(env["card"].parent))
+    assert code == 0, lines
+    assert card_tiers(env) == {"backed_up"}
+    with catalog() as conn:      # one job per source, run in turn
+        assert conn.execute("SELECT COUNT(*) FROM jobs WHERE kind = 'replicate' AND state = 'done'").fetchone()[0] == 2
+
+
+def test_follow_also_copies_files_the_import_skipped_as_already_there(env, capsys) -> None:
+    for key, role, label in (("work", "WORKING", "WORK"), ("back", "MASTER", "BACK")):
+        assert run(capsys, "volumes", "assign", str(env[key]), "--role", role, "--label", label)[0] == 0
+    code, lines = run(capsys, "ingest", "--source", str(env["card"]), "--target", str(env["work"]), "--limit", "3")
+    assert code == 0, lines
+    cfg = load_config()
+    conn = db.connect(cfg.catalog_path)
+    db.migrate(conn)
+    out = Emitter(io.StringIO(), json_mode=True)
+    conn.execute("BEGIN IMMEDIATE")
+    ing = ingest_mod.plan_card_ingest(conn, cfg, source=env["card"], target=env["work"], shoot_name=None, emit=out)
+    conn.execute("COMMIT")
+    card_id = conn.execute("SELECT volume_id FROM volumes WHERE role = 'CARD'").fetchone()[0]
+    conn.execute("BEGIN IMMEDIATE")
+    bk = backup_mod.plan_backup(conn, cfg, source=env["work"], target=env["back"], card_volume_id=card_id,
+                                follow_job=ing, emit=out)
+    conn.execute("COMMIT")
+    ingest_mod.run_job(conn, cfg, ing, emit=out)
+    states = item_states(ing)
+    assert states.get("skipped_dup", 0) == 3 and states.get("committed", 0) == N - 3
+    summary = backup_mod.run_backup(conn, cfg, bk, out, lambda: False, poll_s=0)
+    assert not summary.paused and summary.copied == N and summary.failed == 0     # the 3 skipped ones too
+    assert card_tiers(env) == {"backed_up"} and len(media_files(env["back"])) == N

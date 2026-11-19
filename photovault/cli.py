@@ -161,10 +161,46 @@ def _run_backup(conn, cfg, job_id, emit) -> int:
     return EXIT_ERROR if summary.failed else EXIT_OK
 
 
+def _backup_make_green(conn, cfg, args, emit) -> int:
+    """`backup --card <id> --make-green [--dry-run]` (bk-7, D-107): copy the card's one-copy (yellow) files onto a
+    second connected drive, one job per source drive."""
+    if not args.card or args.to or args.source or args.from_folder or args.follow is not None:
+        emit.emit("error", code="usage", message="--make-green takes only --card <volume_id> (and --dry-run)")
+        return EXIT_USAGE
+    root = Path(args.root) if args.root else VOLUMES_ROOT
+    mounted = {r["volume_id"]: r["mount"] for r in scan_mounts(conn, root, emit) if r["volume_id"]}
+    try:
+        plan = backup.plan_make_green(conn, cfg, card_volume_id=args.card, mounted=mounted, home=cfg.home)
+    except backup.BackupRefused as exc:
+        emit.emit("error", code="backup_refused", message=str(exc))
+        return EXIT_USAGE
+    emit.emit("result", dry_run=bool(args.dry_run), **plan)
+    if args.dry_run:
+        emit.emit("warning", code="dry_run", message="dry run: nothing was written")
+        return EXIT_OK
+    if not plan["possible"]:
+        emit.emit("error", code="make_green_impossible", message=plan["reason"] or "nothing can be copied")
+        return EXIT_USAGE
+    stop = _Stop()
+    stop.install(emit)
+    done = backup.run_make_green(conn, cfg, plan, emit, stop)
+    left = sum(1 for f in cards.card_files(conn, args.card) if f["tier"] == "needs_backup")
+    emit.emit("result", make_green=True, copied=done["copied"], failed=done["failed"], jobs=done["jobs"],
+              yellow_left=left)
+    if done["paused"]:
+        return EXIT_PAUSED
+    return EXIT_ERROR if done["failed"] else EXIT_OK
+
+
 def cmd_backup(args, cfg, emit) -> int:
     """Copy a card's imported files (`--card`, trailing an import with `--follow`) or a folder of any drive
     (`--from-folder`) onto a WORKING or MASTER drive (bk-3)."""
     conn = _open(cfg)
+    if args.make_green:
+        return _backup_make_green(conn, cfg, args, emit)
+    if not args.to:
+        emit.emit("error", code="usage", message="--to <mount> is required")
+        return EXIT_USAGE
     if bool(args.card) == bool(args.from_folder):
         emit.emit("error", code="usage", message="give --card <volume_id> --from <mount>, or --from-folder <path>")
         return EXIT_USAGE
@@ -590,7 +626,10 @@ def build_parser() -> argparse.ArgumentParser:
     bk.add_argument("--card", help="volume id of the card whose imported files are copied")
     bk.add_argument("--from", dest="source", help="mount of the WORKING drive that holds the card's imported files")
     bk.add_argument("--from-folder", dest="from_folder", help="a folder on any registered drive: <mount>/<folder>")
-    bk.add_argument("--to", required=True, help="WORKING or MASTER drive mount (exFAT or APFS)")
+    bk.add_argument("--to", help="WORKING or MASTER drive mount (exFAT or APFS)")
+    bk.add_argument("--make-green", dest="make_green", action="store_true",
+                    help="with --card: copy the card's one-copy (yellow) files onto a connected second drive (D-107)")
+    bk.add_argument("--root", help=argparse.SUPPRESS)
     bk.add_argument("--follow", type=int, default=None, metavar="JOB",
                     help="trail this import job, copying each file once it is committed")
     bk.add_argument("--dry-run", action="store_true", help="plan and show, write nothing")

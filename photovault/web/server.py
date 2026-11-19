@@ -35,7 +35,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from PIL import Image
 
-from photovault import (targets, actions, activity, cards, clock, metadata, naming, preview, previews, shoots, timemodel, usage,
+from photovault import (backup, targets, actions, activity, cards, clock, metadata, naming, preview, previews, shoots, timemodel, usage,
                         volumes)
 from photovault.card_clear import cleared_at
 from photovault.catalog import db, repo
@@ -282,7 +282,12 @@ def build_argv(cmd: str, args: dict) -> list[str]:
             argv += ["--limit", str(limit)]
         return argv + (["--dry-run"] if _bool_arg(args, "dry_run") else [])
     if cmd == "backup":
-        _allow_only(args, {"card", "source", "target", "follow", "from_folder", "dry_run"})
+        _allow_only(args, {"card", "source", "target", "follow", "from_folder", "dry_run", "make_green"})
+        if _bool_arg(args, "make_green"):
+            if any(args.get(k) for k in ("source", "target", "follow", "from_folder")):
+                raise BadRequest("'make_green' takes only card (and dry_run)")
+            return ["backup", "--card", _text_arg(args, "card"), "--make-green"] + (
+                ["--dry-run"] if _bool_arg(args, "dry_run") else [])
         argv = ["backup", "--to", _path_arg(args, "target")]
         if args.get("from_folder"):
             if args.get("card") or args.get("source") or args.get("follow") is not None:
@@ -930,6 +935,16 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
         if method != "GET":
             return 405, {"error": "method not allowed"}
         return 200, _card_files(app, conn, m.group(1), query)
+
+    m = re.fullmatch(r"/api/cards/([^/]+)/make-green", path)
+    if m:
+        if method != "GET":
+            return 405, {"error": "method not allowed"}
+        try:
+            return 200, backup.plan_make_green(conn, None, card_volume_id=m.group(1),
+                                               mounted=_mounted_paths(app, conn), home=app.home)
+        except backup.BackupRefused as exc:
+            raise NotFound(str(exc)) from exc
 
     m = re.fullmatch(r"/api/cards/([^/]+)/targets", path)
     if m:

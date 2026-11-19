@@ -383,6 +383,9 @@ def test_run_rejects_unknown_and_bad_arguments(srv: Client) -> None:
      ["backup", "--to", "/b", "--card", "vid", "--from", "/w", "--dry-run"]),
     ("backup", {"from_folder": "/old/Eclipse", "target": "/b", "dry_run": True},
      ["backup", "--to", "/b", "--from-folder", "/old/Eclipse", "--dry-run"]),
+    ("backup", {"card": "vid", "make_green": True, "dry_run": True},
+     ["backup", "--card", "vid", "--make-green", "--dry-run"]),
+    ("backup", {"card": "vid", "make_green": True}, ["backup", "--card", "vid", "--make-green"]),
     ("resume", {"job_id": 3}, ["resume", "3"]),
     ("card_status", {"mount": "/c"}, ["card-status", "/c"]),
     ("index", {"mount": "/w"}, ["index", "/w"]),
@@ -869,6 +872,18 @@ def test_cards_list_and_ranked_files(srv: Client) -> None:
     assert srv.call("GET", "/api/cards/vol-card/files?tier=bogus")[0] == 400
     assert srv.call("GET", "/api/cards/vol-work/files")[0] == 404  # not a card
     assert srv.call("POST", "/api/cards", {})[0] == 405
+
+
+def test_card_make_green_plan_endpoint(srv: Client) -> None:
+    seed_card(srv)
+    status, body = srv.call("GET", "/api/cards/vol-card/make-green")
+    assert status == 200 and body["files"] == 1 and body["possible"] is False
+    [src] = body["sources"]
+    assert src["source"]["label"] == "WORK" and src["ok"] is False and "second working drive" in src["reason"]
+    assert srv.call("GET", "/api/cards/vol-work/make-green")[0] == 404          # not a card
+    assert srv.call("POST", "/api/cards/vol-card/make-green", {})[0] == 405
+    bad = srv.call("POST", "/api/run", {"cmd": "backup", "args": {"card": "c", "make_green": True, "target": "/b"}})
+    assert bad[0] == 400
 
 
 def test_mac_folder_setting_and_drive(srv: Client) -> None:

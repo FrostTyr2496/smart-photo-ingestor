@@ -78,6 +78,7 @@ task's commit:
    bk-3 done (`backup --card ... --follow <job>`, `backup --from-folder`; the Import dialog's Second drive is live, D-104) and
    rec-1 done (`GET /api/cards/<id>/targets`; the dialog pre-selects the pair, actions name it, D-105). Next agent task: im-7
    (dry-run tree, D-102). ing-14 done (plan from the card check's rows; `--limit` = next N undone frames, D-106).
+   bk-7 done (Make green: `backup --card <id> --make-green [--dry-run]`, button on Cards, D-107; not seen in a browser).
    [user] im-5 and im-6: see "Waiting on user".
 3. **[user] idx-6:** resume the PP 1 hash with `--skip-prefix` on the damaged folder, then run `report duplicates`
    ("If a drive shows I/O errors" in `docs/user/INDEX_WORKFLOW.md`). idx-5 is done except `lrcat mark`.
@@ -119,11 +120,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-107 (user+agent): bk-7 Make green copies yellow card files onto a connected second drive; follow jobs also copy skipped-as-present files.
 - D-106 (agent+user): ing-14 plan reuses the card check's rows; `--limit` takes the next N undone frames.
 - D-105 (agent): rec-1 recommend() returns candidates + pair; card read on WORKING, copy on the best other drive.
 - D-104 (agent): bk-3 judgement calls: skip files already on the target, 120 s planned grace, second-drive dry run.
 - D-103 (user): copy-target recommendations by connected drives, file system, speed, space and copies.
-- D-102 (user): import dry run shows every planned file as a folder tree; Show in Finder after Apply.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.
