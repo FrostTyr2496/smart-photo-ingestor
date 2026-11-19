@@ -67,6 +67,8 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto }:
   const [shoot, setShoot] = usePref<string>('photos.shoot', '');
   const [shootList, setShootList] = useState<ShootRow[]>([]);
   const [days, setDays] = useState<PhotoDay[] | null>(null);
+  // The filter the current `days` were fetched for, so a reveal never reads a list from before the filters cleared.
+  const [daysKey, setDaysKey] = useState('');
   const [counts, setCounts] = useState<MissingCounts | null>(null);
   const [loaded, setLoaded] = useState<Record<string, DayState>>({});
   const [sel, setSel] = useState<Map<number, PhotoGroup>>(() => new Map());
@@ -119,10 +121,12 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto }:
   }, [filterKey]);
   useEffect(() => {
     let alive = true;
+    const key = filterKey;
     api<{ days: PhotoDay[]; missing_counts: MissingCounts }>('GET', `/api/photo-days?${qs({ volume_id: volume, missing, shoot_id: shoot })}`)
       .then((d) => {
         if (!alive) return;
         setDays(d.days);
+        setDaysKey(key);
         setCounts(d.missing_counts);
       })
       .catch((err: Error) => alive && toast(err.message, 'err'));
@@ -262,7 +266,7 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto }:
     setReveal({ id: g.group_id, day: dayOf(g) });
   }, [sel, clearFilters]);
   useEffect(() => {
-    if (!reveal || filterKey !== '|' || days === null) return;
+    if (!reveal || volume || missing || shoot || days === null || daysKey !== filterKey) return;
     const entry = days.find((d) => d.day === reveal.day);
     if (!entry) {
       setReveal(null);
@@ -290,14 +294,32 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto }:
         anchor.current = id;
       }
     }
-    const t = window.setTimeout(() => {
+    setScrollTo(id);
+  }, [reveal, volume, missing, shoot, days, daysKey, filterKey, loaded, loadDay, toast]);
+  // Scrolling is its own effect: clearing `reveal` above re-runs that effect, whose cleanup would cancel a timer
+  // started there. Retries for a few frames while the tile (and the inspector, which narrows the grid) render.
+  const [scrollTo, setScrollTo] = useState<number | null>(null);
+  useEffect(() => {
+    if (scrollTo === null) return undefined;
+    const id = scrollTo;
+    let tries = 0;
+    let t = 0;
+    const attempt = () => {
       const el = document.querySelector<HTMLElement>(`[data-gid="${id}"]`);
-      el?.scrollIntoView({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' });
+      if (!el && ++tries < 40) {
+        t = window.setTimeout(attempt, 50);
+        return;
+      }
+      setScrollTo(null);
+      if (!el) return;
+      el.scrollIntoView({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' });
+      el.focus({ preventScroll: true });
       setFlash(id);
       window.setTimeout(() => setFlash((f) => (f === id ? null : f)), 1400);
-    }, 60);
+    };
+    t = window.setTimeout(attempt, 120);
     return () => window.clearTimeout(t);
-  }, [reveal, filterKey, days, loaded, loadDay, toast]);
+  }, [scrollTo]);
 
   // The full-screen viewer (rv-20): steps through the open photo's day, as loaded, and the selection follows.
   const [viewerId, setViewerId] = useState<number | null>(null);
