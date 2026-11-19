@@ -3,7 +3,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { springs } from '../lib/motion';
 
 /** A centred dialog that springs in. Esc and a click outside close it. */
-export function Modal({ open, title, onClose, children, footer }: { open: boolean; title: string; onClose: () => void; children: ReactNode; footer: ReactNode }) {
+export function Modal({ open, title, onClose, children, footer, wide }: { wide?: boolean; open: boolean; title: string; onClose: () => void; children: ReactNode; footer: ReactNode }) {
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return undefined;
@@ -32,7 +32,7 @@ export function Modal({ open, title, onClose, children, footer }: { open: boolea
             exit={{ opacity: 0, y: 8, scale: 0.98 }}
             transition={springs.snappy}
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-md rounded-2xl border border-line-strong bg-raised shadow-2xl shadow-black/60"
+            className={`w-full ${wide ? 'max-w-xl' : 'max-w-md'} rounded-2xl border border-line-strong bg-raised shadow-2xl shadow-black/60`}
           >
             <h2 className="border-b border-line px-5 py-4 text-lg font-semibold">{title}</h2>
             <div className="flex flex-col gap-4 px-5 py-4">{children}</div>

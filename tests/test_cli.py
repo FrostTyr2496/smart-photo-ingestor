@@ -287,6 +287,7 @@ def test_limit_imports_the_earliest_frames_then_the_rest(env, capsys) -> None:
     plan = result(lines)
     assert code == 0 and (plan["files"], plan["groups"], plan["limit"]) == (2, 1, 1)
     assert (plan["groups_total"], plan["files_total"]) == (3, 6)
+    assert isinstance(plan["target_free_bytes"], int) and plan["target_free_bytes"] > 0
     assert any(e["event"] == "warning" and e["code"] == "batch" for e in lines)
     assert all("DSC_0001" in s for s in plan["sample"])  # earliest capture time first
 

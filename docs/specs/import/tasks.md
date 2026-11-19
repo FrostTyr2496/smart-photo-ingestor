@@ -63,7 +63,7 @@ target are skipped (`skipped_dup`, D-036), so a batch is never copied twice.
     passed. Groups outside the batch still reserve their names (no catalog writes), so a batch names files exactly
     as a full import would; a `batch` warning states "N of M frames".
 
-- [ ] 4. **[stronger]** Import from the Cards view: dry-run plan, then apply
+- [x] 4. **[stronger]** Import from the Cards view: dry-run plan, then apply
   - ID: im-4 (D-091)
   - Cards view: every known card is listed; one not plugged in is greyed with a "Not connected" badge, and its
     Import and Check buttons are disabled with a tooltip ("Plug in <card> to import it").
@@ -74,6 +74,9 @@ target are skipped (`skipped_dup`, D-036), so a batch is never copied twice.
     same import without `--dry-run` and is enabled only after a dry run with the same inputs.
   - Verify: `uv run pytest tests/test_web_api.py -q`; `cd web && npm run typecheck && npm test`; the user does the
     visual check.
+  - Result (2026-11-18): `uv run pytest -q` → 697 passed, 9 skipped; web typecheck clean, `npm test` 120 passed, build
+    committed. The ingest result now also carries `target_free_bytes`. The dialog polls the dry-run task itself for its
+    events. Visual check is the user's.
 
 - [ ] 5. **[user]** Make Backup Plus a working drive
   - ID: im-5 (after im-2)

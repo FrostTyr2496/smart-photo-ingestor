@@ -37,7 +37,7 @@ function CardActions({ c, onImport, showFiles }: { c: Card; onImport: (c: Card) 
   const checking = useChecking()(c.mount);
   return (
     <div className="flex flex-wrap gap-2">
-      {c.mounted && c.mount && (
+      {c.mounted && c.mount ? (
         <>
           <button type="button" className="btn h-7 text-xs" disabled={checking} onClick={() => startTask('card_check', { mount: c.mount })}>
             {checking ? (
@@ -54,6 +54,15 @@ function CardActions({ c, onImport, showFiles }: { c: Card; onImport: (c: Card) 
             Import…
           </button>
         </>
+      ) : (
+        <>
+          <button type="button" className="btn h-7 text-xs" disabled title={`Plug in ${c.label} to check it`}>
+            {c.checked_at ? 'Check again' : 'Check card'}
+          </button>
+          <button type="button" className="btn h-7 text-xs" disabled title={`Plug in ${c.label} to import it`}>
+            Import…
+          </button>
+        </>
       )}
       {showFiles && c.volume_id && (
         <a href={hrefFor({ view: 'cards', id: c.volume_id })} className="btn h-7 text-xs">
@@ -62,6 +71,10 @@ function CardActions({ c, onImport, showFiles }: { c: Card; onImport: (c: Card) 
       )}
     </div>
   );
+}
+
+function NotConnected() {
+  return <span className="chip border-line-strong text-muted">Not connected</span>;
 }
 
 function CardTile({ c, onImport }: { c: Card; onImport: (c: Card) => void }) {
@@ -74,6 +87,7 @@ function CardTile({ c, onImport }: { c: Card; onImport: (c: Card) => void }) {
     <motion.article whileHover={{ y: -2 }} transition={springs.snappy} className={`card flex flex-col gap-2.5 p-4 ${c.mounted ? '' : 'opacity-70'}`}>
       <div className="flex items-center gap-2">
         <h3 className="min-w-0 flex-1 truncate font-semibold">{c.label}</h3>
+        {!c.mounted && <NotConnected />}
         <TierPill tier={c.tier} />
       </div>
       <p className={`text-sm ${TIER_TONE[c.tier].text}`}>{cardHeadline(c)}</p>
@@ -264,6 +278,7 @@ function CardDetail({ id, onImport }: { id: string; onImport: (c: Card) => void 
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2.5">
               <h1 className="truncate text-2xl font-semibold tracking-tight">{c.label}</h1>
+              {!c.mounted && <NotConnected />}
               <TierPill tier={c.tier} />
             </div>
             <p className={`mt-2 ${TIER_TONE[c.tier].text}`}>{cardHeadline(c)}</p>

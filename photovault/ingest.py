@@ -225,6 +225,7 @@ def plan_card_ingest(
         planned_bytes=planned_bytes,
         planned=human_bytes(planned_bytes),
         target_free=human_bytes(free) if free is not None else "unknown",
+        target_free_bytes=free,
         mtime_dated=mtime_dated,
         body_inferred=body_inferred,
         folders=[{"folder": f, "files": n} for f, n in sorted(folders.items())],
