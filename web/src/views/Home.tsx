@@ -18,6 +18,7 @@ import {
   recentTask,
   taskTitle,
 } from '../lib/labels';
+import { groupRuns, followOf, type RunGroup, type RunLike } from '../lib/runGroups';
 import { badgeCount } from '../lib/actions';
 import { rise } from '../lib/motion';
 import { hrefFor } from '../lib/route';
@@ -31,7 +32,6 @@ interface Dev {
   key: string;
   drive: Drive | null;
   mount?: string;
-  running: TaskVM[];
   finished: TaskRec[];
   stale: StaleJob[];
 }
@@ -45,7 +45,6 @@ function devSub(d: Drive | null): string {
 
 function DeviceBlock({ dev, idle }: { dev: Dev; idle: boolean }) {
   const { drives, tasks, elsewhere } = useStore();
-  const [recentOpen, setRecentOpen] = useState(false);
   const [staleOpen, setStaleOpen] = useState(false);
   const d = dev.drive;
   const name = d ? driveName(d) : baseName(dev.mount) || 'drive';
@@ -70,13 +69,6 @@ function DeviceBlock({ dev, idle }: { dev: Dev; idle: boolean }) {
         )}
       </div>
       <p className="mt-1 text-xs text-muted">{devSub(d)}</p>
-      {dev.running.length > 0 && (
-        <div className={`mt-3 grid gap-3 ${dev.running.length > 1 ? 'xl:grid-cols-2' : ''}`}>
-          {dev.running.map((vm) => (
-            <RunningCard key={vm.key} vm={vm} />
-          ))}
-        </div>
-      )}
       {dev.stale.length > 0 && (
         <Disclosure
           summary={
@@ -102,21 +94,67 @@ function DeviceBlock({ dev, idle }: { dev: Dev; idle: boolean }) {
           {last ? `${taskTitle(last.argv, drives)}: ${s!.text}` : d && d.volume_id ? driveStatus(d, liveStep(d, tasks, elsewhere)).text : 'Nothing has run here yet.'}
         </p>
       )}
-      {!idle && dev.finished.length > 0 && (
-        <Disclosure summary={`Finished here (${Math.min(3, dev.finished.length)})`} open={recentOpen} onToggle={setRecentOpen} className="mt-3">
-          {dev.finished.slice(0, 3).map((t) => (
-            <FinishedRow key={t.id} t={t} drives={drives} />
+    </article>
+  );
+}
+
+interface Entry extends RunLike {
+  vm: TaskVM;
+}
+
+/** A drive named in a run's header: role, name, free space and an Open link. */
+function DriveChip({ mount, drives }: { mount: string; drives: Drive[] }) {
+  const d = drives.find((x) => x.mount && sameMount(x.mount, mount)) ?? null;
+  const name = d ? driveName(d) : baseName(mount) || 'drive';
+  const href = d && isCardDrive(d) ? hrefFor({ view: 'cards', id: d.volume_id }) : d && d.volume_id ? hrefFor({ view: 'drive', id: d.volume_id }) : null;
+  return (
+    <div className="flex min-w-0 items-center gap-2">
+      <RolePill role={d?.role ?? null} isNew={!d} text={d ? undefined : 'Folder'} />
+      <span className="min-w-0 truncate text-sm font-semibold">{name}</span>
+      {d?.mounted && d.free && <span className="shrink-0 text-xs text-muted">{d.free} free</span>}
+      {href && (
+        <a href={href} className="btn h-6 px-2 text-2xs" aria-label={`Open ${name}`}>
+          Open
+        </a>
+      )}
+    </div>
+  );
+}
+
+/** One run (rv-31): its drives once in the header, the run's card, and any follow-up copy nested under it. */
+function RunGroupBlock({ group, drives }: { group: RunGroup<Entry>; drives: Drive[] }) {
+  return (
+    <article className="card p-4">
+      {group.mounts.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1.5">
+          {group.mounts.map((m, i) => (
+            <div key={m} className="flex min-w-0 items-center gap-2">
+              {i > 0 && <span className="text-faint" aria-hidden>→</span>}
+              <DriveChip mount={m} drives={drives} />
+            </div>
           ))}
-        </Disclosure>
+        </div>
+      )}
+      <RunningCard vm={group.main.vm} />
+      {group.subs.length > 0 && (
+        <div className="mt-3 flex flex-col gap-3 border-l-2 border-line pl-3">
+          {group.subs.map((s) => (
+            <div key={s.key}>
+              <p className="mb-1 text-2xs font-medium uppercase tracking-wide text-muted">Then</p>
+              <RunningCard vm={s.vm} />
+            </div>
+          ))}
+        </div>
       )}
     </article>
   );
 }
 
-/** The home page (ui-14): what is running, grouped by the drive it runs on, then the idle drives. */
+/** The home page (ui-14): what is running, one block per run (a follow-up copy nested under its import), then the idle drives. */
 export function Home() {
   const { drives, tasks, elsewhere, stale, recent, now, loaded, driveFiles } = useStore();
   const [staleOpen, setStaleOpen] = useState(false);
+  const [doneOpen, setDoneOpen] = useState(false);
   const [allRecent, setAllRecent] = useState(false);
   const { actions } = useActions();
   const urgent = badgeCount(actions, now || Date.now());
@@ -125,30 +163,29 @@ export function Home() {
   const devOf = (mount: string): Dev => {
     const d = drives.find((x) => x.mount && sameMount(x.mount, mount));
     const key = d ? d.key || d.volume_id || `mount:${d.mount}` : `path:${mount}`;
-    if (!devs.has(key)) devs.set(key, { key, drive: d ?? null, mount, running: [], finished: [], stale: [] });
+    if (!devs.has(key)) devs.set(key, { key, drive: d ?? null, mount, finished: [], stale: [] });
     return devs.get(key)!;
   };
-  const other: TaskVM[] = [];
+  const entries: Entry[] = [];
+  const finishedTasks: TaskRec[] = [];
   for (const t of tasks) {
-    const mounts = taskMounts(argvWords(t.argv));
-    if (!mounts.length) {
-      if (!t.final) other.push(taskVM(t, drives, now, driveFiles));
+    const words = argvWords(t.argv);
+    const mounts = taskMounts(words);
+    if (t.final) {
+      finishedTasks.push(t);
+      for (const m of mounts) devOf(m).finished.push(t);
       continue;
     }
-    for (const m of mounts) {
-      const dev = devOf(m);
-      if (t.final) dev.finished.push(t);
-      else dev.running.push(taskVM(t, drives, now, driveFiles));
-    }
+    const jid = t.result && typeof t.result.job_id === 'number' ? t.result.job_id : undefined;
+    entries.push({ key: `t${t.id}`, mounts, jobId: jid, follow: followOf(words), vm: taskVM(t, drives, now, driveFiles) });
   }
   for (const e of elsewhere) {
-    const mounts = taskMounts(e.words || []);
-    if (!mounts.length) {
-      other.push(extVM(e, drives, now, driveFiles));
-      continue;
-    }
-    for (const m of mounts) devOf(m).running.push(extVM(e, drives, now, driveFiles));
+    const words = e.words || [];
+    entries.push({ key: `p${e.pid}`, mounts: taskMounts(words), jobId: e.job?.job_id, follow: followOf(words), vm: extVM(e, drives, now, driveFiles) });
   }
+  const groups = groupRuns(entries);
+  const busyKeys = new Set<string>();
+  for (const g of groups) for (const m of g.mounts) busyKeys.add(devOf(m).key);
   const staleLeft: StaleJob[] = [];
   for (const j of stale) {
     const d = drives.find((x) => x.label && x.label === j.label);
@@ -156,15 +193,15 @@ export function Home() {
     else staleLeft.push(j);
   }
 
-  const busy = [...devs.values()].filter((x) => x.running.length);
-  const used = new Set(busy.map((x) => x.key));
+  for (const dev of devs.values()) if (busyKeys.has(dev.key)) staleLeft.push(...dev.stale);
+  const used = busyKeys;
   const idle = drives
     .filter((d) => d.mounted && !d.ignored)
     .map((d) => devOf(d.mount))
     .filter((dev) => !used.has(dev.key));
-  const nRunning = tasks.filter((t) => !t.final).length + elsewhere.length;
+  const nRunning = entries.length;
   // Live cards shown below; the empty card shows only when there are none, whatever kind of task runs.
-  const anyRunning = nRunning > 0 || busy.length > 0 || other.length > 0;
+  const anyRunning = nRunning > 0;
 
   return (
     <div className="flex flex-col gap-6">
@@ -172,7 +209,7 @@ export function Home() {
         <h1 className="text-2xl font-semibold tracking-tight">Tasks</h1>
         <p className="mt-1 text-sm text-muted">
           {nRunning
-            ? `${plural(nRunning, 'task')} running${busy.length ? ` on ${plural(busy.length, 'drive')}` : ''}${
+            ? `${plural(nRunning, 'task')} running${busyKeys.size ? ` on ${plural(busyKeys.size, 'drive')}` : ''}${
                 elsewhere.length ? ` · ${elsewhere.length} started in a terminal` : ''
               }`
             : loaded
@@ -190,25 +227,15 @@ export function Home() {
       {/* Running: every live task, on a drive or not, from the UI or a terminal (rv-30). */}
       <section>
         <h2 className="label mb-2">Running{anyRunning ? ` (${nRunning})` : ''}</h2>
-        {busy.length > 0 && (
+        {groups.length > 0 && (
           <div className="flex flex-col gap-4">
             <AnimatePresence initial={false}>
-              {busy.map((dev, i) => (
-                <motion.div key={dev.key} {...rise(i)}>
-                  <DeviceBlock dev={dev} idle={false} />
+              {groups.map((g, i) => (
+                <motion.div key={g.main.key} {...rise(i)}>
+                  <RunGroupBlock group={g} drives={drives} />
                 </motion.div>
               ))}
             </AnimatePresence>
-          </div>
-        )}
-        {other.length > 0 && (
-          <div className={busy.length ? 'mt-4' : ''}>
-            {busy.length > 0 && <h3 className="mb-2 text-xs font-medium text-muted">Not on a drive</h3>}
-            <div className="grid gap-3 xl:grid-cols-2">
-              {other.map((vm) => (
-                <RunningCard key={vm.key} vm={vm} />
-              ))}
-            </div>
           </div>
         )}
         {!anyRunning && (
@@ -222,6 +249,14 @@ export function Home() {
           </div>
         )}
       </section>
+
+      {finishedTasks.length > 0 && (
+        <Disclosure summary={`Finished this session (${finishedTasks.length})`} open={doneOpen} onToggle={setDoneOpen}>
+          {finishedTasks.map((t) => (
+            <FinishedRow key={t.id} t={t} drives={drives} />
+          ))}
+        </Disclosure>
+      )}
 
       {recent.length > 0 && (
         <section>

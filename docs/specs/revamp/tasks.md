@@ -406,3 +406,16 @@ Rules for every task:
     metrics backfill; an unknown one reads "Running <command>" instead of "Working". A running backup shows on its
     `--from`/`--to` drives' cards, and previews cache on its drive's.
   - Result (follow-up): `cd web && npm run typecheck && npm test` → 167 passed. Build committed.
+
+- [x] 31. One block per run on the Tasks page
+  - ID: rv-31 (user ask, 2026-11-19; D-112)
+  - A run on two drives (an import card -> target) showed twice, once per drive group. Now Running has one block per
+    run: a header naming its drives (role badge, name, free space, Open link each, joined by arrows) above the run's
+    card. A `backup --follow <job>` run is nested under its import as "Then" (links: the follow run's `--follow N`
+    equals the import's `job_id`, from its `result` event for UI tasks or `job.job_id` for terminal runs). A follower
+    whose parent is not live, or has not reported its job id yet, stays a block of its own. UI-started finished runs
+    are one "Finished this session" list instead of per drive; Recently run (rv-30) is unchanged; idle drives keep
+    their last-run line. Pure grouping in `web/src/lib/runGroups.ts`.
+  - Verify: `cd web && npm run typecheck && npm test && npm run build`.
+  - Result (2026-11-19): typecheck clean; 176 web tests pass (17 files); build committed. Not seen in a browser.
+
