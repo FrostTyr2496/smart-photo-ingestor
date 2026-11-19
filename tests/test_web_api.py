@@ -1224,3 +1224,16 @@ def test_file_photo_finds_the_group_and_day(srv: Client) -> None:
     assert srv.call("GET", base + "Nope.JPG")[0] == 404
     assert srv.call("GET", "/api/volumes/vol-work/photo")[0] == 400
     assert srv.call("GET", "/api/volumes/nope/photo?rel_path=x")[0] == 404
+
+
+def test_card_detail_carries_the_test_card_badge(srv: Client) -> None:
+    """tc-1: the card page reads its header from the files endpoint, so it must say which drives are hidden."""
+    from photovault import testcard
+    seed_card(srv)
+    assert srv.call("GET", "/api/cards/vol-card/files")[1]["card"]["test_card"] is None
+    c = db.connect(srv.app.catalog_path)
+    label = repo.get_volume(c, "vol-work")["label"]
+    testcard.mark(c, "vol-card", ["vol-work"])
+    status, body = srv.call("GET", "/api/cards/vol-card/files")
+    assert status == 200 and body["card"]["test_card"] == {"hidden": [label]}
+    assert body["card"]["tier"] == "only_on_card"

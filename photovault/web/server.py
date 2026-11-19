@@ -1242,7 +1242,8 @@ def _card_files(app: WebApp, conn, volume_id: str, query: dict) -> dict:
         files = [f for f in files if any(c["volume_id"] == other for c in f["copies"])]
     return {"card": {"volume_id": volume_id, "label": vol["label"], "mounted": mount is not None,
                      "mount": str(mount) if mount else None, "last_seen_at": vol["last_seen_at"],
-                     "cleared_at": cleared_at(conn, volume_id), **summary},
+                     "cleared_at": cleared_at(conn, volume_id),
+                     "test_card": cards.test_card_badge(conn, volume_id), **summary},
             "files": files[offset:offset + limit], "total": len(files), "limit": limit, "offset": offset}
 
 

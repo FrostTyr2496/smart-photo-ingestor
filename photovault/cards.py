@@ -281,13 +281,18 @@ def list_cards(conn: sqlite3.Connection, drive_rows: list[dict]) -> dict:
     return {"cards": cards, "cameras": camera_rows(connected_files, names)}
 
 
+def test_card_badge(conn: sqlite3.Connection, vid: str | None) -> dict | None:
+    """``{"hidden": [labels]}`` when `vid` is the test card (D-111), else None. Used by the card list and detail."""
+    tc = testcard.describe(conn)["test_card"]
+    return {"hidden": [h["label"] for h in tc["hidden"]]} if tc and tc["card_volume_id"] == vid else None
+
+
 def _card_row(conn: sqlite3.Connection, d: dict, vid: str | None, files: list[dict]) -> dict:
     summary = card_summary(conn, vid, files=files)
     label = d.get("label") or (Path(d["mount"]).name if d.get("mount") else "Card")
     from photovault.card_clear import cleared_at  # local import: card_clear imports this module
 
-    tc = testcard.describe(conn)["test_card"]
-    test = {"hidden": [h["label"] for h in tc["hidden"]]} if tc and tc["card_volume_id"] == vid else None
+    test = test_card_badge(conn, vid)
     return {"volume_id": vid, "label": label, "mount": d.get("mount"), "mounted": bool(d.get("mounted")),
             "test_card": test, "last_seen_at": d.get("last_seen_at"), "registered": vid is not None,
             "cleared_at": cleared_at(conn, vid), **summary}
