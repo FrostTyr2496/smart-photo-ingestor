@@ -46,7 +46,7 @@ def worst(tiers: Iterable[str]) -> str:
 
 def check_card(conn: sqlite3.Connection, cfg: Config, mount: Path, *, emit: Emitter,
                should_stop: Callable[[], bool] = lambda: False) -> dict:
-    """Register the card (CARD) if new, then index and hash it. Reads the card only. Returns a summary dict with
+    """Register the card (CARD) if new, then index it and full-hash only files that may already be elsewhere (card-4, D-048). Reads the card only. Returns a summary dict with
     ``volume_id``, ``paused`` and the tier counts."""
     mount = Path(mount)
     p = volumes.probe(mount)
@@ -59,10 +59,14 @@ def check_card(conn: sqlite3.Connection, cfg: Config, mount: Path, *, emit: Emit
     job = index_volume(conn, cfg, mount, emit=emit, should_stop=should_stop)
     paused = repo.get_job(conn, job)["state"] == "paused"
     if not paused:
-        job = baseline_hash(conn, cfg, mount, emit=emit, should_stop=should_stop)
+        job = baseline_hash(conn, cfg, mount, emit=emit, should_stop=should_stop, only_candidates=True)
         paused = repo.get_job(conn, job)["state"] == "paused"
     summary = card_summary(conn, vid, mount=mount)
-    return {"volume_id": vid, "paused": paused, "tier": summary["tier"], "counts": summary["counts"]}
+    no_candidate = conn.execute(
+        "SELECT COUNT(*) FROM instances WHERE volume_id = ? AND asset_id IS NULL AND state = 'indexed'", (vid,)
+    ).fetchone()[0]
+    return {"volume_id": vid, "paused": paused, "tier": summary["tier"], "counts": summary["counts"],
+            "no_candidate": 0 if paused else no_candidate}
 
 
 # --------------------------------------------------------------------------- classify

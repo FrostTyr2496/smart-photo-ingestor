@@ -57,3 +57,11 @@ the worst tier among its files; no files gives `empty`.
     bar; a card opens its ranked file list; a Cameras table colours each camera worst first.
   - Verify: `uv run pytest tests/test_web_api.py -q`; the user does the visual check.
   - Result (2026-11-17): `uv run pytest tests/test_web_api.py -q` → 50 passed (with ui-7..ui-10). Visual check open.
+
+- [x] 4. A card check reads only files that may already be elsewhere
+  - ID: card-4 (D-048, D-099)
+  - `baseline_hash(..., only_candidates=False)`: when true, only instances whose size and partial hash match an
+    asset with a `verified` instance on a non-CARD volume are full-hashed; the rest stay `indexed` (red).
+    `check_card` passes it and returns `no_candidate` (files not read in full). `hash` is unchanged.
+  - Verify: `uv run pytest tests/test_cards.py tests/test_baseline_hash.py -q`
+  - Result (2026-11-18): see the commit; a file copied to a backup drive later needs a new card check to link.

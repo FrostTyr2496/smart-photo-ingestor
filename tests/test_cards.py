@@ -177,6 +177,7 @@ def test_card_turns_green_when_every_file_is_on_master(env, capsys) -> None:
             shutil.copy2(f, master / f.name)
     run(capsys, "index", str(env["vols"] / "BACKUP"))
     run(capsys, "hash", str(env["vols"] / "BACKUP"))
+    run(capsys, "cards", "check", str(env["card"]))  # card-4: files with no copy were not read; re-check links them
     [card] = listing(capsys, env)["cards"]
     assert card["tier"] == "backed_up"
     assert {c["tier"] for c in listing(capsys, env)["cameras"]} == {"backed_up"}
@@ -236,3 +237,29 @@ def test_import_after_a_check_uses_the_naming_spec(env, capsys) -> None:
     imported = [p.name for p in (env["work"]).rglob("*.NEF") if p.parent.name != "Photos"]
     assert imported and all(n.startswith("M000") for n in imported), imported
     assert tiers(env)["DSC_0004.NEF"] == "needs_backup"  # now on WORKING
+
+
+def test_check_full_reads_only_candidate_files(env, capsys, monkeypatch: pytest.MonkeyPatch) -> None:
+    import photovault.index as index_mod
+
+    real, seen = index_mod.sha256_file, []
+    monkeypatch.setattr(index_mod, "sha256_file", lambda p, *a, **k: (seen.append(Path(p).name), real(p, *a, **k))[1])
+    code, lines = run(capsys, "cards", "check", str(env["card"]))
+    assert code == 0, lines
+    assert "DSC_0004.NEF" not in seen and "DSC_0005.NEF" not in seen  # no copy anywhere: not read in full
+    assert {"DSC_0001.NEF", "DSC_0002.NEF", "DSC_0003.NEF"} <= set(seen)
+    assert result(lines)["no_candidate"] == 2
+    assert tiers(env)["DSC_0004.NEF"] == "only_on_card"
+
+
+def test_hash_on_a_normal_drive_still_hashes_everything(env, capsys, monkeypatch: pytest.MonkeyPatch) -> None:
+    import photovault.index as index_mod
+
+    real, seen = index_mod.sha256_file, []
+    monkeypatch.setattr(index_mod, "sha256_file", lambda p, *a, **k: (seen.append(Path(p).name), real(p, *a, **k))[1])
+    drive = env["vols"] / "WORK"
+    for n in (7, 8):
+        (drive / "Photos" / f"NEW_{n}.NEF").write_bytes(os.urandom(5000 + n))  # no candidate anywhere
+    run(capsys, "index", str(drive))
+    run(capsys, "hash", str(drive))
+    assert {"NEW_7.NEF", "NEW_8.NEF"} <= set(seen)

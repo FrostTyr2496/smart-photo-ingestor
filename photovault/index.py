@@ -229,7 +229,7 @@ def _folder(key: str) -> str:
 def baseline_hash(
     conn: sqlite3.Connection, cfg: Config, mount: Path, *, emit: Emitter, max_mbps: float | None = None,
     should_stop: Callable[[], bool] = lambda: False, skip_prefixes: Iterable[str] = (),
-    retry_unreadable: bool = False,
+    retry_unreadable: bool = False, only_candidates: bool = False,
 ) -> int:
     """Full-hash every indexed, unlinked instance on a volume; returns the job id. Read-only on the volume.
 
@@ -241,7 +241,8 @@ def baseline_hash(
     it alone unless `retry_unreadable`. After `DIR_ERROR_LIMIT` read errors in one folder the rest of that
     folder is deferred (left `indexed`) to a later run; after `RUN_ERROR_LIMIT` consecutive read errors, or
     when the mount disappears, the job pauses without marking anything more. `skip_prefixes` (relative to the
-    mount) are not read at all.
+    mount) are not read at all. `only_candidates` (card-4, D-048) hashes only files with a candidate: an asset
+    of the same size and partial hash with a `verified` instance on a non-CARD volume; the rest stay `indexed`.
     """
     mount = Path(mount)
     start = time.monotonic()
@@ -259,8 +260,13 @@ def baseline_hash(
         repo.set_job_state(conn, job_id, "running")
 
     states = "('indexed', 'mismatch')" if retry_unreadable else "('indexed')"
+    cand = """ AND partial_sha256 IS NOT NULL AND EXISTS (
+        SELECT 1 FROM assets a JOIN instances o ON o.asset_id = a.asset_id JOIN volumes v ON v.volume_id = o.volume_id
+        WHERE a.size = instances.size AND a.partial_sha256 = instances.partial_sha256 AND o.state = 'verified'
+          AND v.role != 'CARD')""" if only_candidates else ""
     todo = conn.execute(
-        f"SELECT * FROM instances WHERE volume_id = ? AND asset_id IS NULL AND state IN {states} ORDER BY rel_path",
+        f"SELECT * FROM instances WHERE volume_id = ? AND asset_id IS NULL AND state IN {states}{cand} "
+        "ORDER BY rel_path",
         (vid,),
     ).fetchall()
     links = group_links(conn, vid)

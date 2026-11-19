@@ -74,7 +74,7 @@ task's commit:
    Tasks home page, the sidebar groups, drives, cards, a step's Run button (e.g. Hash) and the editor (Photos).
 1. **[user] re-index Big Boy Old** (`uv run photovault index "/Volumes/Big Boy Old"`), then open its drive page.
    Then:
-2. **Import (spec `docs/specs/import`, D-088..D-091, D-096):** im-1..im-4 and cc-1 (safe card clear, schema V8) done.
+2. **Import (spec `docs/specs/import`, D-088..D-091, D-096):** im-1..im-4 and cc-1 (safe card clear, schema V8) done; card-4 (card check skips full reads of files with no copy) done.
    Next agent task: **bk-3** (trailing copy onto a second WORKING/MASTER drive). Until it lands nothing can turn green,
    because a second import onto another WORKING drive skips the files as duplicates (D-036), so Clear finds nothing.
    [user] im-5 and im-6: see "Waiting on user".
@@ -118,11 +118,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-099 (agent): card-4 a card check full-reads only files that may already be elsewhere; result has `no_candidate`.
 - D-098 (agent): rv-26 file lists as a folder tree, runs of similar names collapsed, pages of 1000.
 - D-097 (agent): cc-1 details: V8 rebuilds `jobs`; frames held back whole; one copy re-hashed, a mismatch stops the run.
 - D-096 (user): safe card clear; vault-rules 1 and 4 exceptions; job kind `card_clear`.
 - D-095 (agent): act-3 locations deep link `#/photos?missing=gps&day=`, shoots_review offers a plan, clock_suggested rule.
-- D-094 (agent): act-4 previews cached by a user-started task, offered as the action `previews_missing`.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.
