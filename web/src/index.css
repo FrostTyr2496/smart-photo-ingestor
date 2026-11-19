@@ -240,3 +240,13 @@
   border: 2px solid rgb(var(--c-bg));
   box-shadow: 0 2px 6px rgb(0 0 0 / 0.35);
 }
+
+/* Review mode (sh-3): a hatched frame in the warning hue marks the dry-run pane as another mode. */
+.review-frame {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+  border: 6px solid transparent;
+  border-image: repeating-linear-gradient(135deg, rgb(var(--c-maybe) / 0.75) 0 8px, rgb(var(--c-maybe) / 0.12) 8px 16px) 6;
+}

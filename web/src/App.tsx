@@ -14,6 +14,7 @@ import { Header } from './views/Header';
 import { Home } from './views/Home';
 import { SetupView } from './views/SetupView';
 import { Photos } from './views/Photos';
+import { ReviewFrame, ReviewShoots } from './views/review/ReviewShoots';
 import { Settings } from './views/Settings';
 import { Sidebar } from './views/Sidebar';
 
@@ -32,12 +33,15 @@ function useWide(): boolean {
 
 function Shell() {
   const route = useRoute();
-  const [hidden, setHidden] = usePref('shell.sidebarHidden', false);
+  const [savedHidden, setHidden] = usePref('shell.sidebarHidden', false);
+  // Review (sh-3) is its own mode: the drives sidebar is hidden there without touching the saved preference.
+  const review = route.view === 'review';
+  const hidden = savedHidden || review;
   const wide = useWide();
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
       if (e.key !== '[' || e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
-      if (isTypingTarget(e.target) || modalOpen()) return;
+      if (isTypingTarget(e.target) || modalOpen() || window.location.hash === '#/review/shoots') return;
       setHidden((h) => !h);
     };
     window.addEventListener('keydown', on);
@@ -48,6 +52,7 @@ function Shell() {
   return (
     <>
       <AmbientGlow active={active} />
+      {review && <ReviewFrame />}
       <div className="relative z-[1] min-h-screen">
         <Header route={route} sidebarHidden={hidden} onToggleSidebar={() => setHidden((h) => !h)} />
         <main className="mx-auto flex max-w-[1600px] flex-col gap-5 px-4 py-5 lg:flex-row lg:gap-0">
@@ -70,7 +75,7 @@ function Shell() {
           ) : (
             !hidden && <Sidebar route={route} />
           )}
-          {wide && hidden && (
+          {wide && hidden && !review && (
             <button
               type="button"
               onClick={() => setHidden(false)}
@@ -98,6 +103,8 @@ function Shell() {
                   <SetupView driveKey={route.key} />
                 ) : route.view === 'photos' ? (
                   <Photos />
+                ) : route.view === 'review' ? (
+                  <ReviewShoots />
                 ) : route.view === 'settings' ? (
                   <Settings />
                 ) : (

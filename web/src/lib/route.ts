@@ -7,9 +7,11 @@ export type Route =
   | { view: 'cards'; id: string | null }
   | { view: 'setup'; key: string }
   | { view: 'photos' }
+  | { view: 'review' }
   | { view: 'settings' };
 
 export function parseRoute(hash: string): Route {
+  if (hash === '#/review/shoots') return { view: 'review' };
   const m = /^#\/(drive|cards|setup|photos|settings)(?:\/(.+))?$/.exec(hash);
   if (!m) return { view: 'home' };
   const id = m[2] ? decodeURIComponent(m[2]) : null;
@@ -31,6 +33,8 @@ export function hrefFor(r: Route): string {
       return r.id ? `#/cards/${encodeURIComponent(r.id)}` : '#/cards';
     case 'photos':
       return '#/photos';
+    case 'review':
+      return '#/review/shoots';
     case 'settings':
       return '#/settings';
     default:

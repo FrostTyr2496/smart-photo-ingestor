@@ -102,7 +102,7 @@ Rules for every task:
   - `POST /api/shoots/decisions {proposal_id, kind, payload}` stores a decision. `GET /api/shoots/decisions` lists them.
   - Verify: `uv run pytest tests/test_shoots_api.py -q`.
 
-- [ ] 4. Review mode: a separate dry-run pane
+- [x] 4. Review mode: a separate dry-run pane
   - ID: sh-3. Built first against fixture plans in this format; wired to the live API when sh-2 lands.
   - A route `#/review/shoots`, reached from Photos ("Review shoots") and the nav. It must be **visibly another mode**:
     - a persistent mode bar ("Dry run — nothing changes until you Apply · N decisions pending");
@@ -125,6 +125,9 @@ Rules for every task:
     undo.
   - Apply is disabled until sh-4 lands.
   - Verify: `cd web && npm run typecheck && npm test` (decision reducer, split/merge preview); **[user]** browser check.
+  - Result (2026-11-18): built against `tests/fixtures/plans/shoots-fixture.json` until sh-2 (`GET /api/shoots/plan` serves the
+    newest plan, or `PHOTOVAULT_DEV_PLAN=<path>`); decisions are kept in the browser per `plan_id` (`TODO(sh-2)`); Apply is
+    disabled until sh-4. Reducer in `web/src/lib/review.ts`, views in `web/src/views/review/`. Not seen in a browser yet.
 
 - [ ] 5. Apply and undo
   - ID: sh-4 (after sh-2, sh-3).

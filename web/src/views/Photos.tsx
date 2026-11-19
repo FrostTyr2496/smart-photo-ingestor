@@ -309,7 +309,16 @@ export function Photos() {
       <ClockBanner onApplied={() => setReload((r) => r + 1)} />
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight">Photos</h1>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-semibold tracking-tight">Photos</h1>
+            <a
+              href="#/review/shoots"
+              title="Check the proposed trips and shoots as a dry run (nothing changes until you Apply)"
+              className="inline-flex h-7 items-center rounded-full border border-maybe/40 bg-maybe/10 px-3 text-xs font-medium text-maybe hover:bg-maybe/20"
+            >
+              Review shoots
+            </a>
+          </div>
           <p className="mt-1 text-sm text-muted">
             {counts ? (
               <>

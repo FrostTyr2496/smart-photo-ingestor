@@ -859,6 +859,7 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
         ("POST", "/api/run"): lambda: _run(app, body),
         ("GET", "/api/tasks"): lambda: {"tasks": app.runner.summaries()},
         ("GET", "/api/activity"): lambda: activity.snapshot(conn, app.home, server_pid=os.getpid()),
+        ("GET", "/api/shoots/plan"): lambda: _shoots_plan(app),
         ("GET", "/api/shoots"): lambda: {"shoots": [dict(r) for r in repo.list_shoots(conn)]},
         ("GET", "/api/groups"): lambda: _groups(conn, query, app),
         ("GET", "/api/photo-days"): lambda: _photo_days(conn, query),
@@ -873,6 +874,26 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
     if any(p == path for _, p in routes):
         return 405, {"error": "method not allowed"}
     return 404, {"error": "unknown endpoint"}
+
+
+def _shoots_plan(app: WebApp) -> dict:
+    """``GET /api/shoots/plan`` (sh-3): the newest ``<home>/plans/shoots-*.json``, read-only. ``PHOTOVAULT_DEV_PLAN=<path>``
+    serves that file instead (development and the fixture). 404 when there is none; sh-2 adds the planner."""
+    override = os.environ.get("PHOTOVAULT_DEV_PLAN")
+    if override:
+        path = Path(override)
+    else:
+        plans = app.home / "plans"
+        found = sorted(plans.glob("shoots-*.json")) if plans.is_dir() else []
+        if not found:
+            raise NotFound("no plan yet")
+        path = found[-1]
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise NotFound("no plan yet") from exc
+    except (OSError, ValueError) as exc:
+        raise BadRequest(f"the plan file could not be read: {exc}") from exc
 
 
 FILE_STATES = ("indexed", "verified", "mismatch", "missing")

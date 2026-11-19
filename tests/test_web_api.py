@@ -1116,3 +1116,21 @@ def test_groups_say_whether_full_size_is_available(srv: Client) -> None:
     assert rows[srv.ids["a"]]["full_available"] is True and rows[srv.ids["a"]]["held_on"] == ["WORK"]
     assert rows[srv.ids["c"]]["full_available"] is False and len(rows[srv.ids["c"]]["held_on"]) == 1
     assert rows[srv.ids["b"]]["full_available"] is False and rows[srv.ids["b"]]["held_on"] == []
+
+
+def test_shoots_plan_newest_file_wins_404_and_dev_override(srv: Client, tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("PHOTOVAULT_DEV_PLAN", raising=False)
+    assert srv.call("GET", "/api/shoots/plan") == (404, {"error": "no plan yet"})
+    plans = srv.home / "plans"
+    plans.mkdir(parents=True)
+    (plans / "shoots-20261101-100000.json").write_text(json.dumps({"plan_id": "old"}))
+    (plans / "shoots-20261118-210000.json").write_text(json.dumps({"plan_id": "new"}))
+    (plans / "notes.json").write_text("{}")
+    status, body = srv.call("GET", "/api/shoots/plan")
+    assert status == 200 and body["plan_id"] == "new"
+    dev = tmp_path / "dev.json"
+    dev.write_text(json.dumps({"plan_id": "dev"}))
+    monkeypatch.setenv("PHOTOVAULT_DEV_PLAN", str(dev))
+    assert srv.call("GET", "/api/shoots/plan")[1]["plan_id"] == "dev"
+    monkeypatch.setenv("PHOTOVAULT_DEV_PLAN", str(tmp_path / "missing.json"))
+    assert srv.call("GET", "/api/shoots/plan")[0] == 404

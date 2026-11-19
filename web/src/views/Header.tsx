@@ -105,6 +105,7 @@ export function Header({ route, sidebarHidden, onToggleSidebar }: { route: Route
         >
           <NavItem label="Tasks" href="#/" active={route.view === 'home'} />
           <NavItem label="Photos" href="#/photos" active={route.view === 'photos'} title="Photos (being rebuilt)" />
+          <NavItem label="Review" href="#/review/shoots" active={route.view === 'review'} dot="bg-maybe" title="Review shoots (dry run)" />
           <NavItem
             label="Cards"
             href="#/cards"

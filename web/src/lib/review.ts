@@ -1,0 +1,349 @@
+// Shoot review (sh-3): the plan file format (docs/specs/shoots/tasks.md) and the decision reducer behind the dry-run
+// pane. A decision is a small record; the "effective plan" the UI renders is the base plan with every decision folded
+// in, in order. Nothing here writes anything: Apply arrives with sh-4.
+//
+// TODO(sh-2): decisions are kept in the browser (usePref, per plan_id). When POST /api/shoots/decisions lands, send
+// each Decision there and load them from GET /api/shoots/decisions; `effectivePlan(plan, decisions)` stays as is.
+
+export type NameSource = 'folder' | 'phone' | 'other_folder' | 'fallback' | 'user' | string;
+
+export interface NameChoice {
+  value: string;
+  source: NameSource;
+}
+export interface PlanName extends NameChoice {
+  alternatives: NameChoice[];
+}
+export interface Gap {
+  after_group_id: number;
+  gap_s: number;
+}
+export interface PlanShoot {
+  proposal_id: string;
+  trip_id: string | null;
+  name: PlanName;
+  shoot_date: string;
+  start_instant: string;
+  end_instant: string;
+  wall: { start: string | null; end: string | null };
+  local_offset: { value: string; camera: string; source: string; changes: boolean };
+  group_ids: number[];
+  counts: { frames: number; by_body: Record<string, number>; located: number };
+  sample_group_ids: number[];
+  centroid: { lat: number; lon: number } | null;
+  points: [number, number][];
+  gaps: Gap[];
+  flags: string[];
+  locked: boolean;
+}
+export interface PlanTrip {
+  proposal_id: string;
+  name: PlanName;
+  start_date: string;
+  end_date: string;
+  shoot_ids: string[];
+  flags: string[];
+}
+export interface Plan {
+  plan_id: string;
+  created_at: string;
+  params: Record<string, number | string | null>;
+  summary: { frames: number; shoots: number; trips: number; unassigned: number; locked: number; flagged: number };
+  trips: PlanTrip[];
+  shoots: PlanShoot[];
+}
+
+export type Decision = { seq: number } & (
+  | { kind: 'accept'; id: string }
+  | { kind: 'skip'; id: string }
+  | { kind: 'rename'; id: string; value: string; source?: NameSource }
+  | { kind: 'reject_name'; id: string; value: string }
+  | { kind: 'split'; id: string; after_group_id: number }
+  | { kind: 'merge'; id: string; with: 'prev' | 'next' }
+  | { kind: 'move'; id: string; trip_id: string | null }
+  | { kind: 'accept_trip'; id: string }
+  | { kind: 'accept_all_unflagged' }
+);
+/** A decision before it gets its sequence number. */
+export type NewDecision = Decision extends infer D ? (D extends unknown ? Omit<D, 'seq'> : never) : never;
+
+export type ShootState = 'undecided' | 'accepted' | 'skipped';
+export interface EffShoot extends PlanShoot {
+  state: ShootState;
+  renamed: boolean;
+  /** Made by a split or merge here, so counts, dates and points are estimates. */
+  derived: boolean;
+  /** Names the user rejected for this shoot (they join the stoplist on Apply). */
+  rejected: string[];
+}
+export interface EffTrip extends Omit<PlanTrip, 'shoot_ids'> {
+  shoot_ids: string[];
+  renamed: boolean;
+}
+export interface EffPlan {
+  trips: EffTrip[];
+  /** All shoots in time order. */
+  shoots: EffShoot[];
+  stoplist: string[];
+}
+
+export const isTripId = (id: string): boolean => id.startsWith('t:');
+
+// ---- pure shoot operations (also used for previews) ----
+
+const sumBodies = (a: Record<string, number>, b: Record<string, number>): Record<string, number> => {
+  const out = { ...a };
+  for (const [k, v] of Object.entries(b)) out[k] = (out[k] ?? 0) + v;
+  return out;
+};
+
+/** Spread a total over the two halves by group count, keeping the sum exact. */
+const share = (total: number, left: number, all: number): [number, number] => {
+  const l = all > 0 ? Math.round((total * left) / all) : 0;
+  return [l, total - l];
+};
+
+export function fromPlanShoot(s: PlanShoot): EffShoot {
+  return { ...s, state: 'undecided', renamed: false, derived: false, rejected: [] };
+}
+
+/** Cut a shoot after a group (at one of its gaps) into two. Counts, bodies, located and points are shared by group
+ *  count, so they are estimates (`derived`). Returns null when the cut is not between two groups. */
+export function splitShoot(s: EffShoot, afterGroupId: number): [EffShoot, EffShoot] | null {
+  const cut = s.group_ids.indexOf(afterGroupId);
+  if (cut < 0 || cut >= s.group_ids.length - 1) return null;
+  const n = s.group_ids.length;
+  const leftIds = s.group_ids.slice(0, cut + 1);
+  const rightIds = s.group_ids.slice(cut + 1);
+  const [fl, fr] = share(s.counts.frames, leftIds.length, n);
+  const [ll, lr] = share(Math.min(s.counts.located, s.counts.frames), leftIds.length, n);
+  const bl: Record<string, number> = {};
+  const br: Record<string, number> = {};
+  for (const [body, c] of Object.entries(s.counts.by_body)) {
+    const [a, b] = share(c, leftIds.length, n);
+    if (a) bl[body] = a;
+    if (b) br[body] = b;
+  }
+  const pc = Math.round((s.points.length * leftIds.length) / n);
+  const set = new Set(leftIds);
+  const mk = (suffix: string, ids: number[], isLeft: boolean): EffShoot => ({
+    ...s,
+    proposal_id: `${s.proposal_id}/${suffix}`,
+    group_ids: ids,
+    counts: { frames: isLeft ? fl : fr, by_body: isLeft ? bl : br, located: isLeft ? ll : lr },
+    sample_group_ids: s.sample_group_ids.filter((g) => (set.has(g) === isLeft)),
+    points: isLeft ? s.points.slice(0, pc) : s.points.slice(pc),
+    gaps: s.gaps.filter((g) => g.after_group_id !== afterGroupId && (set.has(g.after_group_id) === isLeft)),
+    // The cut moves one end of each half to a time we do not have; the other end keeps the original value.
+    start_instant: isLeft ? s.start_instant : '',
+    end_instant: isLeft ? '' : s.end_instant,
+    wall: isLeft ? { start: s.wall.start, end: null } : { start: null, end: s.wall.end },
+    shoot_date: isLeft ? s.shoot_date : (s.wall.end ?? s.shoot_date).slice(0, 10),
+    state: 'undecided',
+    derived: true,
+    name: isLeft ? s.name : { ...s.name, alternatives: [...s.name.alternatives] },
+  });
+  return [mk('1', leftIds, true), mk('2', rightIds, false)];
+}
+
+const gapSeconds = (a: EffShoot, b: EffShoot): number | null => {
+  const e = Date.parse(a.end_instant);
+  const st = Date.parse(b.start_instant);
+  return Number.isFinite(e) && Number.isFinite(st) && st >= e ? Math.round((st - e) / 1000) : null;
+};
+
+/** Join two neighbouring shoots (a before b). The earlier one's name, trip and date win. */
+export function mergeShoots(a: EffShoot, b: EffShoot): EffShoot {
+  const bridge = gapSeconds(a, b);
+  const last = a.group_ids[a.group_ids.length - 1]!;
+  return {
+    ...a,
+    proposal_id: `${a.proposal_id}+${b.proposal_id}`,
+    group_ids: [...a.group_ids, ...b.group_ids],
+    counts: { frames: a.counts.frames + b.counts.frames, by_body: sumBodies(a.counts.by_body, b.counts.by_body), located: a.counts.located + b.counts.located },
+    sample_group_ids: [...a.sample_group_ids, ...b.sample_group_ids].slice(0, 12),
+    points: [...a.points, ...b.points].slice(0, 50),
+    gaps: [...a.gaps, ...(bridge !== null ? [{ after_group_id: last, gap_s: bridge }] : []), ...b.gaps].sort((x, y) => y.gap_s - x.gap_s).slice(0, 20),
+    start_instant: a.start_instant || b.start_instant,
+    end_instant: b.end_instant || a.end_instant,
+    wall: { start: a.wall.start ?? b.wall.start, end: b.wall.end ?? a.wall.end },
+    flags: [...new Set([...a.flags, ...b.flags])],
+    state: 'undecided',
+    derived: true,
+    renamed: a.renamed,
+    rejected: [...new Set([...a.rejected, ...b.rejected])],
+    locked: false,
+  };
+}
+
+const byStart = (x: EffShoot, y: EffShoot): number => {
+  const a = x.start_instant || x.end_instant;
+  const b = y.start_instant || y.end_instant;
+  return a < b ? -1 : a > b ? 1 : x.group_ids[0]! - y.group_ids[0]!;
+};
+
+/** The neighbour a merge would use: the previous or next shoot in the same trip (or the same "no trip" group). */
+export function neighbour(plan: EffPlan, id: string, dir: 'prev' | 'next'): EffShoot | null {
+  const s = plan.shoots.find((x) => x.proposal_id === id);
+  if (!s) return null;
+  const peers = plan.shoots.filter((x) => x.trip_id === s.trip_id);
+  const i = peers.indexOf(s);
+  const n = peers[dir === 'prev' ? i - 1 : i + 1];
+  return n && !n.locked && !s.locked ? n : null;
+}
+
+// ---- the reducer ----
+
+function dateSpan(shoots: EffShoot[]): [string, string] | null {
+  const ds = shoots.flatMap((s) => [s.shoot_date, (s.wall.end ?? '').slice(0, 10)]).filter((d) => d.length === 10).sort();
+  return ds.length ? [ds[0]!, ds[ds.length - 1]!] : null;
+}
+
+function rebuildTrips(trips: EffTrip[], shoots: EffShoot[]): EffTrip[] {
+  // Trips left empty stay in the list (a shoot can be moved back into one); the UI hides them.
+  return trips.map((t) => {
+      const mine = shoots.filter((s) => s.trip_id === t.proposal_id);
+      const span = dateSpan(mine);
+      return { ...t, shoot_ids: mine.map((s) => s.proposal_id), start_date: span?.[0] ?? t.start_date, end_date: span?.[1] ?? t.end_date };
+  });
+}
+
+export function initialPlan(plan: Plan): EffPlan {
+  const shoots = plan.shoots.map(fromPlanShoot).sort(byStart);
+  const trips = plan.trips.map((t) => ({ ...t, renamed: false }));
+  return { trips: rebuildTrips(trips, shoots), shoots, stoplist: [] };
+}
+
+const patch = (p: EffPlan, id: string, f: (s: EffShoot) => EffShoot): EffPlan => ({
+  ...p,
+  shoots: p.shoots.map((s) => (s.proposal_id === id && !s.locked ? f(s) : s)),
+});
+
+/** Apply one decision. A decision that names something gone (after an undo of an earlier split, say) does nothing. */
+export function applyDecision(p: EffPlan, d: Decision): EffPlan {
+  switch (d.kind) {
+    case 'accept':
+      return patch(p, d.id, (s) => ({ ...s, state: 'accepted' }));
+    case 'skip':
+      return patch(p, d.id, (s) => ({ ...s, state: 'skipped' }));
+    case 'rename': {
+      const value = d.value.trim();
+      if (!value) return p;
+      const source = d.source ?? 'user';
+      if (isTripId(d.id)) {
+        return { ...p, trips: p.trips.map((t) => (t.proposal_id === d.id ? { ...t, renamed: true, name: { value, source, alternatives: t.name.alternatives.filter((a) => a.value !== value) } } : t)) };
+      }
+      return patch(p, d.id, (s) => ({
+        ...s,
+        renamed: true,
+        name: { value, source, alternatives: [...(s.name.value !== value ? [{ value: s.name.value, source: s.name.source }] : []), ...s.name.alternatives].filter((a, i, all) => a.value !== value && all.findIndex((b) => b.value === a.value) === i) },
+      }));
+    }
+    case 'reject_name': {
+      const stoplist = p.stoplist.includes(d.value) ? p.stoplist : [...p.stoplist, d.value];
+      const next = patch({ ...p, stoplist }, d.id, (s) => {
+        const alts = s.name.alternatives.filter((a) => a.value !== d.value);
+        const rejected = [...s.rejected, d.value];
+        if (s.name.value !== d.value) return { ...s, rejected, name: { ...s.name, alternatives: alts } };
+        const [first, ...rest] = alts;
+        return first ? { ...s, rejected, name: { ...first, alternatives: rest } } : { ...s, rejected };
+      });
+      return next;
+    }
+    case 'split': {
+      const s = p.shoots.find((x) => x.proposal_id === d.id);
+      if (!s || s.locked) return p;
+      const halves = splitShoot(s, d.after_group_id);
+      if (!halves) return p;
+      const shoots = p.shoots.flatMap((x) => (x === s ? halves : [x])).sort(byStart);
+      return { ...p, shoots, trips: rebuildTrips(p.trips, shoots) };
+    }
+    case 'merge': {
+      const other = neighbour(p, d.id, d.with);
+      const s = p.shoots.find((x) => x.proposal_id === d.id);
+      if (!s || !other) return p;
+      const [a, b] = d.with === 'prev' ? [other, s] : [s, other];
+      const merged = mergeShoots(a, b);
+      const shoots = [...p.shoots.filter((x) => x !== a && x !== b), merged].sort(byStart);
+      return { ...p, shoots, trips: rebuildTrips(p.trips, shoots) };
+    }
+    case 'move': {
+      if (d.trip_id !== null && !p.trips.some((t) => t.proposal_id === d.trip_id)) return p;
+      const q = patch(p, d.id, (s) => ({ ...s, trip_id: d.trip_id }));
+      return { ...q, trips: rebuildTrips(p.trips, q.shoots) };
+    }
+    case 'accept_trip': {
+      const t = p.trips.find((x) => x.proposal_id === d.id);
+      if (!t) return p;
+      return { ...p, shoots: p.shoots.map((s) => (s.trip_id === t.proposal_id && !s.locked ? { ...s, state: 'accepted' } : s)) };
+    }
+    case 'accept_all_unflagged':
+      return { ...p, shoots: p.shoots.map((s) => (!s.locked && s.state === 'undecided' && s.flags.length === 0 ? { ...s, state: 'accepted' } : s)) };
+  }
+}
+
+/** The effective plan after every decision, in order. */
+export function effectivePlan(plan: Plan, decisions: Decision[]): EffPlan {
+  return decisions.reduce(applyDecision, initialPlan(plan));
+}
+
+export function addDecision(decisions: Decision[], d: NewDecision): Decision[] {
+  const seq = decisions.reduce((m, x) => Math.max(m, x.seq), 0) + 1;
+  return [...decisions, { ...d, seq } as Decision];
+}
+
+/** Undo one decision by its sequence number. Later ones that depended on it become no-ops when replayed. */
+export function undoDecision(decisions: Decision[], seq: number): Decision[] {
+  return decisions.filter((d) => d.seq !== seq);
+}
+
+const nameOf = (p: EffPlan, id: string): string => p.trips.find((t) => t.proposal_id === id)?.name.value ?? p.shoots.find((s) => s.proposal_id === id)?.name.value ?? 'a shoot';
+
+/** One line per decision for the side panel, worded with the names as they were when it was made. */
+export function describeAll(plan: Plan, decisions: Decision[]): { seq: number; text: string }[] {
+  let cur = initialPlan(plan);
+  return decisions.map((d) => {
+    const nm = 'id' in d ? nameOf(cur, d.id) : '';
+    let text: string;
+    switch (d.kind) {
+      case 'accept': text = `Accept ${nm}`; break;
+      case 'skip': text = `Skip ${nm}`; break;
+      case 'rename': text = `Rename ${nm} to "${d.value}"`; break;
+      case 'reject_name': text = `Reject the name "${d.value}" (${nm})`; break;
+      case 'split': text = `Split ${nm} after photo ${d.after_group_id}`; break;
+      case 'merge': text = `Merge ${nm} with the ${d.with === 'prev' ? 'previous' : 'next'} shoot`; break;
+      case 'move': text = `Move ${nm} ${d.trip_id ? `to ${nameOf(cur, d.trip_id)}` : 'out of its trip'}`; break;
+      case 'accept_trip': text = `Accept trip ${nm}`; break;
+      case 'accept_all_unflagged': text = 'Accept all unflagged'; break;
+    }
+    cur = applyDecision(cur, d);
+    return { seq: d.seq, text };
+  });
+}
+
+export type ReviewFilter = 'all' | 'flagged' | 'undecided' | 'accepted';
+
+export const matchesFilter = (s: EffShoot, f: ReviewFilter): boolean =>
+  f === 'all' ? true : f === 'flagged' ? s.flags.length > 0 : f === 'undecided' ? s.state === 'undecided' && !s.locked : s.state === 'accepted' || s.locked;
+
+export function tally(p: EffPlan): { shoots: number; trips: number; accepted: number; skipped: number; undecided: number; flagged: number } {
+  const open = p.shoots.filter((s) => !s.locked);
+  return {
+    shoots: p.shoots.length,
+    trips: p.trips.filter((t) => t.shoot_ids.length > 0).length,
+    accepted: open.filter((s) => s.state === 'accepted').length,
+    skipped: open.filter((s) => s.state === 'skipped').length,
+    undecided: open.filter((s) => s.state === 'undecided').length,
+    flagged: p.shoots.filter((s) => s.flags.length > 0).length,
+  };
+}
+
+export const FLAG_INFO: Record<string, { label: string; tip: string }> = {
+  multi_place: { label: 'several places', tip: 'The frames sit in more than one place. Splitting at a gap may help.' },
+  tz_change: { label: 'time zone changes', tip: 'A time-zone change is proposed for this shoot: the camera clock and the local time differ.' },
+  body_clock_mismatch: { label: 'bodies disagree', tip: 'Two camera bodies show different clocks for this shoot.' },
+  huge_timelapse: { label: 'very large timelapse', tip: 'A very large run of frames. It may be a timelapse that belongs in one shoot, or several.' },
+  weak_name: { label: 'weak name', tip: 'The name comes from a weak source (a fallback or an undated folder). Rename it or pick an alternative.' },
+};
+
+export const NAME_SOURCE_LABEL: Record<string, string> = { folder: 'folder', phone: 'phone', other_folder: 'other folder', fallback: 'fallback', user: 'you' };

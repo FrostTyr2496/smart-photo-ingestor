@@ -6,9 +6,9 @@ import { initialView } from '../lib/mapview';
 // is shown, so the rest of the app never fetches it and no tile is requested until the editor is open. Tiles show
 // the area being viewed to OpenStreetMap; no photo, path or catalog data is sent.
 
-type Leaflet = typeof L;
+export type Leaflet = typeof L;
 let leafletPromise: Promise<Leaflet> | null = null;
-function loadLeaflet(): Promise<Leaflet> {
+export function loadLeaflet(): Promise<Leaflet> {
   leafletPromise ??= Promise.all([import('leaflet'), import('leaflet/dist/leaflet.css')]).then(([m]) => (m.default ?? m) as Leaflet);
   return leafletPromise;
 }
