@@ -11,6 +11,7 @@ import webbrowser
 from pathlib import Path
 
 from photovault import cards, meta, metrics, phone, report, volumes
+from photovault import activity
 from photovault.activity import ActivityEmitter
 from photovault.drives import CLI_DRIVE_KEYS, VOLUMES_ROOT, scan_mounts
 from photovault.web import server as web_server
@@ -499,6 +500,9 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+JOB_COMMANDS = frozenset({"ingest", "resume", "index", "hash", "cards"})
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     try:
@@ -513,6 +517,13 @@ def main(argv: list[str] | None = None) -> int:
         cfg = load_config()
         argv_list = list(sys.argv[1:] if argv is None else argv)
         emit.track(cfg.home, argv_list)
+        if args.cmd in JOB_COMMANDS and cfg.catalog_path.exists():
+            # idx-9: a job left `running` by a run that died is set to paused before this one starts.
+            conn = _open(cfg)
+            try:
+                activity.pause_ownerless(conn, cfg.home, emit=emit)
+            finally:
+                conn.close()
         if args.cmd not in ("serve", "metrics"):
             # Lifetime I/O metrics (met-1, D-054): a no-op for commands that read and write nothing.
             recorder = metrics.Recorder(cfg.home, cfg.catalog_path, command=" ".join(argv_list),

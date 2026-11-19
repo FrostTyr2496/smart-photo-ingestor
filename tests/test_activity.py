@@ -194,7 +194,25 @@ def test_jobs_without_a_process_are_stale(conn, tmp_path: Path) -> None:
     other = running_job(conn, "baseline_hash", "/Volumes/PP 1")
     snap = snapshot(conn, tmp_path, server_pid=SERVER, processes=[proc(200, "index /Volumes/Big Drive")])
     assert snap["activity"][0]["job"]["job_id"] == newer  # the newest running job is the live one
-    assert sorted(j["job_id"] for j in snap["stale_jobs"]) == sorted([older, other])
+    assert snap["stale_jobs"] == []  # idx-9: ownerless jobs are paused, so the list empties by itself
+    states = {r["job_id"]: r["state"] for r in conn.execute("SELECT job_id, state FROM jobs")}
+    assert states == {older: "paused", newer: "running", other: "paused"}
+
+
+def test_pause_ownerless_names_the_job_and_spares_live_ones(conn, tmp_path: Path, monkeypatch) -> None:
+    dead = running_job(conn, "index_volume", "/Volumes/PP 1")
+    live = running_job(conn, "index_volume", "/Volumes/Big Drive")
+    resumed = running_job(conn, "baseline_hash", "/Volumes/Other")
+    out = io.StringIO()
+    em = ActivityEmitter(out, json_mode=True)
+    procs = [proc(200, "index /Volumes/Big Drive"), proc(201, f"resume {resumed}")]
+    assert activity.pause_ownerless(conn, tmp_path, processes=procs, emit=em) == [dead]
+    events = [json.loads(line) for line in out.getvalue().splitlines()]
+    assert [e["event"] for e in events] == ["warning"] and f"job {dead}" in events[0]["message"]
+    states = {r["job_id"]: r["state"] for r in conn.execute("SELECT job_id, state FROM jobs")}
+    assert states == {dead: "paused", live: "running", resumed: "running"}
+    monkeypatch.setattr(activity, "list_processes", lambda: None)  # ps unavailable: touch nothing
+    assert activity.pause_ownerless(conn, tmp_path) == []
 
 
 def test_server_and_its_children_are_hidden_but_keep_their_job_live(conn, tmp_path: Path) -> None:

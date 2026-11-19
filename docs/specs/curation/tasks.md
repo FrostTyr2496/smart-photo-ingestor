@@ -19,12 +19,13 @@ Existing tasks, now unblocked (D-069): **ing-13** (`docs/specs/ingest/tasks.md`)
 (`docs/specs/index/tasks.md`: repeatable `--was-mounted-as <old_mount>`, `off_volume` / `paths_elsewhere` in the
 result). Build them as written there.
 
-- [ ] 1. Ownerless `running` jobs become `paused`
+- [x] 1. Ownerless `running` jobs become `paused`
   - ID: idx-9 (approved, D-069)
   - At the start of any job-taking command and in `activity.snapshot`, a job in state `running` whose owner pid
     is not alive (per `photovault/activity.py`) is set to `paused`, with a `warning` event naming the job. A job
     whose pid is alive is never touched. The UI's "Marked running, but stopped" list then empties on its own.
   - Verify: `uv run pytest tests/test_activity.py -q` with a test for each case.
+  - Result (2026-11-18): `activity.pause_ownerless` (used by `snapshot` and by `cli.main` before ingest, resume, index, hash and cards) pauses running jobs no live process owns (mount match or `resume <id>`) and emits a `warning`; tests in `tests/test_activity.py`.
 
 - [ ] 2. Drive usage: more camera stems, and no ExifTool on a no-op re-index
   - ID: idx-14 (approved, D-069)

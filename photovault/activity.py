@@ -291,6 +291,43 @@ def read_progress_files(home: Path, live_pids: set[int] | None) -> dict[int, dic
     return found
 
 
+def pause_ownerless(conn: sqlite3.Connection, home: Path, *, processes: list[EngineProcess] | None = None,
+                    emit: Emitter | None = None) -> list[int]:
+    """Set `running` jobs that no live engine process owns to `paused` (idx-9); returns their ids.
+
+    A job is owned when a live process names its mount or runs `resume <job_id>`. When `ps` cannot be run
+    nothing is touched. A `warning` event names each job that was paused.
+    """
+    procs = list_processes() if processes is None else processes
+    if procs is None:
+        return []
+    files = read_progress_files(home, {p.pid for p in procs})
+    jobs = running_jobs(conn)
+    claimed: set[int] = set()
+    for p in procs:
+        f = files.get(p.pid)
+        text = " ".join(f["words"]) if f and isinstance(f.get("words"), list) else p.text
+        words = p.words
+        if len(words) >= 2 and words[0] == "resume" and words[1].isdigit():
+            claimed.add(int(words[1]))
+        job = next((j for j in jobs if j["job_id"] not in claimed and _matches(j, text)), None)
+        if job is not None:
+            claimed.add(job["job_id"])
+    paused = []
+    for j in jobs:
+        if j["job_id"] in claimed:
+            continue
+        conn.execute("UPDATE jobs SET state = 'paused' WHERE job_id = ? AND state = 'running'", (j["job_id"],))
+        paused.append(j["job_id"])
+        if emit is not None:
+            emit.emit("warning", code="job_paused",
+                      message=f"job {j['job_id']} ({j['kind']}) was marked running but no process owns it; "
+                              f"set to paused (resume with: photovault resume {j['job_id']})")
+    if paused:
+        conn.commit()
+    return paused
+
+
 def snapshot(conn: sqlite3.Connection, home: Path, *, server_pid: int,
              processes: list[EngineProcess] | None = None, now: float | None = None) -> dict:
     """Engine runs not started by this server, with progress, plus `running` jobs that no process is doing.
@@ -300,6 +337,7 @@ def snapshot(conn: sqlite3.Connection, home: Path, *, server_pid: int,
     """
     procs = list_processes() if processes is None else processes
     now = time.time() if now is None else now
+    pause_ownerless(conn, home, processes=procs)
     live = {p.pid for p in procs} if procs is not None else None
     files = read_progress_files(home, live)
     jobs = running_jobs(conn)
@@ -337,4 +375,4 @@ def snapshot(conn: sqlite3.Connection, home: Path, *, server_pid: int,
 
 
 __all__ = ["ActivityEmitter", "EngineProcess", "activity_dir", "guess_words", "job_counts", "list_processes",
-           "parse_etime", "parse_ps", "read_progress_files", "running_jobs", "snapshot"]
+           "parse_etime", "parse_ps", "pause_ownerless", "read_progress_files", "running_jobs", "snapshot"]
