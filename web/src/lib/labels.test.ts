@@ -226,3 +226,17 @@ describe('recentTask (rv-30)', () => {
     expect(failed.id).not.toBe(crashed.id);
   });
 });
+
+describe('taskTitle covers every task command (rv-30)', () => {
+  const drives = [{ volume_id: 'card-1', label: 'NIKON', mount: '/mnt/card' }, { volume_id: 'w', label: 'SMALL 1TB', mount: '/mnt/small' }] as never;
+  const t = (...w: string[]) => taskTitle(['python', '-m', 'photovault', '--json', ...w], drives);
+  it('names backups, make green and the catalog-only commands', () => {
+    expect(t('backup', '--card', 'card-1', '--make-green')).toBe('Making NIKON green');
+    expect(t('backup', '--card', 'card-1', '--to', '/mnt/small', '--dry-run')).toBe('Backing up NIKON → SMALL 1TB (dry run)');
+    expect(t('backup', '--from-folder', '/mnt/small/2024', '--to', '/mnt/small')).toBe('Copying folder 2024 → SMALL 1TB');
+    expect(t('shoots', 'plan')).toBe('Planning shoots and trips');
+    expect(t('previews', 'cache', '/mnt/small')).toBe('Saving previews from SMALL 1TB');
+    expect(t('report', 'duplicates')).toBe('Finding duplicates across drives');
+    expect(t('something', 'new', '--x')).toBe('Running something new');
+  });
+});

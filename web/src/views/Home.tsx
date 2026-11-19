@@ -163,6 +163,8 @@ export function Home() {
     .map((d) => devOf(d.mount))
     .filter((dev) => !used.has(dev.key));
   const nRunning = tasks.filter((t) => !t.final).length + elsewhere.length;
+  // Live cards shown below; the empty card shows only when there are none, whatever kind of task runs.
+  const anyRunning = nRunning > 0 || busy.length > 0 || other.length > 0;
 
   return (
     <div className="flex flex-col gap-6">
@@ -185,47 +187,41 @@ export function Home() {
         </a>
       )}
 
-      {busy.length > 0 && (
-        <div className="flex flex-col gap-4">
-          <AnimatePresence initial={false}>
-            {busy.map((dev, i) => (
-              <motion.div key={dev.key} {...rise(i)}>
-                <DeviceBlock dev={dev} idle={false} />
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </div>
-      )}
-      {loaded && !busy.length && (
-        <div className="card flex flex-col items-center gap-2 px-6 py-10 text-center">
-          <p className="font-medium">Nothing is running.</p>
-          <p className="max-w-md text-sm text-muted">Open a drive to index or hash it. Runs started in a terminal show up here too.</p>
-        </div>
-      )}
-
-      {other.length > 0 && (
-        <section>
-          <h2 className="label mb-2">Other tasks</h2>
-          <div className="grid gap-3 xl:grid-cols-2">
-            {other.map((vm) => (
-              <RunningCard key={vm.key} vm={vm} />
-            ))}
+      {/* Running: every live task, on a drive or not, from the UI or a terminal (rv-30). */}
+      <section>
+        <h2 className="label mb-2">Running{anyRunning ? ` (${nRunning})` : ''}</h2>
+        {busy.length > 0 && (
+          <div className="flex flex-col gap-4">
+            <AnimatePresence initial={false}>
+              {busy.map((dev, i) => (
+                <motion.div key={dev.key} {...rise(i)}>
+                  <DeviceBlock dev={dev} idle={false} />
+                </motion.div>
+              ))}
+            </AnimatePresence>
           </div>
-        </section>
-      )}
-
-      {idle.length > 0 && (
-        <section>
-          <h2 className="label mb-2">Idle drives ({idle.length})</h2>
-          <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
-            {idle.map((dev, i) => (
-              <motion.div key={dev.key} {...rise(i)}>
-                <DeviceBlock dev={dev} idle />
-              </motion.div>
-            ))}
+        )}
+        {other.length > 0 && (
+          <div className={busy.length ? 'mt-4' : ''}>
+            {busy.length > 0 && <h3 className="mb-2 text-xs font-medium text-muted">Not on a drive</h3>}
+            <div className="grid gap-3 xl:grid-cols-2">
+              {other.map((vm) => (
+                <RunningCard key={vm.key} vm={vm} />
+              ))}
+            </div>
           </div>
-        </section>
-      )}
+        )}
+        {!anyRunning && (
+          <div className="card flex flex-col items-center gap-2 px-6 py-8 text-center">
+            <p className="font-medium">{loaded ? 'Nothing is running.' : 'Loading…'}</p>
+            {loaded && (
+              <p className="max-w-md text-sm text-muted">
+                Any task shows up here while it runs (imports, backups, card checks, indexing, hashing and the rest), whether you start it here or in a terminal.
+              </p>
+            )}
+          </div>
+        )}
+      </section>
 
       {recent.length > 0 && (
         <section>
@@ -244,6 +240,19 @@ export function Home() {
                 {allRecent ? 'Show fewer' : `Show all (${recent.length})`}
               </button>
             )}
+          </div>
+        </section>
+      )}
+
+      {idle.length > 0 && (
+        <section>
+          <h2 className="label mb-2">Idle drives ({idle.length})</h2>
+          <div className="grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
+            {idle.map((dev, i) => (
+              <motion.div key={dev.key} {...rise(i)}>
+                <DeviceBlock dev={dev} idle />
+              </motion.div>
+            ))}
           </div>
         </section>
       )}

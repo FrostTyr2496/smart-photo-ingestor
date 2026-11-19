@@ -397,5 +397,12 @@ Rules for every task:
     each with its title, plain-words result (same `summarize` as UI tasks) and how long ago it ended. A UI task's
     end re-reads it at once; the "terminal run has ended" toast now points there. No schema or protocol change.
   - Verify: `uv run pytest tests/test_activity.py -q`; `cd web && npm run typecheck && npm test`.
-  - Result (2026-11-19): 33 activity tests pass; web 168 tests clean; full suite 772 passed, 4 skipped. Build
+  - Result (2026-11-19): 33 activity tests pass; web 166 tests clean; full suite 772 passed, 4 skipped. Build
     committed. Browser check pending.
+  - Follow-up (user, 2026-11-19): Tasks now reads Running → Recently run → Idle drives. Running holds every live
+    task (drive cards, then "Not on a drive"), and its empty card shows only when nothing at all runs (before, a
+    task with no drive, e.g. `shoots plan`, still showed "Nothing is running"). Every command has a title: backup
+    (card, Make green, folder), meta phone, shoots plan/apply/undo, previews cache, report duplicates, lrcat mark,
+    metrics backfill; an unknown one reads "Running <command>" instead of "Working". A running backup shows on its
+    `--from`/`--to` drives' cards, and previews cache on its drive's.
+  - Result (follow-up): `cd web && npm run typecheck && npm test` → 167 passed. Build committed.

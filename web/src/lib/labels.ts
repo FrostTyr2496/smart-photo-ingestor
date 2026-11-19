@@ -60,7 +60,8 @@ export function commandKey(words: string[]): string {
   if (a === 'volumes' && b === 'assign') return 'assign';
   if (a === 'cards' && b === 'check') return 'card_check';
   if (a === 'cards' && b === 'clear') return 'card_clear';
-  if (a === 'meta') return ({ scan: 'meta_scan', refs: 'meta_refs', sidecars: 'meta_sidecars' } as Record<string, string>)[b ?? ''] || 'meta';
+  if (a === 'meta') return ({ scan: 'meta_scan', refs: 'meta_refs', sidecars: 'meta_sidecars', phone: 'meta_phone' } as Record<string, string>)[b ?? ''] || 'meta';
+  if ((a === 'shoots' || a === 'previews' || a === 'report' || a === 'lrcat' || a === 'metrics') && b) return `${a}_${b}`;
   return a || '';
 }
 
@@ -92,8 +93,35 @@ export function taskTitle(argv: string[], drives: Drive[]): string {
       return `Reading GPS references from ${flagValue(w, '--label') || 'a folder'}`;
     case 'meta_sidecars':
       return `Writing sidecars on ${name(flagValue(w, '--volume'))}${dry ? ' (dry run)' : ''}`;
+    case 'meta_phone':
+      return 'Reading phone locations';
+    case 'backup': {
+      const id = flagValue(w, '--card');
+      const card = id ? drives.find((d) => d.volume_id === id) : undefined;
+      const cardName = card ? driveName(card) : 'a card';
+      const to = flagValue(w, '--to');
+      const folder = flagValue(w, '--from-folder');
+      const tail = `${to ? ` → ${name(to)}` : ''}${dry ? ' (dry run)' : ''}`;
+      if (w.includes('--make-green')) return `Making ${cardName} green${tail}`;
+      if (folder) return `Copying folder ${baseName(folder) || folder}${tail}`;
+      return `Backing up ${cardName}${tail}`;
+    }
+    case 'shoots_plan':
+      return 'Planning shoots and trips';
+    case 'shoots_apply':
+      return 'Applying reviewed shoots';
+    case 'shoots_undo':
+      return 'Undoing applied shoots';
+    case 'previews_cache':
+      return `Saving previews from ${name(w[2])}`;
+    case 'report_duplicates':
+      return 'Finding duplicates across drives';
+    case 'lrcat_mark':
+      return `Marking files a Lightroom catalog uses on ${name(flagValue(w, '--volume'))}`;
+    case 'metrics_backfill':
+      return 'Estimating past drive work';
     default:
-      return 'Working';
+      return w[0] ? `Running ${w.filter((x) => !x.startsWith('-')).slice(0, 2).join(' ')}` : 'Working';
   }
 }
 
@@ -117,6 +145,12 @@ export function taskMounts(words: string[]): string[] {
       break;
     case 'ingest':
       out = [flagValue(words, '--source'), flagValue(words, '--target')];
+      break;
+    case 'backup':
+      out = [flagValue(words, '--from'), flagValue(words, '--to')];
+      break;
+    case 'previews_cache':
+      out = [words[2]];
       break;
     default:
       out = [];
