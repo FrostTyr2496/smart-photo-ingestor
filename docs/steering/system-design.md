@@ -8,7 +8,8 @@ as task-execution §6 describes.
 ## 1. Shape
 
 - **Engine:** the Python package `photovault/`, run as a CLI (`photovault …`). The macOS app (Phase 5) launches
-  it per job and reads its output as JSON-lines (§10). No server, no daemon.
+  it per job and reads its output as JSON-lines (§10). No daemon. `photovault serve` (D-045, D-059) is a local
+  web server that starts the CLI the same way. Diagrams: `docs/ARCHITECTURE.md`.
 - **Catalog:** SQLite at `<home>/catalog.sqlite`. The engine is the only writer; the app reads it read-only.
   - `home` = `$PHOTOVAULT_HOME`, or else `~/Library/Application Support/PhotoVault`.
   - Tests always set `PHOTOVAULT_HOME` to a `tmp_path`.

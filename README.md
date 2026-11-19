@@ -5,8 +5,13 @@ SSD, checking every byte. It records each file in a local SQLite catalog, which 
 verified copies. It tells you when a card is safe to format, and it later reconciles everything onto an
 offline 12 TB master drive.
 
-**Status:** being rebuilt (November 2026). `main` holds the new design and a clean scaffold. The previous CLI
-(`photo-ingest analyze/ingest`) is preserved on branch `archive/v0-cli-2026-11-11`.
+**Status (November 2026):** in daily use on real cards and drives. Import with verified copies, a second copy
+to another drive, per-file card status, safe card clear, drive indexing and duplicate reports, and a local web
+UI all work. The SwiftUI menu-bar app is still to come. The previous CLI is preserved on branch
+`archive/v0-cli-2026-11-11`.
+
+**How it is built:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (diagrams of the processes, the verified
+copy, a card's life and the data model).
 
 ## Design in one paragraph
 
@@ -19,6 +24,7 @@ SwiftUI menu-bar app (Phase 5) watches for mounted volumes and shows progress. T
 - names files deterministically so camera number rollover can't collide.
 
 Details:
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): the overview, with diagrams.
 - [`docs/ARCHITECTURE_AUDIT_AND_ROADMAP.md`](docs/ARCHITECTURE_AUDIT_AND_ROADMAP.md): the reasoning.
 - [`docs/steering/system-design.md`](docs/steering/system-design.md): the contract.
 - [`docs/phase-roadmap.md`](docs/phase-roadmap.md): the plan.
