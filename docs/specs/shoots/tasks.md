@@ -42,6 +42,7 @@ Rules for every task:
      "wall": {"start": "2023-09-09T20:05:00-07:00", "end": "2023-09-09T21:30:00-07:00"},
      "local_offset": {"value": "-07:00", "camera": "-04:00", "source": "phone", "changes": true},
      "group_ids": [101, 102],
+     "volumes": [{"volume_id": "…", "label": "X9 Pro", "frames": 312}],
      "counts": {"frames": 312, "by_body": {"Z6": 300, "Z6II": 12}, "located": 40},
      "sample_group_ids": [101, 140, 180],
      "centroid": {"lat": 0.0, "lon": 0.0}, "points": [[0.0, 0.0]],
@@ -54,6 +55,8 @@ Rules for every task:
 
 - `sample_group_ids` holds at most 12 ids: first, last, and evenly spaced in between.
 - `points` holds at most 50.
+- `volumes` lists the drives holding the shoot's frames (primary files, indexed or verified), most frames first, so review
+  can put shoots on connected drives first.
 - `gaps` holds the 20 largest gaps inside the shoot, which is where the review UI offers a split.
 - Proposal ids are stable for the same first and last frame, so decisions in `shoot_plan_decisions` apply again
   after a re-plan.

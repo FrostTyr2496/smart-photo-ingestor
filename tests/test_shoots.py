@@ -11,7 +11,7 @@ from photovault import shoots
 from photovault.catalog import db, repo
 
 SPEC_SHOOT_KEYS = {"proposal_id", "trip_id", "name", "shoot_date", "start_instant", "end_instant", "wall",
-                   "local_offset", "group_ids", "counts", "sample_group_ids", "centroid", "points", "gaps", "flags",
+                   "local_offset", "group_ids", "volumes", "counts", "sample_group_ids", "centroid", "points", "gaps", "flags",
                    "locked"}
 SPEC_TRIP_KEYS = {"proposal_id", "name", "start_date", "end_date", "shoot_ids", "flags"}
 
@@ -337,3 +337,19 @@ def test_calibrate_counts_a_split_folder(conn, b):
     b.frames(d(1, 20), 20, path="P/20230901 - Alpha")
     r = shoots.calibrate(conn, gap_values=(4,))["results"][0]
     assert r["folders_split"] == 1 and r["precision"] == 0.0
+
+
+def test_generic_names_are_stoplisted_and_volumes_listed(conn, b):
+    b.frames(d(9, 20), 10, path="Backup/New/Nikon Z6/240GB/W/Z6II/Dunes Walk")
+    s = shoots.plan(conn)["shoots"][0]
+    assert s["name"]["value"] == "Dunes Walk"
+    assert s["volumes"] == [{"volume_id": "v1", "label": "W", "frames": 10}]
+    b.frames(d(12, 20), 5, path="New")
+    assert shoots.plan(conn)["shoots"][1]["name"]["source"] == "fallback"
+
+
+def test_phone_place_beats_other_folder(conn, b):
+    b.frames(d(9, 20), 10, path="Dunes Walk")
+    b.phone(datetime(2023, 9, 9, 19, 30, tzinfo=UTC), 6, lat=1.0, lon=1.0, offset="+00:00", place="Harbourton Pier")
+    n = shoots.plan(conn)["shoots"][0]["name"]
+    assert n["value"] == "Harbourton Pier" and {"value": "Dunes Walk", "source": "folder"} in n["alternatives"]

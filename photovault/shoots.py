@@ -37,7 +37,9 @@ _BUILTIN_STOP = [
     re.compile(p, re.I) for p in (
         r"^dcim$", r"^\d{3}nc\w+$", r"^\d{3}[a-z]{3}\w*$", r"^card\s*\d*$", r"^card export$", r"^camera imports?$",
         r"^imports?$", r"^exports?$", r"^raw$", r"^selected$", r"^selects?$", r"^photos?$", r"^pictures$",
-        r"^100apple$", r"^misc$")
+        r"^100apple$", r"^misc$", r"^new$", r"^untitled( folder)?$", r"^temp$", r"^tmp$", r"^backups?$", r".* backups?$",
+        r"^edits?$", r"^final$", r"^\d+(\.\d+)?\s*[gt]b$", r"^(nikon|canon|sony|fuji|fujifilm|gopro|dji|apple|iphone)\b.*",
+        r"^z\s?\d{1,2}\s?(ii|iii)?$", r"^d\d{3,4}[a-z]?$")
 ]
 
 
@@ -149,7 +151,14 @@ def _stoplist(conn: sqlite3.Connection, extra: list[str] | None = None) -> set[s
         items = json.loads(raw) if raw else []
     except ValueError:
         items = []
-    return {clean_name(str(x)).lower() for x in [*items, *(extra or [])]}
+    names = [*items, *(extra or [])]
+    try:
+        for r in conn.execute("SELECT model, nickname FROM bodies"):
+            names += [r["model"], r["nickname"]]
+        names += [r["label"] for r in conn.execute("SELECT label FROM volumes")]
+    except sqlite3.OperationalError:
+        pass
+    return {clean_name(str(x)).lower() for x in names if x}
 
 
 def load_items(conn: sqlite3.Connection, stop: set[str], phone: Phone) -> tuple[list[Item], int]:
@@ -556,6 +565,7 @@ def plan(conn: sqlite3.Connection, *, gap_h: float = 8, split_km: float = 50, me
             s["name"]["value"] += f" {count[key]}"
 
     shoots += _locked_shoots(conn, locked_items)
+    _add_volumes(conn, shoots)
     shoots.sort(key=lambda s: (s["_t0"], s["proposal_id"]))
 
     unlocked = [s for s in shoots if not s["locked"]]
@@ -615,6 +625,19 @@ def plan(conn: sqlite3.Connection, *, gap_h: float = 8, split_km: float = 50, me
                     "locked": sum(1 for s in shoots if s["locked"]), "flagged": flagged},
         "trips": trips, "shoots": shoots,
     }
+
+
+def _add_volumes(conn: sqlite3.Connection, shoots: list[dict]) -> None:
+    """``volumes``: the drives holding each shoot's frames (primary files, indexed or verified), most frames first."""
+    held: dict[int, set[str]] = {}
+    for r in conn.execute(
+            "SELECT DISTINCT a.group_id AS g, i.volume_id AS v FROM assets a JOIN instances i ON i.asset_id = a.asset_id "
+            "WHERE a.group_role = 'primary' AND a.group_id IS NOT NULL AND i.state IN ('indexed', 'verified')"):
+        held.setdefault(r["g"], set()).add(r["v"])
+    labels = {r["volume_id"]: r["label"] for r in conn.execute("SELECT volume_id, label FROM volumes")}
+    for s in shoots:
+        c: Counter = Counter(v for g in s["group_ids"] for v in held.get(g, ()))
+        s["volumes"] = [{"volume_id": v, "label": labels.get(v, v), "frames": n} for v, n in c.most_common()]
 
 
 def write_plan(conn: sqlite3.Connection, home: Path, **kw: Any) -> Path:
