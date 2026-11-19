@@ -70,6 +70,9 @@ Housekeeping (low):
 11. **shoots_review**: frames not in a shoot while a plan exists or can be made (sh-2). `do` = `#/review/shoots`.
 12. **duplicates_reclaimable**: from the last duplicate report, if present (bytes reclaimable). It informs only;
     dd-0 is still a proposal.
+13. **previews_missing**: see act-4.
+14. **clock_suggested** (act-3): one per body and phone run from `clock.suggest_offsets` (the Photos banner's
+    suggestions), id `clock:<body_id>:<start_utc>`, "Align Z6 for 2\u20137 Apr: N photos". `do` = `#/photos`.
 
 ## Tasks
 
@@ -98,9 +101,14 @@ Housekeeping (low):
   - Verify: `cd web && npm run typecheck && npm test`; **[user]** browser check.
   - Result (2026-11-18): built (`#/actions`, nav badge, Tasks link, toast Undo). It reads `web/src/lib/__fixtures__/actions.json` when `/api/actions` returns 404 (`loadActions`, `TODO(act-1)`) until act-1 lands. Browser check still [user].
 
-- [ ] 3. Actions from the shoots and phone work
+- [x] 3. Actions from the shoots and phone work
   - ID: act-3 (after sh-2). Rules 10 and 11 use the live plan and suggestion APIs. The time-zone banner's (sp-7b)
     suggestions also appear as actions ("Align Z6 for 2–7 Apr").
+  - Result (2026-11-18): `#/photos?missing=gps&day=YYYY-MM-DD` is parsed (`route.ts`) and applied in Photos (Missing
+    filter, drives and shoot cleared, scroll to the day), so the locations action opens on its biggest day.
+    `shoots_review` counts frames with no shoot, opens the review when a plan file exists (undecided shoots = not locked,
+    no stored decision) and otherwise offers `shoots_plan`. New rule 14 `clock_suggested`. Open: `suggest_offsets` runs
+    on every Actions refresh (as the banner's API does); not timed on the real catalog.
 
 - [x] 4. Previews cached while a drive is connected
   - ID: act-4 (user ask, 2026-11-18). Review and Photos show a thumbnail only while the photo's drive is connected.

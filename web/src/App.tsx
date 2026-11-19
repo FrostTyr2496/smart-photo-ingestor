@@ -103,7 +103,7 @@ function Shell() {
                 ) : route.view === 'setup' ? (
                   <SetupView driveKey={route.key} />
                 ) : route.view === 'photos' ? (
-                  <Photos />
+                  <Photos missing={route.missing} day={route.day} />
                 ) : route.view === 'review' ? (
                   <ReviewShoots />
                 ) : route.view === 'actions' ? (

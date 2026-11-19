@@ -60,7 +60,7 @@ const qs = (o: Record<string, string | number>): string =>
  * A day's photos load when it scrolls near; select with click, ⌘-click, ⇧-click or "Select day", and edit the
  * selection in the inspector. Thumbnails are the files' embedded previews, read while their drive is connected.
  */
-export function Photos() {
+export function Photos({ missing: wantMissing, day: wantDay }: { missing?: Missing; day?: string } = {}) {
   const { drives, toast, epoch } = useStore();
   const [volume, setVolume] = usePref<string>('photos.drive', '');
   const [missing, setMissing] = usePref<Missing>('photos.missing', '');
@@ -216,6 +216,26 @@ export function Photos() {
       return next;
     });
   };
+
+  // A link such as `#/photos?missing=gps&day=2023-09-09` (act-3: the Actions button) sets the "Missing" filter, drops
+  // the drive and shoot filters, then scrolls to the day once the filtered days have loaded.
+  const [wantScroll, setWantScroll] = useState<string | null>(null);
+  useEffect(() => {
+    if (!wantMissing && !wantDay) return;
+    if (wantMissing) {
+      setMissing(wantMissing);
+      setVolume('');
+      setShoot('');
+    }
+    setWantScroll(wantDay ?? null);
+  }, [wantMissing, wantDay]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!wantScroll || days === null || (wantMissing && missing !== wantMissing)) return;
+    setWantScroll(null);
+    if (!days.some((d) => d.day === wantScroll)) return;
+    const t = window.setTimeout(() => document.getElementById(`day-${wantScroll}`)?.scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' }), 120);
+    return () => window.clearTimeout(t);
+  }, [wantScroll, days, missing, wantMissing]);
 
   // Show in All Photos (rv-19): drop the filters, load the photo's day (and further pages of it), centre the tile and
   // flash its ring once.

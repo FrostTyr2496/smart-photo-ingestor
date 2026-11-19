@@ -309,15 +309,39 @@ def test_locations_suggested(conn) -> None:
 
 
 def test_shoots_review(conn, tmp_path: Path) -> None:
+    import json
     group(conn)
-    assert "shoots_review" not in kinds(run(conn, home=tmp_path))  # no plan
+    group(conn)
+    a = only(run(conn, home=tmp_path), "shoots_review")  # no plan yet: offer to make one
+    assert a["do"]["kind"] == "run" and a["do"]["body"] == {"cmd": "shoots_plan", "args": {}}
+    assert a["cli"] == "uv run photovault --json shoots plan" and a["evidence"]["files"] == 2
     (tmp_path / "plans").mkdir()
-    (tmp_path / "plans" / "shoots-1.json").write_text("{}")
+    plan = {"shoots": [{"proposal_id": "a", "locked": False}, {"proposal_id": "b", "locked": False},
+                       {"proposal_id": "c", "locked": True}]}
+    (tmp_path / "plans" / "shoots-1.json").write_text(json.dumps(plan))
     a = only(run(conn, home=tmp_path), "shoots_review")
-    assert a["do"]["href"] == "#/review/shoots" and a["evidence"]["files"] == 1
+    assert a["do"]["href"] == "#/review/shoots" and a["evidence"]["files"] == 2 and a["evidence"]["undecided"] == 2
+    conn.execute("INSERT INTO shoot_plan_decisions (proposal_id, kind, payload_json, decided_at) "
+                 "VALUES ('a', 'accept', '{}', 'x')")
+    assert only(run(conn, home=tmp_path), "shoots_review")["evidence"]["undecided"] == 1
+    (tmp_path / "plans" / "shoots-2.json").write_text("not json")  # the newest file wins; unreadable counts as none
+    assert only(run(conn, home=tmp_path), "shoots_review")["evidence"]["undecided"] == 0
     conn.execute("INSERT INTO shoots (name, shoot_date, created_at) VALUES ('S', '2026-11-10', 'x')")
     conn.execute("UPDATE capture_groups SET shoot_id = 1")
     assert "shoots_review" not in kinds(run(conn, home=tmp_path))
+
+
+def test_clock_suggested(conn, monkeypatch) -> None:
+    from photovault import clock
+    assert "clock_suggested" not in kinds(run(conn))
+    sug = {"body_id": 3, "body": "Z6", "start_utc": "2026-04-02T08:00:00+00:00", "end_utc": "2026-04-07T18:00:00+00:00",
+           "first_date": "2026-04-02", "last_date": "2026-04-07", "frames": 40, "delta_s": 28800,
+           "sessions_matched": 5, "sessions_total": 6}
+    monkeypatch.setattr(clock, "suggest_offsets", lambda c: [sug])
+    a = only(run(conn), "clock_suggested")
+    assert a["id"] == "clock:3:2026-04-02T08:00:00+00:00" and a["severity"] == "low"
+    assert a["title"] == "Align Z6 for 2\u20137 Apr: 40 photos" and a["do"]["href"] == "#/photos"
+    assert "8 hours behind" in a["why"][0]
 
 
 def test_duplicates_reclaimable(conn, tmp_path: Path) -> None:

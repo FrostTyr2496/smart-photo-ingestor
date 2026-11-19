@@ -84,7 +84,7 @@ task's commit:
    (D-070..D-079):** rv-16, sp-2, sp-3, sp-7, sp-7b, sp-8, rv-10, rv-17..rv-24 done. **Shoots (spec
    `docs/specs/shoots`, D-080, V7 landed):** sh-0b, sh-1 (plan: 182 shoots, 35 trips), sh-2 (`shoots plan`, decisions in
    the catalog), sh-3, sh-3b, sh-4 (Apply/Undo, shoot filter in Photos) done; next sh-5. **Actions** (`docs/specs/actions`): act-1,
-   act-2 done (23 actions on the real catalog); act-4 (previews cached from a connected drive) done; next act-3.
+   act-2 done (23 actions on the real catalog); act-3 (locations deep link, shoot plan, clock) and act-4 (previews cached from a connected drive) done.
 5. **Card backup (spec `docs/specs/backup`, D-050..D-052):** bk-1 drive health, bk-3 backup job (after ing-13),
    vn-1 volume name on hover, then bk-2, bk-4, vn-2, vn-3. bk-5 [user]: plug in and assign the 12 TB. Metrics:
    met-2 (web view); met-4 after bk-1.
@@ -114,11 +114,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
-- D-094 (agent): act-4 previews cached by a user-started task while a drive is connected; served unplugged.
-- D-093 (agent): sh-4 Apply/Undo as tasks with `apply-<time>` ids; refuses a stale review; offsets only when proposed.
-- D-092 (agent): sh-2 decisions saved in the catalog as made; plans record `decisions_through`; planner ids for pieces.
-- D-091 (user): import flow: every card listed (unplugged greyed), dry-run plan in the browser, then apply; X9 Pro first.
-- D-090 (user): `ingest --limit N` imports in small batches (first N frames by capture time).
+- D-095 (agent): act-3 locations deep link `#/photos?missing=gps&day=`, shoots_review offers a plan, clock_suggested rule.
+- D-094 (agent): act-4 previews cached by a user-started task, offered as the action `previews_missing`.
+- D-093 (agent): sh-4 Apply and Undo run as tasks; apply id stored in `shoot_apply_log.job_id`.
+- D-092 (agent): sh-2 decisions stored as made; plan gains `decisions_through`.
+- D-091 (user): Import flow: Cards lists all known cards, dry-run plan then Apply in the browser.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.
