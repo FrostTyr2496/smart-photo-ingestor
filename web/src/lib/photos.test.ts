@@ -460,6 +460,7 @@ describe('headers (rv-21)', () => {
     expect(filterChips(null, '')).toEqual([]);
     expect(filterNote(filterChips('PP 1', 'gps'))).toBe('Filtered: PP 1 · Missing location');
     expect(filterChips(null, 'any')).toEqual([{ key: 'missing', label: 'Missing anything' }]);
+    expect(filterNote(filterChips('PP 1', 'gps', 'Harbour Moonrise'))).toBe('Filtered: Harbour Moonrise · PP 1 · Missing location'); // sh-4
   });
   it('summarises a selection and counts photos per drive', () => {
     const sel = [at(1, '2023-09-10T21:18:00', { body_nickname: 'Z6', volume_id: 'a' }), at(2, '2023-09-10T23:40:00', { body_nickname: 'Z6II', volume_id: 'b' }), at(3, '2023-09-10T22:00:00', { volume_id: 'a' })];

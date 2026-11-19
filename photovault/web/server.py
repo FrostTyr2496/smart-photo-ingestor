@@ -311,11 +311,29 @@ def build_argv(cmd: str, args: dict) -> list[str]:
                 raise BadRequest("'gap_h' must be a number of hours above 0")
             argv += ["--gap-h", str(gap)]
         return argv
+    if cmd == "shoots_apply":
+        _allow_only(args, {"plan_id", "expect"})
+        plan_id = _text_arg(args, "plan_id")
+        if not re.fullmatch(r"shoots-\d{8}-\d{6}", plan_id):
+            raise BadRequest("'plan_id' must look like shoots-20261118-210000")
+        argv = ["shoots", "apply", "--plan", plan_id]
+        expect = args.get("expect")
+        if expect is not None:
+            if isinstance(expect, bool) or not isinstance(expect, int) or expect < 1:
+                raise BadRequest("'expect' must be a positive whole number")
+            argv += ["--expect", str(expect)]
+        return argv
+    if cmd == "shoots_undo":
+        _allow_only(args, {"apply_id"})
+        apply_id = _text_arg(args, "apply_id")
+        if not re.fullmatch(r"apply-\d{8}-\d{6}(-\d+)?", apply_id):
+            raise BadRequest("'apply_id' must look like apply-20261118-210500")
+        return ["shoots", "undo", apply_id]
     raise BadRequest(f"unknown command {cmd!r}")
 
 
 ALLOWED_CMDS = ("assign", "ingest", "resume", "card_status", "card_check", "index", "hash", "meta_scan",
-                "meta_refs", "meta_sidecars", "shoots_plan")
+                "meta_refs", "meta_sidecars", "shoots_plan", "shoots_apply", "shoots_undo")
 
 
 # --------------------------------------------------------------------------- app and helpers
@@ -899,6 +917,9 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
         ("GET", "/api/shoots/decisions"): lambda: _shoot_decisions(conn, "list", query, body),
         ("POST", "/api/shoots/decisions"): lambda: _shoot_decisions(conn, "add", query, body),
         ("POST", "/api/shoots/decisions/delete"): lambda: _shoot_decisions(conn, "delete", query, body),
+        ("POST", "/api/shoots/apply"): lambda: _shoots_task(app, "shoots_apply", body),
+        ("POST", "/api/shoots/undo"): lambda: _shoots_task(app, "shoots_undo", body),
+        ("GET", "/api/shoots/applies"): lambda: {"applies": shoots.list_applies(conn)},
         ("GET", "/api/shoots"): lambda: {"shoots": [dict(r) for r in repo.list_shoots(conn)]},
         ("GET", "/api/groups"): lambda: _groups(conn, query, app),
         ("GET", "/api/photo-days"): lambda: _photo_days(conn, query),
@@ -1009,6 +1030,16 @@ def _dev_decisions_conn(override: str) -> sqlite3.Connection:
                      "kind TEXT NOT NULL, payload_json TEXT NOT NULL, decided_at TEXT NOT NULL)")
         _DEV_DECISIONS[override] = conn
     return conn
+
+
+def _shoots_task(app: WebApp, cmd: str, body: Any) -> dict:
+    """sh-4: Apply and Undo run as tasks (shown in Tasks). ``/api/shoots/undo`` takes ``{"job_id": <apply id>}``."""
+    if os.environ.get("PHOTOVAULT_DEV_PLAN"):
+        raise BadRequest("this is the fixture plan (PHOTOVAULT_DEV_PLAN): Apply and Undo are off")
+    args = dict(_body_dict(body or {}))
+    if cmd == "shoots_undo" and "job_id" in args:
+        args["apply_id"] = args.pop("job_id")
+    return {"task_id": app.runner.start(build_argv(cmd, args))}
 
 
 def _shoot_decisions(conn, verb: str, query: dict, body: Any) -> dict:
@@ -1363,8 +1394,13 @@ def _photo_days(conn, query: dict) -> dict:
     """The Photos timeline (rv-7): days with photos, newest first, and the counts of what is missing."""
     volume_id = _opt_param(query, "volume_id")
     missing = _opt_param(query, "missing")
+    shoot_raw = _opt_param(query, "shoot_id")
     try:
-        days = repo.list_photo_days(conn, volume_id=volume_id, missing=missing)
+        shoot_id = int(shoot_raw) if shoot_raw is not None else None
+    except ValueError as exc:
+        raise BadRequest("shoot_id must be an integer") from exc
+    try:
+        days = repo.list_photo_days(conn, volume_id=volume_id, missing=missing, shoot_id=shoot_id)
         counts = repo.missing_counts(conn, volume_id=volume_id)
     except ValueError as exc:
         raise BadRequest(str(exc)) from exc

@@ -155,7 +155,7 @@ Rules for every task:
   - Result (2026-11-18): `reviewSections` and `connectedFrames` in `web/src/lib/review.ts`; drive chips on each card; the
     toggle sits above the decision list. The fixture plan gained invented `volumes`. Web 113 tests. Browser check [user].
 
-- [ ] 5. Apply and undo
+- [x] 5. Apply and undo
   - ID: sh-4 (after sh-2, sh-3).
   - `POST /api/shoots/apply` runs as a job, in one transaction:
     - creates trips and shoots (name, shoot_date, `local_offset`, `name_source`, `trip_id`);
@@ -164,6 +164,13 @@ Rules for every task:
   - `POST /api/shoots/undo {job_id}` restores the log. Applied shoots become locked in later plans.
   - Photos shows the shoot name on day headers, plus a shoot filter.
   - Verify: `uv run pytest tests/test_shoots_apply.py -q`.
+  - Result (2026-11-18): `shoots.apply` / `undo` / `list_applies`; CLI `shoots apply --plan <id> [--expect N]` and `shoots undo
+    <apply_id>`; `POST /api/shoots/apply {plan_id, expect}` and `POST /api/shoots/undo {job_id}` start them as tasks (the `jobs`
+    kind CHECK has no shoots kind, so the apply id is `apply-<UTC time>` in `shoot_apply_log.job_id`); `GET /api/shoots/applies`.
+    Apply re-plans with the reviewed plan's params and every stored decision, and refuses when the accepted count differs from
+    what the review showed. Later plans show applied shoots and trips locked. Review: Apply N (confirm, toast with Undo, then
+    re-plan) and an Applied list with Undo. Photos: shoot chips on day headers and a shoot filter (`/api/photo-days?shoot_id`).
+    `tests/test_shoots_apply.py` 11 passed; full suite 692 passed; web 112. Browser check [user].
 
 - [ ] 6. The wall clock through shoots
   - ID: sh-5 (after sh-4). Applied shoots' `local_offset` drives wall time, wall date and day grouping everywhere. The

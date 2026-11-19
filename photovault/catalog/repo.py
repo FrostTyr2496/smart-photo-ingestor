@@ -1017,15 +1017,18 @@ def offset_shoot_wall_dates(conn: sqlite3.Connection) -> dict[int, str]:
     return out
 
 
-def list_photo_days(conn: sqlite3.Connection, *, volume_id: str | None = None, missing: str | None = None) -> list[dict]:
-    """Days with photos, newest first: ``{"day", "groups", "bodies"}``. ``day`` is the wall date ``YYYY-MM-DD``
-    (the camera's capture date, or the instant's date in the shoot's ``local_offset``, sh-0b), or ``UNDATED``
-    (listed last); ``bodies`` the camera nicknames that shot that day, sorted."""
-    where, params = _group_filter_sql(volume_id=volume_id, shoot_id=None, missing=missing)
+def list_photo_days(conn: sqlite3.Connection, *, volume_id: str | None = None, missing: str | None = None,
+                    shoot_id: int | None = None) -> list[dict]:
+    """Days with photos, newest first: ``{"day", "groups", "bodies", "shoots"}``. ``day`` is the wall date
+    ``YYYY-MM-DD`` (the camera's capture date, or the instant's date in the shoot's ``local_offset``, sh-0b), or
+    ``UNDATED`` (listed last); ``bodies`` the camera nicknames that shot that day, sorted; ``shoots`` the shoots with
+    frames that day, ``{"shoot_id", "name", "groups"}``, most frames first (sh-4)."""
+    where, params = _group_filter_sql(volume_id=volume_id, shoot_id=shoot_id, missing=missing)
     wall_ids = offset_shoot_wall_dates(conn)
     rows = conn.execute(
         f"""
-        SELECT g.group_id, substr(g.capture_time, 1, 10) AS day, b.nickname AS body
+        SELECT g.group_id, substr(g.capture_time, 1, 10) AS day, b.nickname AS body, g.shoot_id,
+               (SELECT name FROM shoots WHERE shoot_id = g.shoot_id) AS shoot_name
         FROM capture_groups g
         LEFT JOIN group_meta m ON m.group_id = g.group_id
         LEFT JOIN bodies b ON b.body_id = g.body_id
@@ -1036,12 +1039,20 @@ def list_photo_days(conn: sqlite3.Connection, *, volume_id: str | None = None, m
     days: dict[str | None, dict] = {}
 
     def add(day: str | None, n: int, bodies: set[str]) -> None:
-        d = days.setdefault(day, {"groups": 0, "bodies": set()})
+        d = days.setdefault(day, {"groups": 0, "bodies": set(), "shoots": {}})
         d["groups"] += n
         d["bodies"] |= bodies
 
+    def add_shoot(day: str | None, sid: int | None, name: str | None, n: int) -> None:
+        if sid is None or day not in days:
+            return
+        cur = days[day]["shoots"].setdefault(sid, {"shoot_id": sid, "name": name or f"shoot {sid}", "groups": 0})
+        cur["groups"] += n
+
     for r in rows:
-        add(wall_ids.get(int(r["group_id"]), r["day"]), 1, {r["body"]} if r["body"] else set())
+        day = wall_ids.get(int(r["group_id"]), r["day"])
+        add(day, 1, {r["body"]} if r["body"] else set())
+        add_shoot(day, r["shoot_id"], r["shoot_name"], 1)
     skip = " AND (g.shoot_id IS NULL OR g.shoot_id NOT IN (SELECT shoot_id FROM shoots WHERE local_offset IS NOT NULL))" if wall_ids else ""
     for r in conn.execute(
         f"""
@@ -1056,8 +1067,21 @@ def list_photo_days(conn: sqlite3.Connection, *, volume_id: str | None = None, m
         params,
     ):
         add(r["day"], r["groups"], {b for b in (r["bodies"] or "").split(",") if b})
+    for r in conn.execute(
+        f"""
+        SELECT substr(g.capture_time, 1, 10) AS day, g.shoot_id, s.name, COUNT(*) AS groups
+        FROM capture_groups g
+        JOIN shoots s ON s.shoot_id = g.shoot_id
+        LEFT JOIN group_meta m ON m.group_id = g.group_id
+        WHERE {where}{skip}
+        GROUP BY day, g.shoot_id
+        """,
+        params,
+    ):
+        add_shoot(r["day"], r["shoot_id"], r["name"], r["groups"])
     ordered = sorted((d for d in days if d), reverse=True) + ([None] if None in days else [])
-    return [{"day": d or UNDATED, "groups": days[d]["groups"], "bodies": sorted(days[d]["bodies"])} for d in ordered]
+    return [{"day": d or UNDATED, "groups": days[d]["groups"], "bodies": sorted(days[d]["bodies"]),
+             "shoots": sorted(days[d]["shoots"].values(), key=lambda x: (-x["groups"], x["name"]))} for d in ordered]
 
 
 def list_body_clock(conn: sqlite3.Connection) -> list[Row]:

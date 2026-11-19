@@ -397,6 +397,42 @@ def cmd_shoots_plan(args, cfg, emit) -> int:
     return EXIT_OK
 
 
+def cmd_shoots_apply(args, cfg, emit) -> int:
+    """sh-4: create the accepted shoots and trips of a reviewed plan in the catalog. No file is touched."""
+    if not re.fullmatch(r"shoots-\d{8}-\d{6}", args.plan):
+        emit.emit("error", code="usage", message="--plan takes a plan id like shoots-20261118-210000")
+        return EXIT_USAGE
+    path = cfg.home / "plans" / f"{args.plan}.json"
+    try:
+        params = json.loads(path.read_text(encoding="utf-8")).get("params", {})
+    except (OSError, ValueError) as exc:
+        emit.emit("error", code="no_plan", message=f"{path}: {exc}")
+        return EXIT_USAGE
+    conn = _open(cfg)
+    emit.emit("progress", phase="apply", message=f"applying {args.plan}")
+    try:
+        with repo.transaction(conn):
+            out = shoots.apply(conn, params=params, expect=args.expect)
+    except shoots.ApplyError as exc:
+        emit.emit("error", code="apply_refused", message=str(exc))
+        return EXIT_ERROR
+    emit.emit("result", plan_id=args.plan, **{k: v for k, v in out.items() if k != "created"})
+    return EXIT_OK
+
+
+def cmd_shoots_undo(args, cfg, emit) -> int:
+    """sh-4: undo one apply: frames get their previous shoot back, and the shoots and trips it made go."""
+    conn = _open(cfg)
+    try:
+        with repo.transaction(conn):
+            out = shoots.undo(conn, args.apply_id)
+    except shoots.ApplyError as exc:
+        emit.emit("error", code="undo_refused", message=str(exc))
+        return EXIT_ERROR
+    emit.emit("result", **out)
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="photovault", description="Verified card imports and a multi-drive catalog.")
     p.add_argument("--json", action="store_true", help="emit JSON lines (protocol v1)")
@@ -524,6 +560,13 @@ def build_parser() -> argparse.ArgumentParser:
     shp.add_argument("--to", type=_day, metavar="YYYY-MM-DD", help="last capture day to plan")
     shp.add_argument("--gap-h", type=float, default=8, help="hours without photos that start a new shoot (8)")
     shp.set_defaults(func=cmd_shoots_plan)
+    sha = sh.add_parser("apply", help="create the accepted shoots of a reviewed plan (catalog only; undo with `shoots undo`)")
+    sha.add_argument("--plan", required=True, metavar="PLAN_ID", help="the reviewed plan, e.g. shoots-20261118-210000")
+    sha.add_argument("--expect", type=int, help="refuse unless this many shoots are accepted (what the review showed)")
+    sha.set_defaults(func=cmd_shoots_apply)
+    shu = sh.add_parser("undo", help="undo one apply (catalog only)")
+    shu.add_argument("apply_id", help="the apply id, e.g. apply-20261118-210500")
+    shu.set_defaults(func=cmd_shoots_undo)
 
     j = sub.add_parser("jobs", help="recent jobs")
     j.add_argument("--limit", type=int, default=20)

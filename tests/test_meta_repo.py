@@ -240,7 +240,7 @@ def test_unhashed_groups_are_found_through_their_index_job(conn, seeded) -> None
     _unhashed(conn, "leg", "Old/DSC_5.JPG", g5, role="jpeg")
     assert repo.indexed_primary_files(conn, [g5, seeded["g1"]]) == {g5: [{"volume_id": "leg", "rel_path": "Old/DSC_5.NEF"}]}
     assert _ids(repo.list_groups(conn, volume_id="leg")) == [g5]
-    assert repo.list_photo_days(conn, volume_id="leg") == [{"day": "2026-07-01", "groups": 1, "bodies": []}]
+    assert _days(repo.list_photo_days(conn, volume_id="leg")) == [{"day": "2026-07-01", "groups": 1, "bodies": []}]
     conn.execute("UPDATE instances SET state = 'missing' WHERE rel_path = 'Old/DSC_5.NEF'")
     assert repo.indexed_primary_files(conn, [g5]) == {}
 
@@ -256,14 +256,21 @@ def test_list_groups_time_range(conn, seeded) -> None:
         repo.list_groups(conn, after="2026-06-01")
 
 
+def _days(rows: list[dict]) -> list[dict]:
+    """Day rows without their shoots (sh-4), for the shape checks below."""
+    return [{k: v for k, v in r.items() if k != "shoots"} for r in rows]
+
+
 def test_list_photo_days(conn, seeded) -> None:
     _group(conn, "DSC_9", None)
-    assert repo.list_photo_days(conn) == [
+    days = repo.list_photo_days(conn)
+    assert days[0]["shoots"] == [{"shoot_id": 2, "name": "Home", "groups": 2}]  # sh-4
+    assert _days(days) == [
         {"day": "2026-06-01", "groups": 2, "bodies": []},
         {"day": "2026-05-01", "groups": 2, "bodies": ["Z6"]},
         {"day": repo.UNDATED, "groups": 1, "bodies": []},
     ]
-    assert repo.list_photo_days(conn, volume_id="m") == [
+    assert _days(repo.list_photo_days(conn, volume_id="m")) == [
         {"day": "2026-06-01", "groups": 1, "bodies": []},
         {"day": "2026-05-01", "groups": 1, "bodies": ["Z6"]},
     ]

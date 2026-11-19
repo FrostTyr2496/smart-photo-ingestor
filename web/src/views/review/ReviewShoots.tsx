@@ -34,37 +34,96 @@ const FILTERS: { key: ReviewFilter; label: string }[] = [
 const btn = 'inline-flex h-7 items-center rounded-full border border-line px-2.5 text-xs text-muted hover:border-line-strong hover:text-ink disabled:opacity-40';
 const primary = 'inline-flex h-7 items-center rounded-full border border-maybe/50 bg-maybe/15 px-3 text-xs font-medium text-maybe hover:bg-maybe/25 disabled:opacity-40';
 
+interface TaskEnd {
+  ok: boolean;
+  /** The engine's `result` event, or its last `error` message. */
+  result?: Record<string, unknown>;
+  error?: string;
+}
+
+/** Start an engine command as a task (it shows in Tasks) and wait for it to end. */
+async function runTask(startTask: (cmd: string, args: Record<string, unknown>) => Promise<number | null>, cmd: string, args: Record<string, unknown>): Promise<TaskEnd> {
+  const id = await startTask(cmd, args);
+  if (id === null) return { ok: false, error: 'it could not start' };
+  for (;;) {
+    await new Promise((r) => window.setTimeout(r, 700));
+    const t = await api<{ state: string; events: { event: string; message?: string }[] }>('GET', `/api/tasks/${id}?since=-1`);
+    if (t.state === 'running') continue;
+    const result = t.events.filter((e) => e.event === 'result').pop() as Record<string, unknown> | undefined;
+    const err = t.events.filter((e) => e.event === 'error').pop();
+    return t.state === 'done' ? { ok: true, result } : { ok: false, error: err?.message ?? `it ended ${t.state}` };
+  }
+}
+
 interface Replan {
   busy: boolean;
   run: () => void;
+  /** Apply the reviewed plan (sh-4), then plan again so the applied shoots show as locked. */
+  apply: (plan: Plan, expect: number) => void;
+  undo: (applyId: string) => void;
+  /** Bumps after an apply or undo, so the applied list reloads. */
+  applies: number;
 }
 
-/** Run the planner as a task (sh-2) and call `done` when it has written a new plan. */
+/** The planner, Apply and Undo as tasks; `done` reloads the plan. */
 function useReplan(done: () => void): Replan {
-  const { startTask, toast } = useStore();
+  const { startTask, toast, ask } = useStore();
   const [busy, setBusy] = useState(false);
-  const run = useCallback(() => {
-    void (async () => {
-      setBusy(true);
-      try {
-        const id = await startTask('shoots_plan', {});
-        if (id === null) return;
-        for (;;) {
-          await new Promise((r) => window.setTimeout(r, 1000));
-          const t = await api<{ state: string }>('GET', `/api/tasks/${id}?since=-1`);
-          if (t.state === 'running') continue;
-          if (t.state === 'done') done();
-          else toast('The planner did not finish. See Tasks for its log.', 'err');
-          return;
+  const [applies, setApplies] = useState(0);
+  const guard = useCallback(
+    (job: () => Promise<void>) => {
+      void (async () => {
+        setBusy(true);
+        try {
+          await job();
+        } catch (e) {
+          toast((e as Error).message, 'err');
+        } finally {
+          setBusy(false);
         }
-      } catch (e) {
-        toast((e as Error).message, 'err');
-      } finally {
-        setBusy(false);
-      }
-    })();
+      })();
+    },
+    [toast],
+  );
+  const replanNow = useCallback(async () => {
+    const r = await runTask(startTask, 'shoots_plan', {});
+    if (r.ok) done();
+    else toast(`The planner did not finish: ${r.error}. See Tasks for its log.`, 'err');
+    return r.ok;
   }, [startTask, toast, done]);
-  return { busy, run };
+  const run = useCallback(() => guard(async () => void (await replanNow())), [guard, replanNow]);
+  const undo = useCallback(
+    (applyId: string) =>
+      guard(async () => {
+        const ok = await ask({ title: 'Undo this apply?', lines: ['Its photos leave the shoots and trips it created, and those shoots and trips are deleted.', 'Your review decisions stay, so the same shoots can be applied again.'], action: 'Undo apply' });
+        if (!ok) return;
+        const r = await runTask(startTask, 'shoots_undo', { apply_id: applyId });
+        setApplies((n) => n + 1);
+        if (!r.ok) return toast(`Undo failed: ${r.error}`, 'err');
+        toast(`Undone: ${String(r.result?.frames ?? '')} photos are out of their shoots again.`);
+        await replanNow();
+      }),
+    [guard, ask, startTask, toast, replanNow],
+  );
+  const apply = useCallback(
+    (plan: Plan, expect: number) =>
+      guard(async () => {
+        const ok = await ask({
+          title: `Apply ${expect} ${expect === 1 ? 'shoot' : 'shoots'}?`,
+          lines: ['This creates the accepted shoots and their trips in the catalog and puts their photos in them.', 'No file on any drive changes. You can undo it afterwards.'],
+          action: 'Apply',
+        });
+        if (!ok) return;
+        const r = await runTask(startTask, 'shoots_apply', { plan_id: plan.plan_id, expect });
+        setApplies((n) => n + 1);
+        if (!r.ok) return toast(`Apply refused: ${r.error}`, 'err');
+        const id = String(r.result?.apply_id ?? '');
+        toast(`Applied ${String(r.result?.shoots)} shoots (${String(r.result?.frames)} photos).`, 'ok', id ? { label: 'Undo', run: () => undo(id) } : undefined);
+        await replanNow();
+      }),
+    [guard, ask, startTask, toast, replanNow, undo],
+  );
+  return { busy, run, apply, undo, applies };
 }
 
 export function ReviewShoots() {
@@ -106,7 +165,9 @@ export function ReviewShoots() {
   );
 }
 
-function ModeBar({ plan, pending, counts, replan }: { plan: Plan | null; pending: number; counts?: ReturnType<typeof tally>; replan: Replan }) {
+function ModeBar({ plan, pending, counts, replan, dev }: { plan: Plan | null; pending: number; counts?: ReturnType<typeof tally>; replan: Replan; dev?: boolean }) {
+  const accepted = counts?.accepted ?? 0;
+  const why = dev ? 'The fixture plan cannot be applied' : accepted === 0 ? 'Accept at least one shoot first' : `Create ${accepted} accepted ${accepted === 1 ? 'shoot' : 'shoots'} in the catalog`;
   return (
     <div className="sticky top-14 z-20 -mx-1 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-maybe/50 bg-bg/90 px-4 py-2.5 backdrop-blur-xl" role="status">
       <span className="inline-flex items-center gap-2 text-sm font-semibold text-maybe">
@@ -124,8 +185,8 @@ function ModeBar({ plan, pending, counts, replan }: { plan: Plan | null; pending
             {replan.busy ? 'Planning…' : 'Re-plan'}
           </button>
         )}
-        <button type="button" disabled className={primary} title="Apply arrives with sh-4">
-          Apply
+        <button type="button" disabled={!plan || dev || accepted === 0 || replan.busy} className={primary} title={why} onClick={() => plan && replan.apply(plan, accepted)}>
+          {accepted > 0 ? `Apply ${accepted}` : 'Apply'}
         </button>
         <a href="#/photos" className={btn}>
           Exit review
@@ -198,7 +259,7 @@ function Review({ plan, replan }: { plan: Plan; replan: Replan }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <ModeBar plan={plan} pending={decisions.length} counts={counts} replan={replan} />
+      <ModeBar plan={plan} pending={decisions.length} counts={counts} replan={replan} dev={dev} />
       {loadErr && <p className="text-sm text-err">The saved decisions could not be loaded: {loadErr}</p>}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -258,13 +319,50 @@ function Review({ plan, replan }: { plan: Plan; replan: Replan }) {
               </ol>
             )}
           </div>
+          {!dev && <Applied replan={replan} />}
           <p className="text-2xs text-faint">
             {dev
               ? 'Fixture plan: decisions are kept in server memory only and go when the server stops.'
-              : 'Each decision is saved in the catalog as you make it. Re-plan folds them into a new plan; nothing else changes until Apply.'}
+              : 'Each decision is saved in the catalog as you make it. Re-plan folds them into a new plan. Apply changes the catalog only, never a file, and can be undone.'}
           </p>
         </aside>
       </div>
+    </div>
+  );
+}
+
+/** Applies that can be undone (sh-4), newest first. */
+function Applied({ replan }: { replan: Replan }) {
+  const [list, setList] = useState<{ apply_id: string; frames: number; shoots: number }[]>([]);
+  useEffect(() => {
+    let alive = true;
+    api<{ applies: typeof list }>('GET', '/api/shoots/applies')
+      .then((r) => alive && setList(r.applies))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [replan.applies]);
+  if (list.length === 0) return null;
+  const when = (id: string) => {
+    const m = /^apply-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/.exec(id);
+    return m ? `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]} UTC` : id;
+  };
+  return (
+    <div>
+      <h2 className="text-sm font-semibold">Applied</h2>
+      <ul className="mt-1 flex flex-col gap-1">
+        {list.map((a) => (
+          <li key={a.apply_id} className="flex items-center justify-between gap-2 rounded-lg px-2 py-1 text-xs hover:bg-ink/5">
+            <span>
+              {when(a.apply_id)} · {a.shoots} {a.shoots === 1 ? 'shoot' : 'shoots'} · {a.frames.toLocaleString()} photos
+            </span>
+            <button type="button" className="shrink-0 text-muted underline hover:text-ink disabled:opacity-40" disabled={replan.busy} onClick={() => replan.undo(a.apply_id)}>
+              Undo
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -293,13 +391,18 @@ function TripSection({ trip, shoots, eff, decide, mounted }: { trip: EffTrip; sh
             </form>
           ) : (
             <h2 className="text-xl font-semibold">
-              {trip.name.value} {accepted && <span className="text-sm font-normal text-go">✓ accepted</span>}
+              {trip.name.value}{' '}
+              {trip.locked ? (
+                <span className="rounded-full bg-ink/10 px-2 py-0.5 align-middle text-xs font-normal text-muted" title="Applied earlier. Shown read-only.">applied</span>
+              ) : (
+                accepted && <span className="text-sm font-normal text-go">✓ accepted</span>
+              )}
             </h2>
           )}
           <p className="text-xs text-muted">
             {trip.start_date} – {trip.end_date} · {all.length} {all.length === 1 ? 'shoot' : 'shoots'}
           </p>
-          {trip.name.alternatives.length > 0 && !renaming && (
+          {trip.name.alternatives.length > 0 && !renaming && !trip.locked && (
             <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted">
               Other names
               {trip.name.alternatives.map((a) => (
@@ -310,7 +413,7 @@ function TripSection({ trip, shoots, eff, decide, mounted }: { trip: EffTrip; sh
             </p>
           )}
         </div>
-        <div className="flex gap-1.5">
+        <div className={`flex gap-1.5 ${trip.locked ? 'hidden' : ''}`}>
           <button type="button" className={btn} onClick={() => { setDraft(trip.name.value); setRenaming(true); }}>Rename</button>
           <button type="button" className={primary} disabled={accepted} onClick={() => decide({ kind: 'accept_trip', id: trip.proposal_id })}>Accept trip</button>
         </div>

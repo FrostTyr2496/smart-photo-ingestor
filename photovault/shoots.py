@@ -429,6 +429,7 @@ def _locked_shoots(conn: sqlite3.Connection, items: list[Item]) -> list[dict]:
                          if located else None),
             "points": [[round(a, 5), round(b, 5)] for a, b in _evenly(located, 50)],
             "gaps": [], "flags": [], "locked": True, "_t0": seg[0].ts, "_t1": seg[-1].ts,
+            "_db_trip": r["trip_id"] if r is not None and "trip_id" in r.keys() else None,
         })
     return out
 
@@ -469,6 +470,28 @@ def _make_trips(shoots: list[dict], phone: Phone, merge_h: float, region_km: flo
     if cur:
         groups.append(cur)
     return [g for g in groups if len(g) >= 2]
+
+
+def _locked_trips(conn: sqlite3.Connection, locked: list[dict]) -> list[dict]:
+    """Applied trips (sh-4), shown read-only like their locked shoots; sets each member's ``trip_id``."""
+    try:
+        names = {r["trip_id"]: r["name"] for r in conn.execute("SELECT trip_id, name FROM trips")}
+    except sqlite3.OperationalError:
+        return []
+    by: dict[int, list[dict]] = {}
+    for s in locked:
+        if s.get("_db_trip") in names:
+            by.setdefault(s["_db_trip"], []).append(s)
+    out = []
+    for tid, members in by.items():
+        members.sort(key=lambda s: s["_t0"])
+        t = _trip_dict(members, _sha("t:", members[0]["group_ids"][0], members[-1]["group_ids"][-1]))
+        t["name"] = {"value": names[tid], "source": "user", "alternatives": []}
+        t["locked"] = True
+        for s in members:
+            s["trip_id"] = t["proposal_id"]
+        out.append(t)
+    return out
 
 
 def _trip_dict(members: list[dict], pid: str | None = None) -> dict:
@@ -685,13 +708,14 @@ def plan(conn: sqlite3.Connection, *, gap_h: float = 8, split_km: float = 50, me
             s["state"] = "accepted"
         elif kind == "skip" and (s is not None and not s["locked"]):
             s["state"] = "skipped"
+    trips += _locked_trips(conn, [s for s in shoots if s["locked"]])
     for t in trips:
         members = sorted((by_id[i] for i in t["shoot_ids"]), key=lambda s: s["_t0"])
         t["shoot_ids"] = [m["proposal_id"] for m in members]
         if members:
             t["start_date"] = members[0]["shoot_date"]
             t["end_date"] = max(m["shoot_date"] for m in members)
-    trips = [t for t in trips if t["shoot_ids"]]
+    trips = sorted((t for t in trips if t["shoot_ids"]), key=lambda t: (t["start_date"], t["proposal_id"]))
 
     for s in shoots:
         for k in [k for k in s if k.startswith("_")]:
@@ -791,3 +815,117 @@ def calibrate(conn: sqlite3.Connection, gap_values=(4, 6, 8, 12), split_km: floa
             "folders": len(folders), "folders_whole": whole, "folders_split": split, "folders_merged": merged,
         })
     return {"frames": n, "ground_truth_folders": len(folders), "split_km": split_km, "results": results}
+
+
+# ---------------------------------------------------------------- apply and undo (sh-4)
+
+class ApplyError(ValueError):
+    """Apply or undo refused, with a plain message (nothing was written)."""
+
+
+def _unique_name(conn: sqlite3.Connection, shoot_date: str, name: str) -> str:
+    """``name``, or ``name 2``, ``name 3``… when (shoot_date, name) is taken (the shoots UNIQUE key)."""
+    taken = {r["name"].lower() for r in conn.execute("SELECT name FROM shoots WHERE shoot_date = ?", (shoot_date,))}
+    if name.lower() not in taken:
+        return name
+    n = 2
+    while f"{name} {n}".lower() in taken:
+        n += 1
+    return f"{name} {n}"
+
+
+def apply(conn: sqlite3.Connection, *, params: dict | None = None, expect: int | None = None,
+          now: datetime | None = None) -> dict:
+    """Create the accepted shoots and their trips in the catalog, and point their frames at them (sh-4).
+
+    The plan is computed again from the catalog and every stored decision, with the reviewed plan's ``params``; only
+    shoots whose state is ``accepted`` and that are not locked are created. ``expect`` is the number of accepted shoots
+    the review showed: when the catalog now gives a different number (new frames, a decision made elsewhere), nothing
+    is written and the review should re-plan. Each frame's previous ``shoot_id`` goes to ``shoot_apply_log`` under an
+    ``apply-<UTC time>`` id, which `undo` takes. ``local_offset`` is stored only when the plan proposed a time-zone
+    change, since a shoot's offset re-times its frames' wall clock. The caller holds the transaction. Files are never
+    touched."""
+    now = now or datetime.now(UTC)
+    p = dict(params or {})
+    kw = {k: p[k] for k in ("gap_h", "split_km", "merge_h", "region_km") if p.get(k) is not None}
+    kw.update({"frm": p.get("from"), "to": p.get("to")})
+    result = plan(conn, now=now, **kw)
+    accepted = [s for s in result["shoots"] if s.get("state") == "accepted" and not s["locked"]]
+    if expect is not None and expect != len(accepted):
+        raise ApplyError(f"the review showed {expect} accepted shoots, but the catalog now gives {len(accepted)}: "
+                         "re-plan and check again")
+    if not accepted:
+        raise ApplyError("no accepted shoots to apply")
+    base = "apply-" + now.strftime("%Y%m%d-%H%M%S")
+    apply_id, n = base, 1
+    while conn.execute("SELECT 1 FROM shoot_apply_log WHERE job_id = ? LIMIT 1", (apply_id,)).fetchone():
+        n += 1
+        apply_id = f"{base}-{n}"
+    at = now.isoformat(timespec="seconds")
+    trips = {t["proposal_id"]: t for t in result["trips"]}
+    trip_ids: dict[str, int] = {}
+    for tid in dict.fromkeys(s["trip_id"] for s in accepted if s["trip_id"]):
+        t = trips[tid]
+        dates = sorted(s["shoot_date"] for s in accepted if s["trip_id"] == tid)
+        trip_ids[tid] = conn.execute(
+            "INSERT INTO trips (name, start_date, end_date, created_at) VALUES (?,?,?,?)",
+            (t["name"]["value"], dates[0], dates[-1], at)).lastrowid
+    frames = renamed = 0
+    created = []
+    for s in accepted:
+        name = _unique_name(conn, s["shoot_date"], s["name"]["value"])
+        renamed += name != s["name"]["value"]
+        off = s["local_offset"]["value"] if s["local_offset"].get("changes") else None
+        sid = conn.execute(
+            "INSERT INTO shoots (name, shoot_date, kind, created_at, trip_id, local_offset, name_source) "
+            "VALUES (?,?,'general',?,?,?,?)",
+            (name, s["shoot_date"], at, trip_ids.get(s["trip_id"]), off, s["name"]["source"])).lastrowid
+        created.append({"shoot_id": sid, "name": name, "shoot_date": s["shoot_date"], "proposal_id": s["proposal_id"]})
+        for gid in s["group_ids"]:
+            cur = conn.execute("UPDATE capture_groups SET shoot_id = ? WHERE group_id = ? AND shoot_id IS NULL",
+                               (sid, gid))
+            if cur.rowcount:
+                conn.execute("INSERT INTO shoot_apply_log (job_id, group_id, prev_shoot_id) VALUES (?,?,NULL)",
+                             (apply_id, gid))
+                frames += 1
+    return {"apply_id": apply_id, "shoots": len(created), "trips": len(trip_ids), "frames": frames,
+            "renamed": renamed, "created": created}
+
+
+def list_applies(conn: sqlite3.Connection) -> list[dict]:
+    """Applies that can still be undone, newest first: ``{apply_id, frames, shoots}``."""
+    rows = conn.execute(
+        "SELECT l.job_id AS apply_id, COUNT(*) AS frames, COUNT(DISTINCT g.shoot_id) AS shoots "
+        "FROM shoot_apply_log l LEFT JOIN capture_groups g ON g.group_id = l.group_id "
+        "GROUP BY l.job_id ORDER BY l.job_id DESC").fetchall()
+    return [dict(r) for r in rows]
+
+
+def undo(conn: sqlite3.Connection, apply_id: str) -> dict:
+    """Undo one apply (sh-4): each logged frame gets its previous ``shoot_id`` back, then the shoots and trips it
+    created are deleted once nothing refers to them. The caller holds the transaction."""
+    rows = conn.execute("SELECT l.group_id, l.prev_shoot_id, g.shoot_id AS now_shoot FROM shoot_apply_log l "
+                        "LEFT JOIN capture_groups g ON g.group_id = l.group_id WHERE l.job_id = ?",
+                        (apply_id,)).fetchall()
+    if not rows:
+        raise ApplyError(f"no apply {apply_id!r} to undo")
+    made = {r["now_shoot"] for r in rows if r["now_shoot"] is not None}
+    for r in rows:
+        conn.execute("UPDATE capture_groups SET shoot_id = ? WHERE group_id = ?", (r["prev_shoot_id"], r["group_id"]))
+    conn.execute("DELETE FROM shoot_apply_log WHERE job_id = ?", (apply_id,))
+    shoots_gone = 0
+    trips = set()
+    for sid in sorted(made):
+        used = conn.execute("SELECT (SELECT COUNT(*) FROM capture_groups WHERE shoot_id = ?) + "
+                            "(SELECT COUNT(*) FROM sequences WHERE shoot_id = ?)", (sid, sid)).fetchone()[0]
+        if used:
+            continue
+        t = conn.execute("SELECT trip_id FROM shoots WHERE shoot_id = ?", (sid,)).fetchone()
+        if t is not None and t["trip_id"] is not None:
+            trips.add(t["trip_id"])
+        shoots_gone += conn.execute("DELETE FROM shoots WHERE shoot_id = ?", (sid,)).rowcount
+    trips_gone = 0
+    for tid in sorted(trips):
+        if not conn.execute("SELECT 1 FROM shoots WHERE trip_id = ? LIMIT 1", (tid,)).fetchone():
+            trips_gone += conn.execute("DELETE FROM trips WHERE trip_id = ?", (tid,)).rowcount
+    return {"apply_id": apply_id, "frames": len(rows), "shoots": shoots_gone, "trips": trips_gone}

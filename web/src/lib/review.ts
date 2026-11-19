@@ -54,6 +54,8 @@ export interface PlanTrip {
   end_date: string;
   shoot_ids: string[];
   flags: string[];
+  /** An applied trip (sh-4), shown read-only with its locked shoots. */
+  locked?: boolean;
 }
 export interface Plan {
   plan_id: string;

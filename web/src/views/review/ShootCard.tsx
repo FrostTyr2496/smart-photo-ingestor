@@ -139,7 +139,7 @@ export function ShootCard({ s, plan, onDecide, mounted }: { s: EffShoot; plan: E
   const other = mergeDir === 'prev' ? prev : mergeDir === 'next' ? next : null;
   const merged = other ? (mergeDir === 'prev' ? mergeShoots(other, s) : mergeShoots(s, other)) : null;
   const off = s.local_offset;
-  const tripChoices = plan.trips.filter((t) => t.proposal_id !== s.trip_id);
+  const tripChoices = plan.trips.filter((t) => t.proposal_id !== s.trip_id && !t.locked);
   const ring = s.state === 'accepted' ? 'border-go/40' : s.state === 'skipped' ? 'border-line opacity-60' : 'border-line';
 
   const close = () => {

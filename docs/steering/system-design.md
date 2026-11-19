@@ -306,7 +306,8 @@ the `V7` string in `photovault/catalog/migrations.py`:
 - `shoot_plan_decisions`: the user's dry-run decisions, kept across re-plans. Kinds: accept, split, merge, skip,
   rename, reject_name, move. A review action that touches several shoots ("Accept trip") is stored as one row per
   shoot sharing `payload.batch` (sh-2).
-- `shoot_apply_log`: each group's previous `shoot_id` per apply job, for undo.
+- `shoot_apply_log`: each group's previous `shoot_id` per apply, for undo. `job_id` holds the apply id
+  (`apply-<UTC YYYYMMDD-HHMMSS>`), not a `jobs` row: Apply and Undo run as tasks (sh-4).
 - `body_clock`: a correction in seconds per body over a UTC range, with source phone | gps | user, and `accepted`.
 - `capture_groups.subsec`.
 

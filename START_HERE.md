@@ -83,7 +83,7 @@ task's commit:
    seq-1b (then seq-2), rv-11; then lr-0, set-1; cu-0 / dd-0 / ro-0 are proposals first. **Phone + related
    (D-070..D-079):** rv-16, sp-2, sp-3, sp-7, sp-7b, sp-8, rv-10, rv-17..rv-24 done. **Shoots (spec
    `docs/specs/shoots`, D-080, V7 landed):** sh-0b, sh-1 (plan: 182 shoots, 35 trips), sh-2 (`shoots plan`, decisions in
-   the catalog), sh-3, sh-3b done; next sh-4 apply/undo, sh-5. **Actions** (`docs/specs/actions`): act-1,
+   the catalog), sh-3, sh-3b, sh-4 (Apply/Undo, shoot filter in Photos) done; next sh-5. **Actions** (`docs/specs/actions`): act-1,
    act-2 done (23 actions on the real catalog); next act-3, act-4 (cache previews while a drive is connected).
 5. **Card backup (spec `docs/specs/backup`, D-050..D-052):** bk-1 drive health, bk-3 backup job (after ing-13),
    vn-1 volume name on hover, then bk-2, bk-4, vn-2, vn-3. bk-5 [user]: plug in and assign the 12 TB. Metrics:
@@ -99,7 +99,8 @@ task's commit:
   No clock banners should show now (sp-7b). Then run `uv run photovault --json meta scan --rescan "<mount>"` on each
   connected drive so `subsec` fills in (sh-0b), and try the review mode on test data:
   `PHOTOVAULT_DEV_PLAN=tests/fixtures/plans/shoots-fixture.json uv run photovault serve` → `#/review/shoots` (sh-3),
-  or on the real catalog: `uv run photovault --json shoots plan`, then `#/review/shoots` (sh-2 saves each decision).
+  or on the real catalog: `uv run photovault --json shoots plan`, then `#/review/shoots` (sh-2 saves each decision;
+  sh-4 Apply changes the catalog only, and Undo is in the review's side panel).
 - **Push the archive branch?** Run `git push -u origin archive/v0-cli-2026-11-11` if you want it on GitHub.
   (`main` is pushed.)
 - **Corpus gaps (fnd-7):** the wish list still lacks a Z6II pair, a night run, a GoPro set and an iPhone
@@ -113,11 +114,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
-- D-088 (agent): sh-2 decisions saved in the catalog as made; plans record `decisions_through`; planner ids for pieces.
+- D-093 (agent): sh-4 Apply/Undo as tasks with `apply-<time>` ids; refuses a stale review; offsets only when proposed.
+- D-092 (agent): sh-2 decisions saved in the catalog as made; plans record `decisions_through`; planner ids for pieces.
 - D-091 (user): import flow: every card listed (unplugged greyed), dry-run plan in the browser, then apply; X9 Pro first.
 - D-090 (user): `ingest --limit N` imports in small batches (first N frames by capture time).
 - D-089 (user): green = on a MASTER or on two different WORKING/MASTER drives; replaces D-046's MASTER-only green.
-- D-088 (user): Backup Plus (exFAT, no conversion) becomes WORKING via an explicit `--change-role`; the 12 TB stays MASTER.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

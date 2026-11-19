@@ -36,6 +36,13 @@ import { PhotoInspector } from './PhotoInspector';
 
 const reducedMotion = (): boolean => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 
+interface ShootRow {
+  shoot_id: number;
+  name: string;
+  shoot_date: string;
+  groups: number;
+}
+
 const PAGE = 300; // photos fetched per request within a day
 const ALL_PAGE = 1000; // the server's largest page, for "Select day"
 
@@ -57,6 +64,8 @@ export function Photos() {
   const { drives, toast, epoch } = useStore();
   const [volume, setVolume] = usePref<string>('photos.drive', '');
   const [missing, setMissing] = usePref<Missing>('photos.missing', '');
+  const [shoot, setShoot] = usePref<string>('photos.shoot', '');
+  const [shootList, setShootList] = useState<ShootRow[]>([]);
   const [days, setDays] = useState<PhotoDay[] | null>(null);
   const [counts, setCounts] = useState<MissingCounts | null>(null);
   const [loaded, setLoaded] = useState<Record<string, DayState>>({});
@@ -67,7 +76,7 @@ export function Photos() {
   const [savedEpoch, setSavedEpoch] = useState(0);
   const [relatedIds, setRelatedIds] = useState<Set<number>>(() => new Set());
   const anchor = useRef<number | null>(null);
-  const filterKey = `${volume}|${missing}`;
+  const filterKey = `${volume}|${missing}|${shoot}`;
   const filterRef = useRef(filterKey);
   filterRef.current = filterKey;
   const loadedRef = useRef(loaded);
@@ -78,6 +87,21 @@ export function Photos() {
   useEffect(() => {
     if (volume && drives.length && !byVolume.has(volume)) setVolume('');
   }, [volume, drives.length, byVolume, setVolume]);
+
+  // Applied shoots (sh-4) for the shoot filter; a filter on a shoot that is gone (undone) is dropped.
+  useEffect(() => {
+    let alive = true;
+    api<{ shoots: ShootRow[] }>('GET', '/api/shoots')
+      .then((d) => {
+        if (!alive) return;
+        setShootList(d.shoots);
+        if (shoot && !d.shoots.some((x) => String(x.shoot_id) === shoot)) setShoot('');
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [epoch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     api<{ settings: PhotoSettings & { match_window_s: string | number } }>('GET', '/api/settings')
@@ -95,7 +119,7 @@ export function Photos() {
   }, [filterKey]);
   useEffect(() => {
     let alive = true;
-    api<{ days: PhotoDay[]; missing_counts: MissingCounts }>('GET', `/api/photo-days?${qs({ volume_id: volume, missing })}`)
+    api<{ days: PhotoDay[]; missing_counts: MissingCounts }>('GET', `/api/photo-days?${qs({ volume_id: volume, missing, shoot_id: shoot })}`)
       .then((d) => {
         if (!alive) return;
         setDays(d.days);
@@ -109,10 +133,10 @@ export function Photos() {
 
   const fetchDay = useCallback(
     async (day: string, offset: number, limit: number): Promise<PhotoGroup[]> => {
-      const d = await api<{ groups: PhotoGroup[] }>('GET', `/api/groups?${qs({ day, volume_id: volume, missing, limit, offset })}`);
+      const d = await api<{ groups: PhotoGroup[] }>('GET', `/api/groups?${qs({ day, volume_id: volume, missing, shoot_id: shoot, limit, offset })}`);
       return d.groups;
     },
-    [volume, missing],
+    [volume, missing, shoot],
   );
 
   /** Load the first page of a day, or the next one with `more`. */
@@ -201,7 +225,8 @@ export function Photos() {
   const clearFilters = useCallback(() => {
     setVolume('');
     setMissing('');
-  }, [setVolume, setMissing]);
+    setShoot('');
+  }, [setVolume, setMissing, setShoot]);
   const showInAll = useCallback(() => {
     const g = firstInTime([...sel.values()]);
     if (!g) return;
@@ -297,11 +322,12 @@ export function Photos() {
 
   const selected = useMemo(() => [...sel.values()], [sel]);
   const rail = useMemo(() => monthRail(days ?? []), [days]);
-  const filtered = Boolean(volume || missing);
+  const filtered = Boolean(volume || missing || shoot);
   const chips = useMemo(() => {
     const d = volume ? byVolume.get(volume) : undefined;
-    return filterChips(volume ? (d ? driveName(d) : 'Drive') : null, missing);
-  }, [volume, missing, byVolume]);
+    const sh = shoot ? shootList.find((x) => String(x.shoot_id) === shoot) : undefined;
+    return filterChips(volume ? (d ? driveName(d) : 'Drive') : null, missing, shoot ? (sh ? sh.name : 'Shoot') : null);
+  }, [volume, missing, shoot, byVolume, shootList]);
   const note = filterNote(chips);
 
   return (
@@ -343,6 +369,16 @@ export function Photos() {
             </option>
           ))}
         </select>
+        {shootList.length > 0 && (
+          <select value={shoot} onChange={(e) => setShoot(e.target.value)} className="h-8 max-w-[14rem] shrink-0" aria-label="Shoot">
+            <option value="">All shoots</option>
+            {shootList.map((x) => (
+              <option key={x.shoot_id} value={String(x.shoot_id)}>
+                {x.name} · {x.shoot_date}
+              </option>
+            ))}
+          </select>
+        )}
         <select value={missing} onChange={(e) => setMissing(e.target.value as Missing)} className="h-8 shrink-0" aria-label="Show">
           {(Object.keys(MISSING_LABEL) as Missing[]).map((k) => (
             <option key={k} value={k}>
@@ -353,7 +389,7 @@ export function Photos() {
         {chips.map((c) => (
           <span key={c.key} className="inline-flex shrink-0 items-center gap-1 rounded-full border border-accent/30 bg-accent/10 py-0.5 pl-2.5 pr-1 text-xs">
             {c.label}
-            <button type="button" className="rounded-full p-0.5 text-muted hover:bg-ink/10 hover:text-ink" aria-label={`Clear filter ${c.label}`} onClick={() => (c.key === 'drive' ? setVolume('') : setMissing(''))}>
+            <button type="button" className="rounded-full p-0.5 text-muted hover:bg-ink/10 hover:text-ink" aria-label={`Clear filter ${c.label}`} onClick={() => (c.key === 'drive' ? setVolume('') : c.key === 'shoot' ? setShoot('') : setMissing(''))}>
               <Icon name="x" size={10} />
             </button>
           </span>
@@ -393,6 +429,7 @@ export function Photos() {
                   onSelectDay={() => void selectDay(d)}
                   filterNote=""
                   onClearFilters={clearFilters}
+                  onShoot={(id) => setShoot(String(id))}
                   connected={(id) => (id ? byVolume.get(id)?.mounted ?? false : false)}
                 />
               ))
@@ -468,6 +505,7 @@ function DaySection({
   onSelectDay,
   filterNote: note,
   onClearFilters,
+  onShoot,
   connected,
 }: {
   d: PhotoDay;
@@ -482,6 +520,7 @@ function DaySection({
   onSelectDay: () => void;
   filterNote: string;
   onClearFilters: () => void;
+  onShoot: (shootId: number) => void;
   connected: (volumeId: string | null) => boolean;
 }) {
   const box = useRef<HTMLElement>(null);
@@ -501,6 +540,12 @@ function DaySection({
       <div className="sticky top-[105px] z-10 -mx-1 flex items-center justify-between gap-3 bg-bg/85 px-1 py-2 backdrop-blur">
         <div className="flex min-w-0 items-baseline gap-2">
           <h2 className="truncate font-medium">{dayLabel(d.day)}</h2>
+          {(d.shoots ?? []).slice(0, 3).map((x) => (
+            <button key={x.shoot_id} type="button" onClick={() => onShoot(x.shoot_id)} title={`${x.name}: ${plural(x.groups, 'photo')} this day. Show only this shoot.`} className="shrink-0 truncate rounded-full border border-line px-2 py-0.5 text-xs text-ink/90 hover:border-line-strong">
+              {x.name}
+            </button>
+          ))}
+          {(d.shoots?.length ?? 0) > 3 && <span className="shrink-0 text-xs text-muted">+{d.shoots!.length - 3}</span>}
           <span className="truncate text-xs text-muted" title={dayLine(d, groups, nSel)}>
             {dayLine(d, groups, nSel)}
           </span>

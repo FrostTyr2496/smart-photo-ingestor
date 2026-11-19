@@ -50,6 +50,14 @@ export interface PhotoDay {
   day: string; // YYYY-MM-DD, or UNDATED
   groups: number;
   bodies: string[];
+  /** Applied shoots with frames that day, most frames first (sh-4). */
+  shoots?: DayShoot[];
+}
+
+export interface DayShoot {
+  shoot_id: number;
+  name: string;
+  groups: number;
 }
 
 export interface MissingCounts {
@@ -742,13 +750,14 @@ export function dayLine(d: PhotoDay, rows: PhotoGroup[], nSel: number): string {
 }
 
 export interface FilterChip {
-  key: 'drive' | 'missing';
+  key: 'drive' | 'missing' | 'shoot';
   label: string;
 }
 
 /** The chips for the filters that are on: the drive's name and the "Missing …" choice. */
-export function filterChips(driveLabel: string | null, missing: Missing): FilterChip[] {
+export function filterChips(driveLabel: string | null, missing: Missing, shootLabel: string | null = null): FilterChip[] {
   const out: FilterChip[] = [];
+  if (shootLabel) out.push({ key: 'shoot', label: shootLabel });
   if (driveLabel) out.push({ key: 'drive', label: driveLabel });
   if (missing) out.push({ key: 'missing', label: MISSING_LABEL[missing] });
   return out;
