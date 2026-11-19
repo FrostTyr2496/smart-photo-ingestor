@@ -329,3 +329,7 @@ Rules for every task:
     in no photo. The button opens `#/photos?photo=<group>&day=<day>`, which clears the Photos filters, loads that day,
     centres and flashes the tile (the rv-19 reveal) and selects it, so the inspector opens.
   - Result (2026-11-18): `uv run pytest -q` and `cd web && npm run typecheck && npm test` → green (134 web); build committed. Browser check pending.
+  - Fix (2026-11-19, user report: it did not scroll): the reveal waited for the filter key `'|'`, but sh-4 made it
+    three parts (`'||'`), so it never ran (Show in All Photos too); it also cleared its own scroll timer by clearing
+    `reveal`. Scrolling is now a separate effect that retries until the tile renders, then focuses it; the reveal
+    waits for days fetched under the cleared filters. `npm run typecheck && npm test` → 134 passed. Browser check pending.
