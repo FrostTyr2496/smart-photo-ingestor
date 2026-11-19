@@ -29,9 +29,11 @@ import type { TaskDetail } from '../lib/types';
 type Phase = 'idle' | 'planning' | 'planned' | 'failed' | 'applied';
 
 /** Import a card onto a working drive (ing-*, im-4). The card is only read. A dry run shows the plan; Apply runs the same inputs. */
-export function ImportDialog({ card, onClose }: { card: { mount: string; label: string; volume_id?: string | null } | null; onClose: () => void }) {
+export function ImportDialog({ card, onClose }: { card: { mount: string; label: string; volume_id?: string | null; test_card?: { hidden: string[] } | null } | null; onClose: () => void }) {
   const { drives, startTask, ask, toast } = useStore();
-  const working = drives.filter((t) => roleKey(t.role) === 'working' && !t.ignored);
+  // D-111: a test card's hidden drives are never offered (copying there would duplicate files already on them).
+  const hidden = card?.test_card?.hidden ?? [];
+  const working = drives.filter((t) => roleKey(t.role) === 'working' && !t.ignored && !hidden.includes(t.label ?? ''));
   const firstConnected = working.find((t) => t.mounted);
   const [target, setTarget] = useState('');
   const [second, setSecond] = useState('');
@@ -81,7 +83,7 @@ export function ImportDialog({ card, onClose }: { card: { mount: string; label: 
 
   const limit = batchLimit(choice, custom);
   // The trailing copy needs the card's volume id and a connected working or master drive other than the first.
-  const seconds = drives.filter((t) => (roleKey(t.role) === 'working' || roleKey(t.role) === 'master') && !t.ignored && t.mounted && t.mount !== target);
+  const seconds = drives.filter((t) => (roleKey(t.role) === 'working' || roleKey(t.role) === 'master') && !t.ignored && t.mounted && t.mount !== target && !hidden.includes(t.label ?? ''));
   const secondOk = Boolean(second) && Boolean(card?.volume_id) && second !== target;
   const inputs = card && target && limit !== undefined ? { source: card.mount, target, name, limit, second: secondOk ? second : '' } : null;
   const key = inputs ? inputsKey(inputs) : '';
@@ -216,7 +218,10 @@ export function ImportDialog({ card, onClose }: { card: { mount: string; label: 
         </>
       }
     >
-      <p className="text-sm text-muted">Card: {card?.label}</p>
+      <p className="text-sm text-muted">
+        Card: {card?.label}
+        {hidden.length > 0 && <span className="text-faint"> · Test card: {hidden.join(', ')} not offered (their copies are hidden)</span>}
+      </p>
       <Field label="Copy onto">
         <select value={target} onChange={(e) => setTarget(e.target.value)} className={sel} disabled={!hasTarget}>
           {!target && <option value="">Choose a drive</option>}

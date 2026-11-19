@@ -5,13 +5,20 @@ import { springs } from '../lib/motion';
 /** A centred dialog that springs in. Esc and a click outside close it. */
 export function Modal({ open, title, onClose, children, footer, wide }: { wide?: boolean; open: boolean; title: string; onClose: () => void; children: ReactNode; footer: ReactNode }) {
   const box = useRef<HTMLDivElement>(null);
+  // Callers pass a new onClose each render; keep it in a ref so a re-render (e.g. the drive list polling) does not
+  // re-run the effect and pull focus back to the first field.
+  const close = useRef(onClose);
+  close.current = onClose;
   useEffect(() => {
     if (!open) return undefined;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close.current();
     document.addEventListener('keydown', onKey);
-    window.setTimeout(() => box.current?.querySelector<HTMLElement>('input, select, button')?.focus(), 30);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+    const t = window.setTimeout(() => box.current?.querySelector<HTMLElement>('input, select, button')?.focus(), 30);
+    return () => {
+      window.clearTimeout(t);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
   return (
     <AnimatePresence>
       {open && (
