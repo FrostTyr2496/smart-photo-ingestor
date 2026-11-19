@@ -93,6 +93,9 @@ task's commit:
    met-2 (web view); met-4 after bk-1.
 
 ## Waiting on user
+- **[user] test card (tc-1, D-111):** after the copy, mark the card, restart `serve`, then import and watch it turn
+  yellow then green: `uv run photovault --json test-card mark "<card mount>" --hide "<drive>"` (repeat `--hide`),
+  `test-card show`, `test-card clear` (see `docs/user/CARD_WORKFLOW.md`). Not seen in a browser yet.
 - **[user] im-5 / im-6 (import tests, X9 Pro plugged in):** restart `serve`. CLI first:
   `uv run photovault --json ingest --source "/Volumes/NIKON Z 6_2" --target "/Volumes/X9 Pro" --limit 10 --dry-run`, then
   without `--dry-run`; then Cards → Import… with batch 100 (dry run, then Apply). Backup Plus → WORKING:
@@ -110,9 +113,8 @@ task's commit:
   sh-4 Apply changes the catalog only, and Undo is in the review's side panel).
 - **Push the archive branch?** Run `git push -u origin archive/v0-cli-2026-11-11` if you want it on GitHub.
   (`main` is pushed.)
-- **Corpus gaps (fnd-7):** the wish list still lacks a Z6II pair, a night run, a GoPro set and an iPhone
+- **X9 sample:** move `testdata/x9_sample/` into `testdata/corpus/x9/` (D-017)? **Corpus gaps (fnd-7):** the wish list still lacks a Z6II pair, a night run, a GoPro set and an iPhone
   HEIC+AAE (`docs/private/CORPUS.md`). Copy them when you can.
-- **X9 sample:** should `testdata/x9_sample/` move into `testdata/corpus/x9/` (D-017)?
 - **eval-1, last question:** the boundary check from memory (the other three are answered, D-069). See the review file.
 - **Curation proposals (D-069):** cu-0 (now schema V9), dd-0 (duplicate quarantine), ro-0 (shoot folder layout) each
   come back as a review for your approval before any code.
@@ -120,11 +122,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-111 (user+agent): tc-1 test card mode: hide chosen drives' copies of one card's files (settings row, no schema change).
 - D-110 (agent): im-7 ingest result carries `planned_items`; the Import dialog shows a folder tree and stays open after Apply for Show in Finder.
 - D-109 (user+agent): rv-30 Recently run on Tasks, from `<home>/activity/history.jsonl` written by every engine run at exit.
 - D-108 (user): bk-7 Make green copies yellow card files onto a connected second drive; follow jobs also copy skipped-as-present files.
 - D-107 (agent): right-click menus (Shift = browser menu); Show in Photos jumps then holds the tile centred.
-- D-106 (agent+user): ing-14 plan reuses the card check's rows; `--limit` takes the next N undone frames.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

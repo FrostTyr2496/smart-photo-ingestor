@@ -13,7 +13,7 @@ import webbrowser
 from pathlib import Path
 
 from photovault import backup, card_clear, cards, meta, metrics, phone, previews, report, shoots, volumes
-from photovault import activity
+from photovault import activity, testcard
 from photovault.activity import ActivityEmitter
 from photovault.drives import CLI_DRIVE_KEYS, VOLUMES_ROOT, scan_mounts
 from photovault.web import server as web_server
@@ -294,6 +294,25 @@ def cmd_cards_clear(args, cfg, emit) -> int:
         emit.emit("error", code="clear_refused", message=str(exc))
         return EXIT_USAGE
     return EXIT_ERROR if out["stopped"] else EXIT_OK
+
+
+def cmd_test_card(args, cfg, emit) -> int:
+    """Test card mode (tc-1, D-111): hide drives' copies of one card's files. Writes only the catalog settings row."""
+    conn = _open(cfg)
+    try:
+        if args.action == "mark":
+            if not args.card:
+                raise ValueError("name the card: test-card mark <card> --hide <drive>")
+            card = testcard.resolve(conn, args.card)
+            testcard.mark(conn, card, [testcard.resolve(conn, h) for h in args.hide or []])
+            emit.emit("warning", code="test_card", message="test card on: its files show only-on-card until copied again")
+        elif args.action == "clear":
+            testcard.clear(conn)
+    except ValueError as exc:
+        emit.emit("error", code="test_card", message=str(exc))
+        return EXIT_USAGE
+    emit.emit("result", **testcard.describe(conn))
+    return EXIT_OK
 
 
 def cmd_cards_list(args, cfg, emit) -> int:
@@ -658,6 +677,12 @@ def build_parser() -> argparse.ArgumentParser:
     cl = crd.add_parser("list", help="every card, ranked green/yellow/red, and the cameras on them")
     cl.add_argument("--root", help=argparse.SUPPRESS)
     cl.set_defaults(func=cmd_cards_list)
+
+    tcp = sub.add_parser("test-card", help="pretend one card's files have no copy on some drives (catalog only)")
+    tcp.add_argument("action", choices=["mark", "show", "clear"])
+    tcp.add_argument("card", nargs="?", help="mark: the card (mount path, volume id or card:LABEL)")
+    tcp.add_argument("--hide", action="append", metavar="DRIVE", help="mark: a drive to hide (repeatable)")
+    tcp.set_defaults(func=cmd_test_card)
 
     ix = sub.add_parser("index", help="record what is on a registered drive (read-only; Ctrl-C pauses, re-run resumes)")
     ix.add_argument("mount")

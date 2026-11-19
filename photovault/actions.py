@@ -17,7 +17,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from photovault import previews, targets
+from photovault import previews, targets, testcard
 from photovault.catalog import repo
 from photovault.protocol import human_bytes
 
@@ -155,6 +155,7 @@ def _recommend(conn, home, mounted, nbytes: int, source_id: str | None, exclude=
 
 
 def card_unbacked(conn, now, mounted, home, vols) -> list[dict]:
+    hide, hide_p = testcard.sql_hide(conn, "o")
     rows = conn.execute(
         f"""
         SELECT i.volume_id, COUNT(*) AS files, COALESCE(SUM(i.size), 0) AS bytes FROM instances i
@@ -162,9 +163,9 @@ def card_unbacked(conn, now, mounted, home, vols) -> list[dict]:
         WHERE i.state != 'missing' AND i.asset_id IS NOT NULL AND NOT EXISTS (
           SELECT 1 FROM instances o JOIN volumes ov ON ov.volume_id = o.volume_id
           WHERE o.asset_id = i.asset_id AND o.state = 'verified'
-            AND ov.role IN ({",".join("?" * len(BACKUP_ROLES))}))
+            AND ov.role IN ({",".join("?" * len(BACKUP_ROLES))}){hide})
         GROUP BY i.volume_id
-        """, BACKUP_ROLES).fetchall()
+        """, (*BACKUP_ROLES, *hide_p)).fetchall()
     totals = {r["volume_id"]: r["n"] for r in conn.execute(
         "SELECT volume_id, COUNT(*) AS n FROM instances WHERE state != 'missing' GROUP BY volume_id")}
     target = _working_target(vols, mounted)

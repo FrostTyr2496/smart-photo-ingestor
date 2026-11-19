@@ -50,3 +50,12 @@ separate one, for example for a trial run.
 ## Old drives and duplicates
 
 To index an existing drive and find duplicates (`index`, `hash`, `report duplicates`), see `INDEX_WORKFLOW.md`.
+
+## Test cards
+
+To rehearse a real import with a card the catalog already has copies of, mark it as a test card:
+`uv run photovault --json test-card mark "<card mount or card:LABEL>" --hide "<drive>" [--hide "<drive>" ...]`.
+For that card's files, copies on the hidden drives count as nonexistent: the files show red, import copies them
+again, and they turn yellow then green as new copies land on drives that are not hidden. Card clear and make-green
+follow the same view. Nothing on any drive changes; only the catalog's settings row. `test-card show` prints the
+state and `test-card clear` restores the normal view. Cards shows a "Test" badge on the card.

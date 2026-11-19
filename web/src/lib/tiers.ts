@@ -62,6 +62,7 @@ export interface Card {
   copies_by_volume: CopyVolume[];
   checked_at: string | null;
   cleared_at?: string | null;
+  test_card?: { hidden: string[] } | null;
 }
 
 /** "A", "A and B", "A, B and C". */

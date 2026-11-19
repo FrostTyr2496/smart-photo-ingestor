@@ -21,7 +21,7 @@ from collections import Counter
 from collections.abc import Callable, Iterable
 from pathlib import Path, PurePosixPath
 
-from photovault import volumes
+from photovault import testcard, volumes
 from photovault.catalog import repo
 from photovault.config import Config
 from photovault.index import baseline_hash, index_volume
@@ -73,20 +73,23 @@ def check_card(conn: sqlite3.Connection, cfg: Config, mount: Path, *, emit: Emit
 
 
 def _catalog_rows(conn: sqlite3.Connection, volume_id: str) -> dict[str, sqlite3.Row]:
+    hide, hide_p = testcard.sql_hide(conn, "o")
+    hv = testcard.hidden_for_card(conn, volume_id)  # an unhashed card file has no asset yet: hide outright
+    chide = f" AND o.volume_id NOT IN ({','.join('?' * len(hv))})" if hv else ""
     rows = conn.execute(
-        """
+        f"""
         SELECT i.rel_path, i.rel_path_key, i.size, i.mtime_ns, i.kind, i.state, i.asset_id,
           (SELECT GROUP_CONCAT(x.role || char(31) || x.label || char(31) || x.volume_id, char(30)) FROM (
              SELECT DISTINCT v.role, v.label, v.volume_id FROM instances o JOIN volumes v ON v.volume_id = o.volume_id
-             WHERE o.asset_id = i.asset_id AND o.state = 'verified' AND v.role != 'CARD') x) AS copies,
+             WHERE o.asset_id = i.asset_id AND o.state = 'verified' AND v.role != 'CARD'{hide}) x) AS copies,
           CASE WHEN i.asset_id IS NULL AND i.partial_sha256 IS NOT NULL THEN (
              SELECT MIN(v.label) FROM assets a JOIN instances o ON o.asset_id = a.asset_id
              JOIN volumes v ON v.volume_id = o.volume_id
              WHERE a.size = i.size AND a.partial_sha256 = i.partial_sha256 AND o.state = 'verified'
-               AND v.role != 'CARD') END AS candidate
+               AND v.role != 'CARD'{chide}) END AS candidate
         FROM instances i WHERE i.volume_id = ? AND i.state != 'missing'
         """,
-        (volume_id,),
+        (*hide_p, *sorted(hv), volume_id),
     ).fetchall()
     return {r["rel_path_key"]: r for r in rows}
 
@@ -283,8 +286,10 @@ def _card_row(conn: sqlite3.Connection, d: dict, vid: str | None, files: list[di
     label = d.get("label") or (Path(d["mount"]).name if d.get("mount") else "Card")
     from photovault.card_clear import cleared_at  # local import: card_clear imports this module
 
+    tc = testcard.describe(conn)["test_card"]
+    test = {"hidden": [h["label"] for h in tc["hidden"]]} if tc and tc["card_volume_id"] == vid else None
     return {"volume_id": vid, "label": label, "mount": d.get("mount"), "mounted": bool(d.get("mounted")),
-            "last_seen_at": d.get("last_seen_at"), "registered": vid is not None,
+            "test_card": test, "last_seen_at": d.get("last_seen_at"), "registered": vid is not None,
             "cleared_at": cleared_at(conn, vid), **summary}
 
 

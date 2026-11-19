@@ -117,6 +117,14 @@ function NotConnected() {
   return <span className="chip border-line-strong text-muted">Not connected</span>;
 }
 
+function TestBadge({ c }: { c: Card }) {
+  return (
+    <span className="rounded-full border border-line px-2 py-0.5 text-xs text-muted" title={`Test card: copies on ${c.test_card?.hidden.join(', ')} are hidden`}>
+      Test
+    </span>
+  );
+}
+
 function CardTile({ c, onImport, onClear, onGreen }: { c: Card; onImport: (c: Card) => void; onClear: (c: Card) => void; onGreen: (c: Card) => void }) {
   const when = c.mounted
     ? c.checked_at
@@ -127,6 +135,7 @@ function CardTile({ c, onImport, onClear, onGreen }: { c: Card; onImport: (c: Ca
     <motion.article whileHover={{ y: -2 }} transition={springs.snappy} className={`card flex flex-col gap-2.5 p-4 ${c.mounted ? '' : 'opacity-70'}`}>
       <div className="flex items-center gap-2">
         <h3 className="min-w-0 flex-1 truncate font-semibold">{c.label}</h3>
+        {c.test_card && <TestBadge c={c} />}
         {!c.mounted && <NotConnected />}
         <TierPill tier={c.tier} />
       </div>
@@ -326,12 +335,13 @@ function CardDetail({ id, onImport, onClear, onGreen }: { id: string; onImport: 
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2.5">
               <h1 className="truncate text-2xl font-semibold tracking-tight">{c.label}</h1>
+              {c.test_card && <TestBadge c={c} />}
               {!c.mounted && <NotConnected />}
               <TierPill tier={c.tier} />
             </div>
             <p className={`mt-2 ${TIER_TONE[c.tier].text}`}>{cardHeadline(c)}</p>
             <p className="mt-1 text-sm text-muted">
-              {[cardHint(c), c.mounted ? (c.checked_at ? `Checked ${relTime(c.checked_at)}.` : 'Never checked.') : 'Not connected: as last checked.', c.cleared_at ? `Cleared by PhotoVault on ${fmtDate(c.cleared_at)}.` : '']
+              {[cardHint(c), c.mounted ? (c.checked_at ? `Checked ${relTime(c.checked_at)}.` : 'Never checked.') : 'Not connected: as last checked.', c.cleared_at ? `Cleared by PhotoVault on ${fmtDate(c.cleared_at)}.` : '', c.test_card ? `Test card: copies on ${c.test_card.hidden.join(', ')} are hidden.` : '']
                 .filter(Boolean)
                 .join(' ')}
             </p>

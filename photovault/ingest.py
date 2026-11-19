@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Callable
 
-from photovault import metadata, volumes
+from photovault import metadata, testcard, volumes
 from photovault.catalog import repo
 from photovault.config import Config
 from photovault.copy_engine import CopyError, _hash_uncached, copy_verified, sweep_partials
@@ -186,6 +186,8 @@ def plan_card_ingest(
     on_target = {int(r[0]) for r in conn.execute(
         "SELECT DISTINCT asset_id FROM instances WHERE volume_id = ? AND state = 'verified' AND asset_id IS NOT NULL",
         (target_row["volume_id"],))}
+    if target_row["volume_id"] in testcard.hidden_for_card(conn, source_id):
+        on_target = set()  # D-111: the test card's files are not "already there" on a hidden drive
     done: set[int] = set()
     for gi, g in enumerate(groups):
         if all(unchanged(known.get(repo.path_key(m.entry.rel_path)), m.entry)
@@ -424,6 +426,7 @@ def run_job(
         emit.emit("warning", code="paused", message=f"{reason}; resume with: photovault resume {job_id}")
         return JobSummary(copied, skipped, failed, bytes_copied, time.monotonic() - start, True)
 
+    test_hidden = testcard.hidden_for_card(conn, job["source_volume_id"])
     current: int | None = None
     try:
         for n, item in enumerate(items, 1):
@@ -448,7 +451,9 @@ def run_job(
                 dup = None
                 for cand in repo.find_candidates(conn, st.st_size, partial):
                     full = full or sha256_file(src)
-                    if cand["sha256"] == full and _policy_met(cfg, repo.verified_counts_by_role(conn, cand["asset_id"])):
+                    # D-111: the test card's own files hide those drives even before the card file is hashed
+                    hidden = test_hidden | testcard.hidden_for_asset(conn, int(cand["asset_id"]))
+                    if cand["sha256"] == full and _policy_met(cfg, repo.verified_counts_by_role(conn, cand["asset_id"], hidden)):
                         dup = cand
                         break
                 if dup is not None:

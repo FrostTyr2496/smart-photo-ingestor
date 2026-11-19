@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from photovault import testcard
 from photovault.catalog import repo
 from photovault.protocol import human_bytes
 
@@ -85,13 +86,14 @@ def _speeds(home: Path | None) -> tuple[dict[str, float], dict[str, float], dict
 
 def card_unbacked_bytes(conn: sqlite3.Connection, card_volume_id: str) -> int:
     """Bytes of the card's files that have no verified copy on a WORKING or MASTER drive yet."""
+    hide, hide_p = testcard.sql_hide(conn, "o")
     row = conn.execute(
-        """
+        f"""
         SELECT COALESCE(SUM(i.size), 0) FROM instances i WHERE i.volume_id = ? AND i.state != 'missing' AND (
           i.asset_id IS NULL OR NOT EXISTS (
             SELECT 1 FROM instances o JOIN volumes ov ON ov.volume_id = o.volume_id
-            WHERE o.asset_id = i.asset_id AND o.state = 'verified' AND ov.role IN ('WORKING', 'MASTER')))
-        """, (card_volume_id,)).fetchone()
+            WHERE o.asset_id = i.asset_id AND o.state = 'verified' AND ov.role IN ('WORKING', 'MASTER'){hide}))
+        """, (card_volume_id, *hide_p)).fetchone()
     return int(row[0])
 
 
@@ -99,12 +101,13 @@ def _already_there(conn: sqlite3.Connection, card_volume_id: str | None) -> dict
     """Per drive, how many of the card's files already have a verified copy on it."""
     if not card_volume_id:
         return {}
+    hide, hide_p = testcard.sql_hide(conn, "o")
     rows = conn.execute(
-        """
+        f"""
         SELECT o.volume_id, COUNT(DISTINCT i.asset_id) FROM instances i
-        JOIN instances o ON o.asset_id = i.asset_id AND o.state = 'verified' AND o.volume_id != i.volume_id
+        JOIN instances o ON o.asset_id = i.asset_id AND o.state = 'verified' AND o.volume_id != i.volume_id{hide}
         WHERE i.volume_id = ? AND i.state != 'missing' AND i.asset_id IS NOT NULL GROUP BY o.volume_id
-        """, (card_volume_id,)).fetchall()
+        """, (*hide_p, card_volume_id)).fetchall()
     return {r[0]: int(r[1]) for r in rows}
 
 
@@ -129,6 +132,7 @@ def recommend(
     ``{"read": volume_id, "copy": volume_id | None, "note": str}``: the best usable WORKING drive takes the card
     read, the best other usable drive takes the trailing copy (None when only one drive qualifies).
     """
+    exclude = set(exclude) | testcard.hidden_for_card(conn, source_volume_id)  # D-111: never a hidden drive
     reads, writes, errors = _speeds(home)
     there = _already_there(conn, source_volume_id)
     need = int(planned_bytes * HEADROOM)

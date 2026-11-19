@@ -22,7 +22,7 @@ from collections import Counter
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 
-from photovault import cards, volumes
+from photovault import cards, testcard, volumes
 from photovault.catalog import repo
 from photovault.config import Config
 from photovault.drives import scan_mounts
@@ -186,13 +186,14 @@ def _check_file(conn: sqlite3.Connection, card: sqlite3.Row, mount: Path, item: 
         raise Surprise(f"{rel}: cannot re-read the card file ({exc})") from exc
     if card_sha != asset["sha256"]:
         raise Surprise(f"{rel}: the card file's checksum no longer matches the catalog")
+    hide, hide_p = testcard.sql_hide(conn, "i")  # D-111: test-card copies on hidden drives do not count
     copies = conn.execute(
-        """
+        f"""
         SELECT i.volume_id, i.rel_path, v.role FROM instances i JOIN volumes v ON v.volume_id = i.volume_id
         WHERE i.asset_id = ? AND i.state = 'verified' AND i.verified_sha256 = ? AND v.role IN ('WORKING','MASTER')
-          AND i.volume_id != ?
+          AND i.volume_id != ?{hide}
         """,
-        (item["asset_id"], asset["sha256"], card["volume_id"]),
+        (item["asset_id"], asset["sha256"], card["volume_id"], *hide_p),
     ).fetchall()
     vols = {c["volume_id"] for c in copies}
     if not (any(c["role"] == "MASTER" for c in copies) or len(vols) >= 2):

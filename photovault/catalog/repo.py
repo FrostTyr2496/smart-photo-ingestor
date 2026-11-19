@@ -191,16 +191,19 @@ def get_instance(conn: sqlite3.Connection, volume_id: str, rel_path: str) -> Row
     ).fetchone()
 
 
-def verified_counts_by_role(conn: sqlite3.Connection, asset_id: int) -> dict[str, int]:
-    """Count ``verified`` instances of an asset per volume role. CARD volumes are excluded (vault-rules 5)."""
+def verified_counts_by_role(conn: sqlite3.Connection, asset_id: int,
+                            ignore_volumes: frozenset[str] | set[str] = frozenset()) -> dict[str, int]:
+    """Count ``verified`` instances of an asset per volume role. CARD volumes are excluded (vault-rules 5).
+    `ignore_volumes` leaves those volumes out (test card mode, D-111)."""
+    skip = f" AND i.volume_id NOT IN ({','.join('?' * len(ignore_volumes))})" if ignore_volumes else ""
     rows = conn.execute(
-        """
+        f"""
         SELECT v.role AS role, COUNT(*) AS n
         FROM instances i JOIN volumes v ON v.volume_id = i.volume_id
-        WHERE i.asset_id = ? AND i.state = 'verified' AND v.role != 'CARD'
+        WHERE i.asset_id = ? AND i.state = 'verified' AND v.role != 'CARD'{skip}
         GROUP BY v.role
         """,
-        (asset_id,),
+        (asset_id, *sorted(ignore_volumes)),
     ).fetchall()
     return {r["role"]: int(r["n"]) for r in rows}
 
