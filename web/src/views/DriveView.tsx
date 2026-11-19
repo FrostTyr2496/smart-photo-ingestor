@@ -26,6 +26,7 @@ import { rise, springs } from '../lib/motion';
 import { hrefFor } from '../lib/route';
 import { UnpluggedStrip, useUnpluggedEdge } from '../components/Unplugged';
 import { RenameTitle } from '../components/RenameTitle';
+import { EjectButton } from '../components/Eject';
 import { useStore } from '../lib/store';
 import type { Drive, DriveSummary, DriveUsage } from '../lib/types';
 
@@ -533,6 +534,7 @@ export function DriveView({ id }: { id: string }) {
             >
               <Icon name="folder" /> Show in Finder
             </button>
+            <EjectButton d={drive} />
             <a href="#/" className="btn">
               <Icon name="back" /> Tasks
             </a>

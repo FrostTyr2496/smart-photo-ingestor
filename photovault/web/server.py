@@ -930,7 +930,7 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
             raise NotFound(str(exc)) from exc
         return 200, {"suggestions": found}
 
-    m = re.fullmatch(r"/api/volumes/([^/]+)(?:/(files|reveal|label|photo))?", path)
+    m = re.fullmatch(r"/api/volumes/([^/]+)(?:/(files|reveal|label|eject|photo))?", path)
     if m:
         return _volume_route(app, conn, method, m.group(1), m.group(2), query, body)
 
@@ -1154,6 +1154,10 @@ def _volume_route(app: WebApp, conn, method: str, volume_id: str, sub: str | Non
         if method != "POST":
             return 405, {"error": "method not allowed"}
         return 200, _set_label(conn, volume_id, _body_dict(body))
+    if sub == "eject":
+        if method != "POST":
+            return 405, {"error": "method not allowed"}
+        return 200, _eject(app, conn, volume_id)
     if method != "GET":
         return 405, {"error": "method not allowed"}
     if repo.get_volume(conn, volume_id) is None:
@@ -1410,6 +1414,47 @@ def _reveal(app: WebApp, conn, volume_id: str, body: dict) -> dict:
     if result.returncode != 0:
         raise Conflict(result.stderr.strip() or "Finder did not open")
     return {"opened": str(target)}
+
+
+def _uses_mount(words: list[str], mount: str) -> bool:
+    """A command's words name `mount` itself or a path on it."""
+    m = mount.rstrip("/")
+    return any(w.rstrip("/") == m or w.startswith(m + "/") for w in words)
+
+
+def _eject(app: WebApp, conn, volume_id: str) -> dict:
+    """Eject a drive the way Finder does (`diskutil eject`, rv-43). It writes no file: macOS unmounts the volume (and
+    the other volumes of its disk) and can then be unplugged. Refused for the Mac folder, for anything outside the
+    volumes root, and while a task (UI or terminal) names the drive; macOS itself refuses while files are open."""
+    if sys.platform != "darwin":
+        raise BadRequest("Eject works on macOS only")
+    drive = _drive_row(app, conn, volume_id)
+    if drive is None:
+        raise NotFound("unknown drive")
+    if drive.get("local"):
+        raise BadRequest("the Mac folder is not a drive; there is nothing to eject")
+    if not drive["mounted"] or not drive["mount"]:
+        raise Conflict("this drive is not connected")
+    mount = Path(drive["mount"])
+    root = Path(app.volumes_root).resolve()
+    if not mount.resolve().is_relative_to(root) or mount.resolve() == root:
+        raise BadRequest("only drives mounted under the volumes folder can be ejected")
+    name = drive.get("label") or mount.name
+    for s in app.runner.summaries():
+        if s["state"] == "running" and _uses_mount(s["argv"], str(mount)):
+            raise Conflict(f"a task is using {name}. Pause it or let it finish, then eject.")
+    for p in activity.list_processes() or []:
+        if _uses_mount(p.words, str(mount)):
+            raise Conflict(f"a run started in a terminal is using {name} (pid {p.pid}). Stop it, then eject.")
+    try:
+        result = subprocess.run(["diskutil", "eject", str(mount)], capture_output=True, text=True, timeout=60,
+                                check=False)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise Conflict(f"could not eject {name}: {exc}") from exc
+    if result.returncode != 0:
+        text = (result.stderr.strip() or result.stdout.strip() or "macOS did not eject it")
+        raise Conflict(f"could not eject {name}: {text}. Close any app using it (Finder windows, Lightroom) and try again.")
+    return {"ejected": str(mount), "label": name}
 
 
 def _run(app: WebApp, body: Any) -> dict:

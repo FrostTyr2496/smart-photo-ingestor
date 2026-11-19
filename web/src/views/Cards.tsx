@@ -12,6 +12,7 @@ import { hrefFor } from '../lib/route';
 import type { Drive } from '../lib/types';
 import { UnpluggedStrip, useUnpluggedEdge } from '../components/Unplugged';
 import { RenameTitle } from '../components/RenameTitle';
+import { EjectButton } from '../components/Eject';
 import { useDialogs } from '../lib/dialogs';
 import { useStore } from '../lib/store';
 import { cardHeadline, cardHint, TIER, TIER_HINT, TIER_ORDER, TIER_TONE, type Card, type CardCamera, type Tier } from '../lib/tiers';
@@ -461,6 +462,7 @@ function CardDetail({ id, onImport, onClear, onGreen }: { id: string; onImport: 
           </div>
           <div className="flex flex-wrap gap-2">
             <CardActions c={c} onImport={onImport} onClear={onClear} onGreen={onGreen} showFiles={false} />
+            {cardDrive && <EjectButton d={cardDrive} className="h-7 text-xs" />}
             <a href={hrefFor({ view: 'cards', id: null })} className="btn h-7 text-xs">
               <Icon name="back" size={12} /> All cards
             </a>

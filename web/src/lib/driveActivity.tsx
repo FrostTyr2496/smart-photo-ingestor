@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { busyDriveKeys, driveForRoute, driveHref, seeDrive, touchDrive, trackArrivals, unplugged, type SeenState } from './driveList';
 import { driveName } from './labels';
+import { takeExpected } from './eject';
 import { readPref, writePref } from './prefs';
 import type { Route } from './route';
 import { useStore } from './store';
@@ -48,7 +49,8 @@ export function DriveActivityProvider({ route, children }: { route: Route; child
   const busyRef = useRef<string[]>([]);
   useEffect(() => {
     if (!loaded) return;
-    const gone = unplugged(mountedRef.current, drives);
+    // An eject the user asked for is not news: no popup, no amber pulse (rv-43).
+    const gone = unplugged(mountedRef.current, drives).filter((d) => !takeExpected(d.key));
     const on = drives.filter((d) => d.mounted).map((d) => d.key);
     mountedRef.current = on;
     setLeft((l) => {

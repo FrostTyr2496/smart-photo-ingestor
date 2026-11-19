@@ -4,6 +4,7 @@ import { Disclosure, FsPill, Icon, RolePill, ROLE_DOT } from '../components/bits
 import { RefsDialog } from './RefsDialog';
 import { PULLED_MS } from '../components/Unplugged';
 import { openMenu } from '../lib/menu';
+import { EjectButton, useEjectBlock } from '../components/Eject';
 import { ProgressBar } from '../components/ProgressBar';
 import { extVM, FinishedRow, RunningCard, taskVM } from '../components/TaskCard';
 import { useDriveActivity } from '../lib/driveActivity';
@@ -56,7 +57,7 @@ function DriveRow({
   pulled?: boolean;
   onSeen: () => void;
 }) {
-  const { tasks, elsewhere, setIgnored, drives } = useStore();
+  const { tasks, elsewhere, setIgnored, drives, ejectDrive } = useStore();
   const isNew = !d.volume_id && !isCardDrive(d);
   const live = d.mounted ? liveStep(d, tasks, elsewhere) : null;
   // Being read or written right now (rv-35): the row is shaded with a moving sheen, and says what is happening.
@@ -82,11 +83,14 @@ function DriveRow({
   const used = size && free !== null ? (size - free) / size : null;
   const key = isNew ? 'new' : roleKey(d.role);
   const href = driveHref(d);
+  const ejectBlock = useEjectBlock(d);
+  const canEject = Boolean(d.volume_id && !d.local && d.mounted);
   const menu = (e: MouseEvent) =>
     openMenu(
       e,
       [
         { label: 'Open', icon: 'open', onSelect: () => (window.location.hash = href) },
+        canEject && { label: 'Eject', icon: 'eject', disabled: Boolean(ejectBlock), hint: ejectBlock ? 'In use' : undefined, onSelect: () => void ejectDrive(d) },
         'sep',
         {
           label: d.ignored ? 'Show in the list again' : 'Ignore (move under Ignored)',
@@ -170,16 +174,22 @@ function DriveRow({
         )}
         {d.mounted ? status.text : pulled ? 'Unplugged just now' : `Not connected${d.last_seen_at ? ` · last seen ${relTime(d.last_seen_at)}` : ''}`}
       </p>
-      {d.mounted && used !== null && (
+      {d.mounted && (used !== null || canEject) && (
         <div className="mt-2 flex items-center gap-2 pl-4">
           {/* A full card is normal; a full drive is not. */}
-          <ProgressBar
-            value={used}
-            size="xs"
-            tone={key === 'card' ? 'muted' : used > 0.95 ? 'err' : used > 0.85 ? 'maybe' : 'muted'}
-            label="Space used"
-          />
-          <span className="shrink-0 font-mono text-2xs text-faint">{d.free} free</span>
+          {used !== null ? (
+            <ProgressBar
+              value={used}
+              size="xs"
+              tone={key === 'card' ? 'muted' : used > 0.95 ? 'err' : used > 0.85 ? 'maybe' : 'muted'}
+              label="Space used"
+            />
+          ) : (
+            <span className="flex-1" />
+          )}
+          {d.free && <span className="shrink-0 font-mono text-2xs text-faint">{d.free} free</span>}
+          {/* Eject (rv-43): at the end of the space line, so it never crowds the name. */}
+          <EjectButton d={d} variant="icon" />
         </div>
       )}
     </a>

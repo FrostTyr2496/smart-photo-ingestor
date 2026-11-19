@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from photovault import cli, metadata, preview, volumes
+from photovault import activity, cli, metadata, preview, volumes
 from photovault.catalog import db, repo
 from photovault.config import load_config
 from photovault.geo import utc_text
@@ -698,6 +698,46 @@ def test_reveal_opens_drive_or_file_in_finder(srv: Client, monkeypatch: pytest.M
     monkeypatch.setattr(web.sys, "platform", "linux")
     assert srv.call("POST", "/api/volumes/vol-work/reveal", {})[0] == 400
     assert len(calls) == 2  # nothing ran for the refused requests
+
+
+def test_eject_runs_diskutil_and_refuses_busy_or_unsafe_drives(srv: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    """rv-43: Eject is Finder's eject; it is refused while a task uses the drive, and macOS's refusal is passed on."""
+    calls: list[list[str]] = []
+    outcome = {"code": 0, "err": ""}
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, outcome["code"], "", outcome["err"])
+
+    procs: list = []
+    monkeypatch.setattr(web.sys, "platform", "darwin")
+    monkeypatch.setattr(web.subprocess, "run", fake_run)
+    monkeypatch.setattr(web.activity, "list_processes", lambda: procs)
+    mount = srv.root / "WORK"
+
+    assert srv.call("POST", "/api/volumes/vol-work/eject", {}) == (200, {"ejected": str(mount), "label": "WORK"})
+    assert calls[-1] == ["diskutil", "eject", str(mount)]
+
+    outcome.update(code=1, err="Volume WORK failed to eject: in use by Finder")
+    status, body = srv.call("POST", "/api/volumes/vol-work/eject", {})
+    assert status == 409 and "in use by Finder" in body["error"]
+
+    procs.append(activity.EngineProcess(pid=77, ppid=1, elapsed_s=5, words=["hash", str(mount)], text=""))
+    n = len(calls)
+    status, body = srv.call("POST", "/api/volumes/vol-work/eject", {})
+    assert status == 409 and "pid 77" in body["error"]
+    assert srv.call("POST", "/api/volumes/vol-leg/eject", {})[0] == 409  # not plugged in
+    assert srv.call("POST", "/api/volumes/nope/eject", {})[0] == 404
+    assert srv.call("GET", "/api/volumes/vol-work/eject")[0] == 405
+    monkeypatch.setattr(web.sys, "platform", "linux")
+    assert srv.call("POST", "/api/volumes/vol-work/eject", {})[0] == 400
+    assert len(calls) == n  # nothing ran for the refused requests
+
+
+def test_uses_mount_matches_the_drive_or_a_path_on_it() -> None:
+    assert web._uses_mount(["hash", "/mnt/A"], "/mnt/A")
+    assert web._uses_mount(["ingest", "--source", "/mnt/A/DCIM"], "/mnt/A/")
+    assert not web._uses_mount(["hash", "/mnt/AB"], "/mnt/A")
 
 
 def test_meta_scanned_flag_follows_group_meta(srv: Client) -> None:

@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { api } from './api';
 import { readPref, writePref } from './prefs';
 import { argvWords, displayLabel, driveName, isHash, parseRoute, workflowSteps, liveStep, STEP_NAME, type WorkflowStep } from './labels';
+import { cancelUnplug, expectUnplug } from './eject';
 import type { Drive, ExtRun, RecentRun, StaleJob, TaskDetail, TaskRec, TaskSummary, CardInfo, FileEvt } from './types';
 
 /** Files a running task's card lists (rv-34). */
@@ -68,6 +69,10 @@ interface Store {
   setIgnored: (d: Drive, ignored: boolean) => Promise<void>;
   /** Give a set-up drive a new nickname (catalog only; the volume on disk keeps its name). True when saved. */
   renameDrive: (d: Drive, label: string) => Promise<boolean>;
+  /** Eject a drive like Finder (rv-43). */
+  ejectDrive: (d: Drive) => Promise<boolean>;
+  /** Drive keys being ejected right now. */
+  ejecting: Set<string>;
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -502,6 +507,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [toast],
   );
 
+  const [ejecting, setEjecting] = useState<Set<string>>(new Set());
+  const ejectDrive = useCallback(
+    async (d: Drive) => {
+      if (!d.volume_id) return false;
+      const key = d.key;
+      expectUnplug(key);
+      setEjecting((s) => new Set(s).add(key));
+      try {
+        await api('POST', `/api/volumes/${encodeURIComponent(d.volume_id)}/eject`, {});
+        toast(`Ejected ${driveName(d)}. You can unplug it now.`);
+        loadDrives().catch(() => {});
+        return true;
+      } catch (err) {
+        cancelUnplug(key);
+        toast((err as Error).message, 'err');
+        return false;
+      } finally {
+        setEjecting((s) => {
+          const n = new Set(s);
+          n.delete(key);
+          return n;
+        });
+      }
+    },
+    [toast, loadDrives],
+  );
+
   const value: Store = {
     loaded,
     drives,
@@ -528,6 +560,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     ask,
     setIgnored,
     renameDrive,
+    ejectDrive,
+    ejecting,
   };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

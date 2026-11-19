@@ -560,3 +560,17 @@ Rules for every task:
     role pill no longer wraps.
   - Verify: `cd web && npm run typecheck && npm test && npm run build`.
   - Result (2026-11-19): typecheck clean; 234 web tests pass; build committed. Not seen in a browser.
+
+- [x] 43. Eject a drive from the sidebar and from its page
+  - ID: rv-43 (user ask, 2026-11-19; D-126)
+  - `POST /api/volumes/<id>/eject` runs `diskutil eject <mount>`, as Finder's Eject does: macOS unmounts the volume
+    (and the other volumes of the same disk) and writes no file. Refused: off macOS (400), the Mac folder (400), a
+    mount outside the volumes root (400), not connected (409), while a UI task or a terminal engine run names the
+    drive or a path on it (409); macOS's own refusal (files open) comes back as 409 with its text.
+  - UI: a small ⏏ at the end of each connected drive's space line in the sidebar, Eject in the row's right-click / ⋯
+    menu, and an Eject button in the drive page's and card page's header (`web/src/components/Eject.tsx`). Disabled
+    with the reason while a task uses the drive. On success: "Ejected X. You can unplug it now." The unplug notice
+    (rv-38) skips a drive ejected in the last two minutes (`web/src/lib/eject.ts`), so no warning or amber pulse.
+  - Verify: `uv run pytest tests/test_web_api.py -q -k "eject or uses_mount"`; `cd web && npm run typecheck && npm test && npm run build`.
+  - Result (2026-11-19): 2 server tests pass (both new); 235 web tests pass (1 new); build committed. Needs a
+    `serve` restart for the endpoint. Not tried on a real drive (agents never act on mounts).
