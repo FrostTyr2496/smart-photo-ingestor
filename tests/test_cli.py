@@ -329,3 +329,27 @@ def test_a_batch_names_files_as_a_full_import_would(env, capsys, monkeypatch) ->
 def test_limit_must_be_positive(env, capsys) -> None:
     code = cli.main(["--json", "ingest", "--source", str(env["card"]), "--target", str(env["work"]), "--limit", "0"])
     assert code != 0
+
+
+def test_volumes_assign_change_role(capsys, env) -> None:
+    drive = env["vols"] / "OLD"
+    drive.mkdir()
+    (drive / "keep.jpg").write_bytes(b"x")
+    code, lines = run(capsys, "volumes", "assign", str(drive), "--role", "LEGACY")
+    legacy_id = result(lines)["volume_id"]
+    code, lines = run(capsys, "volumes", "assign", str(drive), "--role", "WORKING")
+    assert code == 1 and "--change-role" in lines[-1]["message"]
+    code, lines = run(capsys, "volumes", "assign", str(drive), "--role", "WORKING", "--change-role")
+    assert code == 0 and result(lines)["volume_id"] == legacy_id
+    assert volumes.read_marker(drive) == legacy_id
+    assert (drive / "keep.jpg").read_bytes() == b"x"
+    conn = db.connect(load_config().catalog_path)
+    row = conn.execute("SELECT role, marker_id FROM volumes WHERE volume_id = ?", (legacy_id,)).fetchone()
+    assert (row["role"], row["marker_id"]) == ("WORKING", legacy_id)
+    code, lines = run(capsys, "volumes", "assign", str(drive), "--role", "MASTER", "--change-role")
+    assert code == 1 and "LEGACY" in lines[-1]["message"]
+
+
+def test_volumes_assign_change_role_refuses_cards(capsys, env) -> None:
+    code, lines = run(capsys, "volumes", "assign", str(env["card"]), "--role", "WORKING", "--change-role")
+    assert code == 1

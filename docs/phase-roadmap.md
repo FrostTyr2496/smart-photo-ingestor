@@ -193,7 +193,7 @@ companion.
 |---|---|---|---|
 | P5e.1 | im-1 two writable copies are green (**done 2026-11-18**) | — | — |
 | P5e.2 | im-3 import in small batches (`--limit`) (**done 2026-11-18**) | — | — |
-| P5e.3 | im-2 LEGACY → WORKING role change **[stronger]** | — | — |
+| P5e.3 | im-2 LEGACY → WORKING role change (**done 2026-11-18**) | — | — |
 | P5e.4 | im-4 import from the Cards view: dry-run plan, then apply **[stronger]** | im-1, im-3 | **[user]** visual check |
 | P5e.5 | im-5 make Backup Plus a working drive | im-2 | **[user]** |
 | P5e.6 | im-6 test imports, small to full | im-1, im-3, im-4 | **[user]**, X9 Pro plugged in |

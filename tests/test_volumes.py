@@ -223,3 +223,57 @@ def test_diskutil_info_never_caches_an_injected_runner_or_a_failure(tmp_path: Pa
     volumes._diskutil_info(tmp_path, fail)
     volumes._diskutil_info(tmp_path, fail)
     assert len(calls) == 2
+
+
+def _legacy(conn, tmp_path: Path, name: str = "old"):
+    m = _mount(tmp_path, name)
+    vid = volumes.register_volume(conn, _probe(m, f"U-{name}", name=name), role="LEGACY")
+    return m, vid
+
+
+def test_change_role_keeps_id_and_instances(conn, tmp_path: Path) -> None:
+    m, vid = _legacy(conn, tmp_path)
+    conn.execute(
+        "INSERT INTO instances (volume_id, rel_path, rel_path_key, size, mtime_ns, kind, state, last_seen_at) "
+        "VALUES (?, 'a.jpg', 'a.jpg', 1, 1, 'jpg', 'indexed', 'now')", (vid,))
+    got = volumes.change_role(conn, _probe(m, "U-old", name="old"), "WORKING")
+    assert got == vid
+    row = repo.find_volume(conn, marker_id=vid)
+    assert row["role"] == "WORKING" and row["marker_id"] == vid and row["da_volume_uuid"] == "U-old"
+    assert volumes.read_marker(m) == vid
+    assert conn.execute("SELECT COUNT(*) FROM instances WHERE volume_id = ?", (vid,)).fetchone()[0] == 1
+    # rerun is refused (no longer LEGACY) and a re-probe finds it as WORKING
+    with pytest.raises(volumes.RoleChangeRefused, match="not LEGACY"):
+        volumes.change_role(conn, _probe(m, "U-old"), "MASTER")
+
+
+def test_change_role_refusals(conn, tmp_path: Path) -> None:
+    card = _mount(tmp_path, "card", card=True)
+    with pytest.raises(volumes.RoleChangeRefused, match="card"):
+        volumes.change_role(conn, _probe(card, "U-C"), "WORKING")
+    m, vid = _legacy(conn, tmp_path)
+    with pytest.raises(volumes.RoleChangeRefused, match="WORKING or MASTER"):
+        volumes.change_role(conn, _probe(m, "U-old"), "LEGACY")
+    with pytest.raises(volumes.RoleChangeRefused, match="no volume UUID"):
+        volumes.change_role(conn, _probe(m, None), "WORKING")
+    with pytest.raises(volumes.RoleChangeRefused, match="not in the catalog"):
+        volumes.change_role(conn, _probe(_mount(tmp_path, "x"), "U-x"), "WORKING")
+    cid = volumes.register_volume(conn, _probe(card, "U-C"))
+    assert conn.execute("SELECT role FROM volumes WHERE volume_id=?", (cid,)).fetchone()[0] == "CARD"
+    for state in ("running", "planned", "paused"):
+        conn.execute("INSERT INTO jobs (kind, target_volume_id, state, created_at) VALUES ('index_volume', ?, ?, 'now')",
+                     (vid, state))
+        with pytest.raises(volumes.RoleChangeRefused, match=state):
+            volumes.change_role(conn, _probe(m, "U-old"), "WORKING")
+        conn.execute("DELETE FROM jobs")
+    volumes.write_marker(m, "someone-else")
+    with pytest.raises(volumes.RoleChangeRefused, match="different volume id"):
+        volumes.change_role(conn, _probe(m, "U-old"), "WORKING")
+    assert repo.find_volume(conn, da_volume_uuid="U-old")["role"] == "LEGACY"
+
+
+def test_assign_error_names_the_flag(conn, tmp_path: Path) -> None:
+    m, _ = _legacy(conn, tmp_path)
+    volumes.write_marker(m, "m-1")
+    with pytest.raises(ValueError, match="--change-role"):
+        volumes.register_volume(conn, _probe(m, "U-old"), role="WORKING")

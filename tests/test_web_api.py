@@ -371,6 +371,8 @@ def test_run_rejects_unknown_and_bad_arguments(srv: Client) -> None:
 @pytest.mark.parametrize("cmd, args, expected", [
     ("assign", {"mount": "/m", "role": "WORKING", "label": "WORK"},
      ["volumes", "assign", "/m", "--role", "WORKING", "--label", "WORK"]),
+    ("assign", {"mount": "/m", "role": "WORKING", "change_role": True},
+     ["volumes", "assign", "/m", "--role", "WORKING", "--change-role"]),
     ("ingest", {"source": "/c", "target": "/t", "name": "Night", "dry_run": True},
      ["ingest", "--source", "/c", "--target", "/t", "--name", "Night", "--dry-run"]),
     ("ingest", {"source": "/c", "target": "/t", "limit": 10, "dry_run": True},

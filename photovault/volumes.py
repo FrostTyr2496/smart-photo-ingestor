@@ -219,7 +219,8 @@ def register_volume(
     row = repo.find_volume(conn, marker_id=probe.marker_id, da_volume_uuid=probe.da_volume_uuid)
     if row is not None:
         if role is not None and role != row["role"]:
-            raise ValueError(f"volume {row['label']!r} is already registered as {row['role']}, not {role}")
+            hint = " (to change a LEGACY drive to WORKING or MASTER, pass --change-role)" if row["role"] == "LEGACY" else ""
+            raise ValueError(f"volume {row['label']!r} is already registered as {row['role']}, not {role}{hint}")
         conn.execute(
             "UPDATE volumes SET last_seen_at = ?, last_mount_path = ? WHERE volume_id = ?",
             (repo.utcnow(), str(probe.mount), row["volume_id"]),
@@ -253,5 +254,51 @@ def register_volume(
         marker_id=probe.marker_id if role in ("WORKING", "MASTER") else None,
         capacity_bytes=probe.capacity_bytes,
         mount_path=probe.mount,
+    )
+    return volume_id
+
+
+class RoleChangeRefused(ValueError):
+    """Raised when a LEGACY volume cannot be turned into a WORKING or MASTER one."""
+
+
+def change_role(conn: sqlite3.Connection, probe: VolumeProbe, role: str) -> str:
+    """Turn a registered LEGACY volume into WORKING or MASTER (im-2, D-088). Does not commit.
+
+    The volume keeps its ``volume_id`` so every indexed instance keeps its row. The marker written to the drive
+    holds that same id and ``volumes.marker_id`` is set to it. Nothing on the drive moves or is renamed.
+    Refused for CARD volumes, folder volumes, unregistered volumes, a volume that is not LEGACY, a volume with a
+    job that is running, planned or paused, and a drive whose marker holds another id.
+    """
+    if role not in ("WORKING", "MASTER"):
+        raise RoleChangeRefused(f"a LEGACY drive can only become WORKING or MASTER, not {role!r}")
+    if probe.looks_like_card:
+        raise RoleChangeRefused(f"{probe.mount} looks like a camera card; cards never change role")
+    if probe.da_volume_uuid is None:
+        raise RoleChangeRefused(f"{probe.mount} has no volume UUID (a folder?), so it cannot change role")
+    row = conn.execute("SELECT * FROM volumes WHERE da_volume_uuid = ?", (probe.da_volume_uuid,)).fetchone()
+    if row is None:
+        raise RoleChangeRefused(f"{probe.mount} is not in the catalog; register it first")
+    if row["role"] == "CARD":
+        raise RoleChangeRefused(f"{row['label']!r} is a CARD volume; cards never change role")
+    if row["role"] != "LEGACY":
+        raise RoleChangeRefused(f"{row['label']!r} is {row['role']}, not LEGACY; only LEGACY drives change role")
+    busy = conn.execute(
+        "SELECT job_id, kind, state FROM jobs WHERE (source_volume_id = ? OR target_volume_id = ?) "
+        "AND state IN ('running','planned','paused') LIMIT 1", (row["volume_id"], row["volume_id"])).fetchone()
+    if busy is not None:
+        raise RoleChangeRefused(
+            f"job {busy['job_id']} ({busy['kind']}) is {busy['state']} on {row['label']!r}; finish or cancel it first")
+    volume_id = row["volume_id"]
+    if probe.marker_id is not None and probe.marker_id != volume_id:
+        raise RoleChangeRefused(f"{probe.mount / MARKER_NAME} already holds a different volume id; refusing to replace it")
+    other = conn.execute("SELECT 1 FROM volumes WHERE marker_id = ? AND volume_id != ?",
+                         (volume_id, volume_id)).fetchone()
+    if other is not None:
+        raise RoleChangeRefused("another volume already uses this id as its marker")
+    write_marker(probe.mount, volume_id)
+    conn.execute(
+        "UPDATE volumes SET role = ?, marker_id = ?, last_seen_at = ?, last_mount_path = ? WHERE volume_id = ?",
+        (role, volume_id, repo.utcnow(), str(probe.mount), volume_id),
     )
     return volume_id

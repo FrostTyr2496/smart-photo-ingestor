@@ -41,7 +41,7 @@ target are skipped (`skipped_dup`, D-036), so a batch is never copied twice.
   - Result (2026-11-18): `uv run pytest tests/test_cards.py -q` → 13 passed; web 109 passed. Yellow is labelled
     "One copy" in the UI (`web/src/lib/tiers.ts`, `labels.ts`); `tests/test_web_api.py` reason string updated.
 
-- [ ] 2. **[stronger]** A LEGACY drive becomes WORKING (or MASTER)
+- [x] 2. **[stronger]** A LEGACY drive becomes WORKING (or MASTER)
   - ID: im-2 (D-088)
   - `volumes.change_role(conn, probe, role) -> str` (does not commit): only LEGACY → WORKING or MASTER. The volume
     keeps its `volume_id`, so its indexed files keep their rows; the marker written to the drive holds that id and
@@ -51,6 +51,8 @@ target are skipped (`skipped_dup`, D-036), so a batch is never copied twice.
     naming the flag). Web `assign` accepts `change_role`. Nothing on the drive moves or is renamed (rule 7); new
     imports land under `working_subdir`.
   - Verify: `uv run pytest tests/test_volumes.py tests/test_cli.py -q`
+  - Result (2026-11-18): `uv run pytest -q` → 697 passed, 9 skipped. Also fixed: plain `volumes assign` on an
+    already-registered drive of another role now errors before writing a marker (it used to write one first).
 
 - [x] 3. Import in small batches
   - ID: im-3 (D-090)

@@ -72,6 +72,24 @@ def cmd_volumes_assign(args, cfg, emit) -> int:
     if p.looks_like_card:
         emit.emit("error", code="card", message=f"{mount} is a camera card; cards are registered automatically by ingest")
         return EXIT_ERROR
+    if getattr(args, "change_role", False):
+        if args.role == "LEGACY":
+            emit.emit("error", code="change_role", message="--change-role turns a LEGACY drive into WORKING or MASTER")
+            return EXIT_ERROR
+        try:
+            with repo.transaction(conn):
+                vid = volumes.change_role(conn, p, args.role)
+        except (volumes.RoleChangeRefused, FileExistsError, OSError) as exc:
+            emit.emit("error", code="change_role", message=str(exc))
+            return EXIT_ERROR
+        emit.emit("result", volume_id=vid, role=args.role, label=p.name, mount=str(mount), changed_role=True)
+        return EXIT_OK
+    known = repo.find_volume(conn, marker_id=p.marker_id, da_volume_uuid=p.da_volume_uuid)
+    if known is not None and known["role"] != args.role:
+        hint = " (pass --change-role to turn a LEGACY drive into WORKING or MASTER)" if known["role"] == "LEGACY" else ""
+        emit.emit("error", code="role", message=f"volume {known['label']!r} is already registered as "
+                                                 f"{known['role']}, not {args.role}{hint}")
+        return EXIT_ERROR
     if args.role in ("WORKING", "MASTER") and p.marker_id is None:
         volumes.write_marker(mount, str(uuid.uuid4()))
         p = volumes.probe(mount)
@@ -465,6 +483,8 @@ def build_parser() -> argparse.ArgumentParser:
     va.add_argument("mount")
     va.add_argument("--role", required=True, choices=["WORKING", "MASTER", "LEGACY"])
     va.add_argument("--label")
+    va.add_argument("--change-role", action="store_true", dest="change_role",
+                    help="turn a registered LEGACY drive into WORKING or MASTER (keeps its files and id)")
     va.set_defaults(func=cmd_volumes_assign)
 
     ing = sub.add_parser("ingest", help="copy a card onto a WORKING drive with verified copies")

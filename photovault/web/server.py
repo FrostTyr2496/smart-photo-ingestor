@@ -257,12 +257,14 @@ def _allow_only(args: dict, allowed: set[str]) -> None:
 def build_argv(cmd: str, args: dict) -> list[str]:
     """Map a whitelisted web command and its JSON arguments to CLI words. Anything else is a 400."""
     if cmd == "assign":
-        _allow_only(args, {"mount", "role", "label"})
+        _allow_only(args, {"mount", "role", "label", "change_role"})
         mount = _path_arg(args, "mount")
         role = _text_arg(args, "role")
         if role not in ROLE_CHOICES:
             raise BadRequest(f"role must be one of {', '.join(ROLE_CHOICES)}")
         argv = ["volumes", "assign", mount, "--role", role]
+        if _bool_arg(args, "change_role"):
+            argv.append("--change-role")
         label = _text_arg(args, "label", required=False)
         return argv + (["--label", label] if label else [])
     if cmd == "ingest":
