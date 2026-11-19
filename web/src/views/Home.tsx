@@ -56,15 +56,16 @@ function DeviceBlock({ dev, idle }: { dev: Dev; idle: boolean }) {
     <article className={`card ${idle ? 'p-3.5' : 'p-4'}`}>
       <div className="flex items-center gap-2.5">
         <RolePill role={d?.role ?? null} isNew={!d} text={d ? undefined : 'Folder'} />
-        <h3 className="min-w-0 flex-1 truncate font-semibold">{name}</h3>
+        {href ? (
+          <a href={href} title={`Open ${name}`} className="min-w-0 flex-1 truncate font-semibold hover:underline">
+            {name}
+          </a>
+        ) : (
+          <h3 className="min-w-0 flex-1 truncate font-semibold">{name}</h3>
+        )}
         {!href && d && !d.volume_id && (
           <a href={hrefFor({ view: 'setup', key: d.key })} className="btn-primary h-7 px-2.5 text-xs" aria-label={`Set up ${name}`}>
             Set up
-          </a>
-        )}
-        {href && (
-          <a href={href} className="btn h-7 px-2.5 text-xs" aria-label={`Open ${name}`}>
-            Open
           </a>
         )}
       </div>
@@ -107,17 +108,24 @@ function DriveChip({ mount, drives }: { mount: string; drives: Drive[] }) {
   const d = drives.find((x) => x.mount && sameMount(x.mount, mount)) ?? null;
   const name = d ? driveName(d) : baseName(mount) || 'drive';
   const href = d && isCardDrive(d) ? hrefFor({ view: 'cards', id: d.volume_id }) : d && d.volume_id ? hrefFor({ view: 'drive', id: d.volume_id }) : null;
-  return (
-    <div className="flex min-w-0 items-center gap-2">
+  const body = (
+    <>
       <RolePill role={d?.role ?? null} isNew={!d} text={d ? undefined : 'Folder'} />
-      <span className="min-w-0 truncate text-sm font-semibold">{name}</span>
+      <span className={`min-w-0 truncate text-sm font-semibold ${href ? 'group-hover/chip:underline' : ''}`}>{name}</span>
       {d?.mounted && d.free && <span className="shrink-0 text-xs text-muted">{d.free} free</span>}
-      {href && (
-        <a href={href} className="btn h-6 px-2 text-2xs" aria-label={`Open ${name}`}>
-          Open
-        </a>
-      )}
-    </div>
+    </>
+  );
+  // The chip itself opens the drive or card (rv-35): no separate Open button.
+  return href ? (
+    <a
+      href={href}
+      title={`Open ${name}`}
+      className="group/chip -mx-1.5 flex min-w-0 items-center gap-2 rounded-lg px-1.5 py-1 hover:bg-raised/70"
+    >
+      {body}
+    </a>
+  ) : (
+    <div className="flex min-w-0 items-center gap-2">{body}</div>
   );
 }
 

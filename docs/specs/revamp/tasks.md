@@ -464,3 +464,15 @@ Rules for every task:
   - Verify: `uv run pytest tests/test_activity.py -q`; `cd web && npm run typecheck && npm test && npm run build`.
   - Result (2026-11-19): 28 activity tests pass (1 new); typecheck clean; 219 web tests pass (4 new); build
     committed; `uv run pytest -q` → 796 passed, 4 skipped. Not seen in a browser.
+
+- [x] 35. Drives open from their own chips; busy drives shaded in the sidebar
+  - ID: rv-35 (user ask, 2026-11-19; D-118)
+  - Tasks: the Open buttons are gone from a run's drive header and from the idle-drive cards; the drive chip (role,
+    name, free space) or the drive's name is the link, underlined on hover.
+  - Sidebar: a drive a live task (UI or terminal) is reading or writing gets a tint with a slow sheen passing over
+    it (accent = reading, green = writing; still under reduced motion), and its status line says what is happening,
+    e.g. "Copying to Backup Plus" on the source, "Receiving from Card A" on the target, both on a drive that is
+    written by an import and read by its backup. Hash / index / metadata / card check read; a card clear writes; a
+    dry run only reads its source. Pure rule `driveIO` in `web/src/lib/labels.ts`. The "New" glow wins over it.
+  - Verify: `cd web && npm run typecheck && npm test && npm run build`.
+  - Result (2026-11-19): typecheck clean; 222 web tests pass (3 new); build committed. Not seen in a browser.

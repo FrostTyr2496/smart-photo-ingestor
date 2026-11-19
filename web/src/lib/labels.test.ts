@@ -12,6 +12,7 @@ import {
   shortLine,
   splitMessage,
   splitPath,
+  driveIO,
   statTiles,
   fileState,
   stepView,
@@ -298,5 +299,34 @@ describe('running-task files and stats (rv-34)', () => {
     expect(fileState('committed', 'card_clear').label).toBe('Deleted');
     expect(fileState('skipped_dup', 'backup')).toEqual({ label: 'Already there', tone: 'muted' });
     expect(fileState('failed', 'backup').tone).toBe('err');
+  });
+});
+
+describe('driveIO (rv-35)', () => {
+  const card = drive({ mount: '/mnt/CARD', label: 'CARD', role: 'CARD', key: 'c', volume_id: 'c' });
+  const ssd = drive({ mount: '/mnt/SSD', label: 'SSD', role: 'WORKING', key: 's', volume_id: 's' });
+  const bak = drive({ mount: '/mnt/BAK', label: 'BAK', role: 'WORKING', key: 'b', volume_id: 'b' });
+  const all = [card, ssd, bak];
+  const run = (argv: string[], over: Partial<TaskRec> = {}) => task({ argv: ['--json', ...argv], final: false, ...over });
+  const imp = run(['ingest', '--source', '/mnt/CARD', '--target', '/mnt/SSD']);
+  const cp = run(['backup', '--card', 'x', '--from', '/mnt/SSD', '--to', '/mnt/BAK', '--follow', '3']);
+  it('an import reads the card and writes the target; its backup reads that target too', () => {
+    expect(driveIO(card, [imp, cp], [], all)).toEqual([{ mode: 'read', text: 'Copying to SSD' }]);
+    expect(driveIO(ssd, [imp, cp], [], all)).toEqual([
+      { mode: 'write', text: 'Receiving from CARD' },
+      { mode: 'read', text: 'Copying to BAK' },
+    ]);
+    expect(driveIO(bak, [imp, cp], [], all)).toEqual([{ mode: 'write', text: 'Receiving from SSD' }]);
+  });
+  it('a dry run reads its source only; finished tasks and unmounted drives count for nothing', () => {
+    const dry = run(['ingest', '--source', '/mnt/CARD', '--target', '/mnt/SSD', '--dry-run']);
+    expect(driveIO(card, [dry], [], all)).toEqual([{ mode: 'read', text: 'Planning a copy' }]);
+    expect(driveIO(ssd, [dry], [], all)).toEqual([]);
+    expect(driveIO(card, [{ ...imp, final: true }], [], all)).toEqual([]);
+    expect(driveIO({ ...card, mounted: false }, [imp], [], all)).toEqual([]);
+  });
+  it('terminal runs count; a hash reads', () => {
+    const ext = { pid: 9, words: ['hash', '/mnt/BAK'], started_at: '2026-11-19T00:00:00Z' };
+    expect(driveIO(bak, [], [ext], all)).toEqual([{ mode: 'read', text: 'Hashing' }]);
   });
 });

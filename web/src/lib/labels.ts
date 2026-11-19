@@ -420,6 +420,47 @@ export function liveStep(d: Drive, tasks: TaskRec[], elsewhere: ExtRun[]): { ste
   return null;
 }
 
+/** What one running command does to one drive it names (rv-35): read it or write it, in words. */
+export interface DriveIO {
+  mode: 'read' | 'write';
+  text: string;
+}
+
+/**
+ * Every live task's effect on drive `d`: an import or backup reads its source and writes its target (a dry run only
+ * reads the source), hash / index / metadata / card check read, a card clear writes. Empty when the drive is idle.
+ */
+export function driveIO(d: Drive, tasks: TaskRec[], elsewhere: ExtRun[], drives: Drive[]): DriveIO[] {
+  if (!d.mounted || !d.mount) return [];
+  const out: DriveIO[] = [];
+  const name = (p: string | undefined) => mountName(p, drives);
+  const look = (words: string[]) => {
+    const key = commandKey(words);
+    const dry = words.includes('--dry-run');
+    const mounts = taskMounts(words);
+    const at = mounts.findIndex((m) => sameMount(m, d.mount));
+    if (at < 0) return;
+    if (key === 'ingest' || key === 'backup') {
+      if (at === 0) out.push({ mode: 'read', text: dry ? 'Planning a copy' : `Copying to ${name(mounts[1])}` });
+      else if (!dry) out.push({ mode: 'write', text: `Receiving from ${name(mounts[0])}` });
+      return;
+    }
+    const READS: Record<string, string> = {
+      hash: 'Hashing',
+      index: 'Indexing',
+      meta_scan: 'Reading metadata',
+      meta_sidecars: 'Reading sidecars',
+      card_check: 'Checking',
+      'card-status': 'Checking',
+    };
+    if (key === 'card_clear') out.push(dry ? { mode: 'read', text: 'Planning a clear' } : { mode: 'write', text: 'Clearing' });
+    else if (READS[key]) out.push({ mode: 'read', text: READS[key] });
+  };
+  for (const t of tasks) if (!t.final) look(argvWords(t.argv));
+  for (const e of elsewhere) look(e.words || []);
+  return out;
+}
+
 /** "Running · Hash", or "Last run: Hash · 2 hours ago", for a drive in the sidebar. */
 export function driveStatus(d: Drive, live: ReturnType<typeof liveStep>): { text: string; tone: 'running' | 'warn' | 'plain' } {
   if (live) return { text: `Running · ${STEP_NAME[live.step]}`, tone: 'running' };

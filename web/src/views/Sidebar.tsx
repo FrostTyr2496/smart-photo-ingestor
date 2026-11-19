@@ -19,7 +19,7 @@ import {
   type TypeKey,
 } from '../lib/driveList';
 import { parseSize, relTime } from '../lib/format';
-import { argvWords, driveName, driveStatus, flagValue, isCardDrive, liveStep, newestAssignTask, ROLE_WORD, roleKey, staleText } from '../lib/labels';
+import { argvWords, driveIO, driveName, driveStatus, flagValue, isCardDrive, liveStep, newestAssignTask, ROLE_WORD, roleKey, staleText } from '../lib/labels';
 import { rise, springs } from '../lib/motion';
 import { usePref } from '../lib/prefs';
 import { hrefFor, type Route } from '../lib/route';
@@ -39,9 +39,12 @@ const driveHref = (d: Drive): string =>
   isCardDrive(d) ? hrefFor({ view: 'cards', id: d.volume_id }) : d.volume_id ? hrefFor({ view: 'drive', id: d.volume_id }) : hrefFor({ view: 'setup', key: d.key });
 
 function DriveRow({ d, active, fresh, onSeen }: { d: Drive; active: boolean; fresh: boolean; onSeen: () => void }) {
-  const { tasks, elsewhere, setIgnored } = useStore();
+  const { tasks, elsewhere, setIgnored, drives } = useStore();
   const isNew = !d.volume_id && !isCardDrive(d);
   const live = d.mounted ? liveStep(d, tasks, elsewhere) : null;
+  // Being read or written right now (rv-35): the row is shaded with a moving sheen, and says what is happening.
+  const io = driveIO(d, tasks, elsewhere, drives);
+  const writing = io.some((x) => x.mode === 'write');
   const assign = isNew ? newestAssignTask(tasks, d.mount) : null;
   const assignRole = assign ? ROLE_WORD[flagValue(argvWords(assign.argv), '--role') ?? ''] || 'a drive' : '';
   const status = isNew
@@ -53,7 +56,9 @@ function DriveRow({ d, active, fresh, onSeen }: { d: Drive; active: boolean; fre
             text: d.local ? `The folder ${d.mount} on this Mac. Click to use it as a working drive.` : 'Not set up · click to set it up',
             tone: 'plain' as const,
           }
-    : driveStatus(d, live);
+    : io.length
+      ? { text: io.map((x) => x.text).join(' · '), tone: 'running' as const }
+      : driveStatus(d, live);
   const size = parseSize(d.size);
   const free = parseSize(d.free);
   const used = size && free !== null ? (size - free) / size : null;
@@ -69,14 +74,16 @@ function DriveRow({ d, active, fresh, onSeen }: { d: Drive; active: boolean; fre
       className={`group relative block rounded-xl border px-3 py-2.5 transition-[border-color,background-color,box-shadow] duration-700 ${
         fresh
           ? 'border-accent/60 bg-accent/[0.09] shadow-[0_0_0_3px_rgb(var(--c-accent)/0.14)]'
-          : active
+          : io.length
+            ? `drive-busy ${writing ? 'drive-busy-write border-go/45' : 'border-accent/45'}`
+            : active
             ? 'border-accent/40 bg-accent/[0.07]'
             : 'border-line bg-raised/30 hover:border-line-strong hover:bg-raised/60'
       } ${d.mounted ? '' : 'opacity-60 hover:opacity-90'} ${isNew && !fresh ? 'border-dashed' : ''}`}
     >
       {active && <motion.span layoutId="drive-active" transition={springs.snappy} className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-accent" />}
       <div className="flex items-center gap-2">
-        <span className={`h-2 w-2 shrink-0 rounded-full ${ROLE_DOT[key]} ${live ? 'live-dot' : ''}`} aria-hidden="true" />
+        <span className={`h-2 w-2 shrink-0 rounded-full ${ROLE_DOT[key]} ${live || io.length ? 'live-dot' : ''}`} aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate text-sm font-medium" title={d.mount}>
           {driveName(d)}
         </span>
@@ -116,7 +123,9 @@ function DriveRow({ d, active, fresh, onSeen }: { d: Drive; active: boolean; fre
         <FsPill fs={d.fs} />
         <RolePill role={d.role} isNew={isNew} />
       </div>
-      <p className={`mt-1 truncate pl-4 text-xs ${status.tone === 'running' ? 'text-accent' : status.tone === 'warn' ? 'text-maybe' : 'text-muted'}`}>
+      <p
+        title={io.length ? status.text : undefined}
+        className={`mt-1 truncate pl-4 text-xs ${io.length && writing ? 'text-go' : status.tone === 'running' ? 'text-accent' : status.tone === 'warn' ? 'text-maybe' : 'text-muted'}`}>
         {d.mounted ? status.text : `Not connected${d.last_seen_at ? ` · last seen ${relTime(d.last_seen_at)}` : ''}`}
       </p>
       {d.mounted && used !== null && (

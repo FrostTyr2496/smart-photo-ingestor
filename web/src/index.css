@@ -202,6 +202,26 @@
   animation: live-dot 1.6s ease-in-out infinite;
 }
 
+/* A drive being read (accent) or written (green) right now: a tint with a slow sheen passing over it (rv-35). */
+.drive-busy {
+  --busy: var(--c-accent);
+  background-color: rgb(var(--busy) / 0.08);
+  background-image: linear-gradient(100deg, transparent 30%, rgb(var(--busy) / 0.14) 50%, transparent 70%);
+  background-size: 250% 100%;
+  animation: drive-busy 2.8s linear infinite;
+}
+.drive-busy-write {
+  --busy: var(--c-go);
+}
+@keyframes drive-busy {
+  from {
+    background-position: 125% 0;
+  }
+  to {
+    background-position: -125% 0;
+  }
+}
+
 /* The ambient glow drifts slowly so the page never looks frozen. */
 @keyframes glow-drift {
   0%,
@@ -221,6 +241,7 @@
   .bar-flow::after,
   .ring-pulse,
   .live-dot,
+  .drive-busy,
   .glow-drift {
     animation: none;
   }
