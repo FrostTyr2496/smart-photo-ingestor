@@ -355,7 +355,7 @@ function CardDetail({ id, onImport, onClear }: { id: string; onImport: (c: Card)
           shown={data.total}
           total={c.files}
         />
-        <FileTable rows={data.files} columns={columns} volumeId={c.volume_id ?? ''} loading={loading} summarize={summarizeCardFiles} />
+        <FileTable rows={data.files} columns={columns} volumeId={c.volume_id ?? ''} mounted={c.mounted && Boolean(c.volume_id)} loading={loading} summarize={summarizeCardFiles} />
         <Pager offset={filter.offset} count={data.files.length} total={data.total} page={CARD_PAGE} onPage={(offset) => setFilter((f) => ({ ...f, offset }))} />
       </section>
     </div>

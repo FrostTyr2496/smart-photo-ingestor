@@ -743,7 +743,7 @@ export function DriveView({ id }: { id: string }) {
           total={s.files}
         />
         {filesError && <p className="text-sm text-err">Could not list files: {filesError}</p>}
-        <FileTable rows={files?.files ?? []} columns={columns} volumeId={id} loading={filesLoading} summarize={summarizeFiles} />
+        <FileTable rows={files?.files ?? []} columns={columns} volumeId={id} mounted={drive.mounted} loading={filesLoading} summarize={summarizeFiles} />
         <Pager
           offset={filter.offset}
           count={files?.files.length ?? 0}

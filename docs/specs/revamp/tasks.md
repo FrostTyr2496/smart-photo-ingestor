@@ -333,3 +333,54 @@ Rules for every task:
     three parts (`'||'`), so it never ran (Show in All Photos too); it also cleared its own scroll timer by clearing
     `reveal`. Scrolling is now a separate effect that retries until the tile renders, then focuses it; the reveal
     waits for days fetched under the cleared filters. `npm run typecheck && npm test` → 134 passed. Browser check pending.
+  - Fix 2 (2026-11-19, user report: still did not scroll to the photo): days not loaded yet render placeholders of at
+    most 4 rows, while a loaded day can be thousands of pixels tall. The days the scroll passed, and the ones near the
+    target, loaded and grew during and after the smooth scroll, so it ended on other photos; opening the inspector
+    narrowed the grid and moved the tile again. `web/src/lib/reveal.ts` `holdCentred` now jumps (no smooth scroll) and
+    re-centres the tile every frame it drifts, until it has stayed put for 450 ms (2.5 s at most), and stops at once on
+    wheel, touch, key or mouse input. Tested with a fake page that grows above the tile. Browser check pending.
+
+- [x] 28. Right-click menus
+  - ID: rv-28 (user ask, 2026-11-19)
+  - One menu at a time (`web/src/lib/menu.ts`, host `components/ContextMenu.tsx` in the shell): opens at the pointer,
+    flips at the window edges, arrow keys / Home / End / Enter / Esc, closes on a click outside, scroll, resize or route
+    change. Shift+right-click keeps the browser's own menu. The Menu key or Shift+F10 open it under the focused element.
+  - Built now (the user's main case is the first two):
+    - **Photo tile** (Photos): Open (Space) · Show in All Photos (when filtered; "Scroll to this photo" when not) ·
+      Select all of <day> · Show only <shoot> · Copy name · Show in Finder (drive connected) · Deselect (Esc).
+      Right-clicking a photo outside the selection selects it; inside the selection it keeps the selection.
+    - **File row** (drive and card file lists, Folders and List views): Show in All Photos (photo kinds; the rv-27
+      route, so it clears the filters, scrolls to the photo and selects it) · Show in Finder (connected) · Show every
+      copy / Hide copies (hashed) · Copy file name · Copy path on the drive.
+  - Proposed, not built (each would be its own task; numbers are suggestions):
+    - **Folder / run row** (file lists): Expand all below / Collapse · Show folder in Finder · Show these files in
+      Photos (needs a "photos in folder" filter on the server) · Copy folder path.
+    - **Copy entry** (the copies row under a file): Show in Finder · Open that drive's page · Copy path.
+    - **Drive row** (sidebar, Home, drive page header): Open · Show in Finder · Photos on this drive (Photos with the
+      drive filter) · Index / Hash / Read metadata (the existing steps) · Rename… · Ignore · Copy mount path.
+    - **Card row / card tile** (sidebar, Cards): Open · Check card · Import… · Back up… · Clear… (only when green) ·
+      Show in Finder · Photos from this card.
+    - **Task card** (Home, Tasks): Pause / Resume · Copy the command · Open the drive or card it ran on · Dismiss when
+      final.
+    - **Action row** (Actions): Do it · Snooze · Dismiss · Copy the command.
+    - **Day header** (Photos): Select day · Show only this day's shoot · Copy date.
+    - **Shoot chip** (day header) and **shoot card** (Review): Show only this shoot · Rename… · Accept / Split / Merge
+      (review only).
+    - **Month rail entry**: Jump · Select month (load and select every photo in it; may be large, so it asks first).
+    - **Filter chip**: Remove · Remove all others.
+    - **Keyword chip** (inspector): Remove from selection · Add to every selected photo · Show photos with this keyword
+      (needs a keyword filter).
+    - **Inspector map / location suggestion**: Use this location · Open in Maps · Copy coordinates.
+    - **Lightbox photo**: Show in All Photos (closes the viewer) · Show in Finder · Copy name.
+    - Not planned: header navigation links and form controls keep the browser's menu (open in new tab, paste).
+  - Result (2026-11-19): `cd web && npm run typecheck && npm test` → clean; tests for `tidyItems`, `placeMenu`,
+    `nextEnabled`, `openMenu`, and the host's keyboard, click and close paths. Build committed. Browser check pending.
+
+- [x] 29. Hover preview in drive and card file lists
+  - ID: rv-29 (user ask, 2026-11-19)
+  - Resting the pointer on a photo row (kinds raw, jpeg, heic, video, derivative) for 350 ms shows a 240 px preview
+    beside the pointer: the row's photo through `GET /api/volumes/<id>/photo?rel_path=` (found photos remembered per
+    page load, misses asked again), then `/api/groups/<id>/thumb` (the cached or embedded preview, act-4). "Not in
+    Photos yet" when the file is in no photo; "No preview" when its drive was never connected with the preview read.
+    Leaving the row, pressing, scrolling or opening the menu hides it. No server change.
+  - Result (2026-11-19): `cd web && npm run typecheck && npm test` → clean. Build committed. Browser check pending.

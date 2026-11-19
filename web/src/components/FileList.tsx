@@ -1,8 +1,11 @@
 import { motion } from 'framer-motion';
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../lib/api';
 import { allKeys, buildTree, visibleRows, type FolderNode, type RunNode } from '../lib/filetree';
 import { fmtInt } from '../lib/format';
+import { openMenu, placeMenu } from '../lib/menu';
+import { copyText } from '../lib/photos';
 import { roleKey, roleLabel } from '../lib/labels';
 import { springs } from '../lib/motion';
 import { usePref } from '../lib/prefs';
@@ -240,23 +243,98 @@ function CopiesRow({ assetId, volumeId, relPath, cols }: { assetId: number; volu
 const PHOTO_KINDS = new Set(['raw', 'jpeg', 'heic', 'video', 'derivative', 'photo']);
 export const isPhotoKind = (kind: string | null | undefined): boolean => Boolean(kind && PHOTO_KINDS.has(kind));
 
+interface FilePhoto {
+  group_id: number;
+  day: string;
+}
+const photoLookups = new Map<string, Promise<FilePhoto>>();
+
+/** A file's photo and timeline day (rv-27). Found photos are remembered; misses are asked again next time. */
+export function lookupPhoto(volumeId: string, relPath: string): Promise<FilePhoto> {
+  const key = `${volumeId}\n${relPath}`;
+  let p = photoLookups.get(key);
+  if (!p) {
+    p = api<FilePhoto>('GET', `/api/volumes/${encodeURIComponent(volumeId)}/photo?rel_path=${encodeURIComponent(relPath)}`);
+    photoLookups.set(key, p);
+    p.catch(() => photoLookups.delete(key));
+  }
+  return p;
+}
+
+/** Open Photos on this file's photo: filters cleared, scrolled to and selected (rv-27). */
+export function showFileInPhotos(volumeId: string, relPath: string, onError: (msg: string) => void): Promise<void> {
+  return lookupPhoto(volumeId, relPath)
+    .then((r) => {
+      window.location.hash = hrefFor({ view: 'photos', photo: r.group_id, day: r.day });
+    })
+    .catch((err: Error) => onError(err.message));
+}
+
 /** Opens Photos on this file's photo, selected (rv-27). The server finds its photo and day. */
 export function ShowInPhotos({ volumeId, relPath }: { volumeId: string; relPath: string }) {
   const { toast } = useStore();
   const [busy, setBusy] = useState(false);
   const go = () => {
     setBusy(true);
-    api<{ group_id: number; day: string }>('GET', `/api/volumes/${encodeURIComponent(volumeId)}/photo?rel_path=${encodeURIComponent(relPath)}`)
-      .then((r) => {
-        window.location.hash = hrefFor({ view: 'photos', photo: r.group_id, day: r.day });
-      })
-      .catch((err: Error) => toast(err.message, 'err'))
-      .finally(() => setBusy(false));
+    void showFileInPhotos(volumeId, relPath, (m) => toast(m, 'err')).finally(() => setBusy(false));
   };
   return (
     <button type="button" className="btn-ghost h-6 whitespace-nowrap px-2 text-2xs" disabled={busy} onClick={go} title="Open this photo in Photos">
       <Icon name="image" size={11} /> Show in Photos
     </button>
+  );
+}
+
+// ---------------------------------------------------------------- hover preview (rv-29)
+
+const PREVIEW = 240;
+const HOVER_MS = 350;
+
+/** A photo row's embedded preview, floating beside the pointer. Read from the cache or a connected drive. */
+function HoverPreview({ volumeId, relPath, x, y }: { volumeId: string; relPath: string; x: number; y: number }) {
+  const [state, setState] = useState<{ gid: number } | 'none' | null>(null);
+  const [img, setImg] = useState<'loading' | 'ok' | 'failed'>('loading');
+  useEffect(() => {
+    let live = true;
+    setState(null);
+    setImg('loading');
+    lookupPhoto(volumeId, relPath)
+      .then((r) => live && setState({ gid: r.group_id }))
+      .catch(() => live && setState('none'));
+    return () => {
+      live = false;
+    };
+  }, [volumeId, relPath]);
+  const name = relPath.split('/').pop() ?? relPath;
+  const { left, top } = placeMenu(x + 16, y + 16, PREVIEW, PREVIEW + 24, window.innerWidth, window.innerHeight);
+  return createPortal(
+    <div
+      aria-hidden="true"
+      className="pointer-events-none fixed z-[110] flex flex-col overflow-hidden rounded-xl border border-line bg-surface/95 shadow-xl backdrop-blur"
+      style={{ left, top, width: PREVIEW }}
+    >
+      <div className="flex items-center justify-center bg-ink/5" style={{ height: PREVIEW }}>
+        {state && state !== 'none' && img !== 'failed' && (
+          <img
+            src={`/api/groups/${state.gid}/thumb`}
+            alt=""
+            decoding="async"
+            onLoad={() => setImg('ok')}
+            onError={() => setImg('failed')}
+            className={`max-h-full max-w-full object-contain ${img === 'ok' ? '' : 'hidden'}`}
+          />
+        )}
+        {(state === null || (state !== 'none' && img === 'loading')) && <span className="h-5 w-5 animate-spin rounded-full border-2 border-ink/20 border-t-accent" />}
+        {(state === 'none' || img === 'failed') && (
+          <span className="flex flex-col items-center gap-1 px-4 text-center text-2xs text-faint">
+            <Icon name="image" size={18} />
+            {state === 'none' ? 'Not in Photos yet' : 'No preview: connect the drive once to cache it'}
+          </span>
+        )}
+      </div>
+      <p className="truncate px-2 py-1 font-mono text-2xs text-muted">{name}</p>
+    </div>,
+    document.body,
   );
 }
 
@@ -330,16 +408,19 @@ function GroupRow<T>({
  * A file table whose rows can open a copies row under them. The folder view (rv-26) nests rows by folder and
  * collapses runs of similar names; the list view is the flat page in server order.
  */
-export function FileTable<T extends { rel_path: string; asset_id?: number | null }>({
+export function FileTable<T extends { rel_path: string; asset_id?: number | null; kind?: string | null }>({
   rows,
   columns,
   volumeId,
+  mounted = false,
   loading,
   summarize,
 }: {
   rows: T[];
   columns: Array<Column<T>>;
   volumeId: string;
+  /** The drive or card is connected: the menu offers Show in Finder. */
+  mounted?: boolean;
   loading: boolean;
   /** One line for a folder or run row: e.g. total size and states. */
   summarize?: (rows: T[]) => ReactNode;
@@ -350,6 +431,22 @@ export function FileTable<T extends { rel_path: string; asset_id?: number | null
   const [opened, setOpened] = useState<Set<string>>(new Set());
   const tree = useMemo(() => buildTree(rows), [rows]);
   const keys = useMemo(() => allKeys(tree), [tree]);
+  const { toast } = useStore();
+  // Hover preview (rv-29): a photo row shows its preview after a short rest; moving off, clicking or scrolling hides it.
+  const [hover, setHover] = useState<{ relPath: string; x: number; y: number } | null>(null);
+  const hoverTimer = useRef(0);
+  const pointer = useRef({ x: 0, y: 0 });
+  const endHover = () => {
+    window.clearTimeout(hoverTimer.current);
+    setHover(null);
+  };
+  useEffect(() => {
+    if (!hover) return undefined;
+    const hide = () => setHover(null);
+    window.addEventListener('scroll', hide, true);
+    return () => window.removeEventListener('scroll', hide, true);
+  }, [hover]);
+  useEffect(() => () => window.clearTimeout(hoverTimer.current), []);
   if (!rows.length) return <p className="py-4 text-center text-sm text-muted">{loading ? 'Loading…' : 'No files in this view.'}</p>;
 
   const isTree = view === 'tree';
@@ -366,9 +463,47 @@ export function FileTable<T extends { rel_path: string; asset_id?: number | null
   const fileRow = (r: T, name: string, depth: number) => {
     const open = openRow === r.rel_path;
     const toggle = r.asset_id ? () => setOpenRow(open ? null : r.rel_path) : null;
+    const photo = Boolean(volumeId) && isPhotoKind(r.kind);
+    const base = r.rel_path.split('/').pop() ?? r.rel_path;
+    const copied = (what: string) => (ok: boolean) => toast(ok ? `Copied the ${what}.` : 'Could not copy.', ok ? 'ok' : 'err');
+    const onMenu = (e: React.MouseEvent) => {
+      endHover();
+      openMenu(
+        e,
+        [
+          photo && { label: 'Show in All Photos', icon: 'image', onSelect: () => void showFileInPhotos(volumeId, r.rel_path, (m) => toast(m, 'err')) },
+          mounted && {
+            label: 'Show in Finder',
+            icon: 'folder',
+            onSelect: () =>
+              void api('POST', `/api/volumes/${encodeURIComponent(volumeId)}/reveal`, { rel_path: r.rel_path }).catch((err: Error) => toast(err.message, 'err')),
+          },
+          toggle && { label: open ? 'Hide copies' : 'Show every copy', icon: 'drive', onSelect: toggle },
+          'sep',
+          { label: 'Copy file name', icon: 'copy', onSelect: () => void copyText(base).then(copied('file name')) },
+          { label: 'Copy path on the drive', icon: 'copy', onSelect: () => void copyText(r.rel_path).then(copied('path')) },
+        ],
+        r.rel_path,
+      );
+    };
+    const hoverProps = photo
+      ? {
+          onMouseEnter: (e: React.MouseEvent) => {
+            pointer.current = { x: e.clientX, y: e.clientY };
+            window.clearTimeout(hoverTimer.current);
+            hoverTimer.current = window.setTimeout(() => setHover({ relPath: r.rel_path, ...pointer.current }), HOVER_MS);
+          },
+          // The pointer is tracked in a ref: re-rendering a 1000-row table on every move would be slow.
+          onMouseMove: (e: React.MouseEvent) => {
+            pointer.current = { x: e.clientX, y: e.clientY };
+          },
+          onMouseLeave: endHover,
+          onMouseDown: endHover,
+        }
+      : {};
     return (
       <Fragment key={r.rel_path}>
-        <tr className="border-b border-line hover:bg-ink/[0.03]">
+        <tr className="border-b border-line hover:bg-ink/[0.03]" onContextMenu={onMenu} {...hoverProps}>
           {columns.map((c) => (
             <td
               key={c.head}
@@ -456,6 +591,7 @@ export function FileTable<T extends { rel_path: string; asset_id?: number | null
           </tbody>
         </table>
       </div>
+      {hover && <HoverPreview volumeId={volumeId} relPath={hover.relPath} x={hover.x} y={hover.y} />}
     </div>
   );
 }
