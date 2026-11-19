@@ -46,6 +46,7 @@ import {
   SCOPE_DEFAULTS,
   secondsBetween,
   shiftedTime,
+  timeTag,
   shiftSeconds,
   splitShift,
   type ClockReach,
@@ -258,8 +259,13 @@ export function PhotoInspector({
         </div>
         <p className="text-xs text-muted" title={exposure || undefined}>
           {n === 1 && first
-            ? [first.body_nickname, first.capture_time?.replace('T', ' '), exposure].filter(Boolean).join(' · ')
+            ? [first.body_nickname, (first.wall_time ?? first.capture_time)?.replace('T', ' '), exposure].filter(Boolean).join(' · ')
             : [selectionLine(selected), 'Changes apply to every selected photo.'].filter(Boolean).join(' · ')}
+          {n === 1 && first && timeTag(first) && (
+            <span className="ml-1 rounded border border-line px-1 text-2xs text-faint" title={timeTag(first)!.title}>
+              {timeTag(first)!.label}
+            </span>
+          )}
         </p>
         <DriveChips chips={chips} showing={n === 1 ? detail?.preview_from ?? null : null} loaded={n !== 1 || detail !== null} />
       </div>

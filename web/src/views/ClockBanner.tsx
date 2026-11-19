@@ -17,6 +17,8 @@ export interface ClockSuggestion {
   sessions_matched?: number;
   sessions_total?: number;
   runner_up: number;
+  start_utc: string;
+  end_utc: string;
   groups: { time_shift_s: number; group_ids: number[] }[];
 }
 
@@ -62,16 +64,20 @@ export function ClockBanner({ onApplied }: { onApplied: () => void }) {
 
   const apply = async (s: ClockSuggestion) => {
     const ok = window.confirm(
-      `Shift ${plural(s.frames, 'photo')} from ${s.body}, ${rangeText(s)}, by ${deltaText(s.delta_s)}? ` +
-        'This changes the clock correction only; the files are not touched.',
+      `Align ${s.body}'s clock for ${rangeText(s)} (${plural(s.frames, 'photo')}), ${deltaText(s.delta_s)}? ` +
+        "This saves one clock correction for that camera over that time range, which you can undo. No photo's own shift is changed and no file is touched.",
     );
     if (!ok) return;
     setBusy(true);
     try {
-      for (const g of s.groups) {
-        await api('POST', '/api/groups/meta', { group_ids: g.group_ids, fields: { time_shift_s: g.time_shift_s } });
-      }
-      toast(`Shifted ${plural(s.frames, 'photo')}`, 'ok');
+      await api('POST', '/api/body-clock', {
+        body_id: s.body_id,
+        start_utc: s.start_utc,
+        end_utc: s.end_utc,
+        correction_s: s.delta_s,
+        source: 'phone',
+      });
+      toast(`Aligned ${s.body}'s clock for ${plural(s.frames, 'photo')}`, 'ok');
       onApplied();
       await load();
     } catch (err) {
@@ -90,7 +96,7 @@ export function ClockBanner({ onApplied }: { onApplied: () => void }) {
           </span>
           <span className="flex items-center gap-2">
             <button type="button" disabled={busy} onClick={() => void apply(s)}>
-              Shift {plural(s.frames, 'photo')}
+              Align {plural(s.frames, 'photo')}
             </button>
             <button type="button" onClick={() => setDismissed((d) => [...d, suggestionKey(s)])}>
               Dismiss

@@ -964,17 +964,43 @@ def test_clock_suggestions_endpoint(srv: Client) -> None:
     assert s["body"] == "Zed" and s["delta_s"] == -8 * 3600
     group = s["groups"][0]
     assert group["time_shift_s"] == -8 * 3600 and set(group["group_ids"]) <= set(ids)
-    # applying goes through the existing meta save
-    assert srv.call("POST", "/api/groups/meta", {"group_ids": group["group_ids"],
-                                                 "fields": {"time_shift_s": group["time_shift_s"]}})[0] == 200
+    # Apply writes a body_clock row (sh-0b), not per-frame shifts
+    status, made = srv.call("POST", "/api/body-clock", {
+        "body_id": s["body_id"], "start_utc": s["start_utc"], "end_utc": s["end_utc"],
+        "correction_s": s["delta_s"], "source": "phone"})
+    assert status == 200
+    rows = srv.call("GET", "/api/body-clock")[1]["rows"]
+    assert [r["clock_id"] for r in rows] == [made["clock_id"]] and rows[0]["body"] == "Zed" and rows[0]["accepted"] == 1
     assert srv.call("GET", "/api/clock-suggestions") == (200, {"suggestions": []})
+    listed = {g["group_id"]: g for g in srv.call("GET", "/api/groups")[1]["groups"]}
+    assert listed[group["group_ids"][0]]["time_provenance"] == "aligned"
+    # undo
+    assert srv.call("POST", f"/api/body-clock/{made['clock_id']}/delete")[0] == 200
+    assert srv.call("GET", "/api/body-clock")[1]["rows"] == []
+    assert srv.call("POST", f"/api/body-clock/{made['clock_id']}/delete")[0] == 404
+    assert len(srv.call("GET", "/api/clock-suggestions")[1]["suggestions"]) == 1
+
+
+def test_body_clock_validates(srv: Client) -> None:
+    ok = {"body_id": 1, "start_utc": "2026-07-12T00:00:00+00:00", "end_utc": "2026-07-12T01:00:00+00:00",
+          "correction_s": 60}
+    assert srv.call("POST", "/api/body-clock", ok)[0] == 400  # no such body
+    for bad in ({"correction_s": "x"}, {"start_utc": "nope"}, {"source": "other"},
+                {"start_utc": "2026-07-13T00:00:00+00:00"}):
+        assert srv.call("POST", "/api/body-clock", {**ok, **bad})[0] == 400
+
+
+def test_groups_carry_the_two_times(srv: Client) -> None:
+    a = {g["group_id"]: g for g in srv.call("GET", "/api/groups")[1]["groups"]}[srv.ids["a"]]
+    assert a["time_provenance"] == "assumed_offset" and a["wall_time"] == "2026-11-10T21:00:00"
+    assert a["wall_date"] == "2026-11-10" and a["time_user_shift"] is False
 
 
 # --------------------------------------------------------------------------- vault name and viewer preview (rv-18, rv-20)
 
 def test_groups_carry_the_vault_name(srv: Client) -> None:
     rows = {g["group_id"]: g for g in srv.call("GET", "/api/groups")[1]["groups"]}
-    # not yet imported (no shoot): the D-005 name ingest would give; no sub-second in the catalog, so "00"
+    # not yet imported (no shoot): the D-005 name ingest would give; no sub-second stored, so "00"
     assert rows[srv.ids["a"]]["vault_name"] == "M0001_20261110-210000-00_UNKNOWN_0000001.JPG"
     assert rows[srv.ids["b"]]["vault_name"] is None  # no file located
 
@@ -1134,3 +1160,11 @@ def test_shoots_plan_newest_file_wins_404_and_dev_override(srv: Client, tmp_path
     assert srv.call("GET", "/api/shoots/plan")[1]["plan_id"] == "dev"
     monkeypatch.setenv("PHOTOVAULT_DEV_PLAN", str(tmp_path / "missing.json"))
     assert srv.call("GET", "/api/shoots/plan")[0] == 404
+
+
+def test_vault_name_uses_the_stored_subsec(srv: Client) -> None:
+    from photovault import naming
+    row = {"rel_path": "Photos/DSC_0001.nef", "canonical_stem": "x", "shoot_id": None, "capture_time": "2026-11-10T21:00:00",
+           "shutter_count": 1, "original_stem": "DSC_0001", "original_num": 1, "subsec": "81"}
+    assert naming.vault_name(load_config(), row) == "M0001_20261110-210000-81_UNKNOWN_0000001.NEF"
+    assert naming.vault_name(load_config(), {**row, "subsec": None}).endswith("-00_UNKNOWN_0000001.NEF")

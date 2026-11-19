@@ -71,7 +71,7 @@ def _record_groups(conn: sqlite3.Connection, cfg: Config, entries: list[FileEntr
                 conn, body_id=body_id, shutter_count=g.shutter_count,
                 capture_time=g.capture_time.isoformat() if g.capture_time else None, capture_offset=g.offset,
                 time_source=g.time_source, canonical_stem=g.original_stem, original_stem=g.original_stem,
-                original_num=g.original_num, shoot_id=None,
+                original_num=g.original_num, shoot_id=None, subsec=g.subsec,
             )
         for m in g.members:
             items.append({"seq": next_seq, "src_rel": m.entry.rel_path, "dst_rel": None, "group_id": group_id,

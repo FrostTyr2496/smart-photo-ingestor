@@ -61,7 +61,7 @@ Rules for every task:
 
 ## Tasks
 
-- [ ] 1. **[stronger]** The two-time model in the engine and the UI
+- [x] 1. **[stronger]** The two-time model in the engine and the UI
   - ID: sh-0b. _Design:_ review §0, `system-design.md` §5g.
   - `photovault/timemodel.py`:
     - `instant(row, *, default_offset, clocks) -> (datetime UTC, provenance)`. Provenance is `gps` | `aligned` |
@@ -79,6 +79,7 @@ Rules for every task:
   - `meta scan` reads `SubSecTimeOriginal` into `capture_groups.subsec`, and `naming.vault_name` uses it (rv-18).
   - Verify: `uv run pytest tests/test_timemodel.py tests/test_geo.py tests/test_clock.py tests/test_web_api.py -q`;
     `cd web && npm test`.
+  - Result (2026-11-18): `photovault/timemodel.py` (`instant`, `instant_info`, `BodyClocks`, `wall_clock`); `geo.group_utc`, `suggest`, `session_of`, `clock.suggest_offsets` and `meta scan` follow the instant. `/api/groups` rows carry `time_provenance`, `time_correction_s`, `time_user_shift`, `wall_time`, `wall_date`; `/api/photo-days` and the `day` filter use the wall date. `GET/POST /api/body-clock` and `POST /api/body-clock/<id>/delete`; the banner's Apply writes a row (suggestions carry `start_utc`/`end_utc`). `subsec` is stored by ingest, index and `meta scan`, and `vault_name` uses it. 594 passed, 9 skipped; web 71 tests.
 
 - [ ] 2. **[stronger]** The planner, calibrated on the real catalog
   - ID: sh-1 (after sh-0b). _Design:_ review §3–4.

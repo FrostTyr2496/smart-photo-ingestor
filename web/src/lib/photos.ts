@@ -30,6 +30,14 @@ export interface PhotoGroup {
   vault_name?: string | null;
   /** Corrected UTC (clock shift applied), ISO; null without a capture time (rv-16). */
   utc_time: string | null;
+  /** How the instant was found (sh-0b): `aligned` to a body clock row, from the camera's own offset, or an assumed one. */
+  time_provenance?: 'gps' | 'aligned' | 'exif_offset' | 'assumed_offset' | null;
+  /** Seconds a body clock row added to the instant (0 when none), and whether a manual shift is set. */
+  time_correction_s?: number;
+  time_user_shift?: boolean;
+  /** The wall clock (naive ISO) and its date: the shoot's local time when it has one, else the capture time as written. */
+  wall_time?: string | null;
+  wall_date?: string | null;
   body_id: number | null;
   sequence_id: number | null;
   /** A drive holding the photo is mounted now (rv-23); `held_volumes` lets the UI recompute when drives change. */
@@ -97,8 +105,40 @@ export function fitBox(w: number, h: number, ratio: number): { w: number; h: num
   return { w: fw, h: fw / ratio };
 }
 
-/** The timeline day a photo sits under: the camera's capture date, or UNDATED (as the server groups them). */
-export const dayOf = (g: Pick<PhotoGroup, 'capture_time'>): string => (g.capture_time ? g.capture_time.slice(0, 10) : UNDATED);
+/** The timeline day a photo sits under: its wall date (sh-0b), else the camera's capture date, or UNDATED (as the server groups them). */
+export const dayOf = (g: Pick<PhotoGroup, 'capture_time' | 'wall_date'>): string => g.wall_date ?? (g.capture_time ? g.capture_time.slice(0, 10) : UNDATED);
+
+const wallDay = (g: Pick<PhotoGroup, 'capture_time' | 'wall_date'>): string | undefined => g.wall_date ?? g.capture_time?.slice(0, 10);
+
+const signed = (s: number): string => {
+  const a = Math.abs(s);
+  const t = a % 3600 === 0 ? `${a / 3600} h` : a >= 3600 ? `${Math.floor(a / 3600)} h ${Math.round((a % 3600) / 60)} min` : a % 60 === 0 ? `${a / 60} min` : `${a} s`;
+  return `${s < 0 ? '−' : '+'}${t}`;
+};
+
+/** The small tag beside a photo's time, with its tooltip: where the instant behind the time came from (sh-0b). */
+export function timeTag(g: Pick<PhotoGroup, 'time_provenance' | 'time_correction_s' | 'time_user_shift' | 'time_shift_s' | 'capture_offset'>): { label: string; title: string } | null {
+  const bits: string[] = [];
+  let label = '';
+  if (g.time_provenance === 'aligned') {
+    label = 'aligned to phone';
+    bits.push(`aligned to phone (${signed(g.time_correction_s ?? 0)})`);
+  } else if (g.time_provenance === 'exif_offset') {
+    label = 'camera offset';
+    bits.push(`camera offset ${g.capture_offset ?? ''}`.trim());
+  } else if (g.time_provenance === 'assumed_offset') {
+    label = 'assumed offset';
+    bits.push('assumed offset: the camera did not record one, so your default zone is used');
+  } else if (g.time_provenance === 'gps') {
+    label = 'GPS time';
+    bits.push('the camera took this time from GPS');
+  } else if (!g.time_user_shift) return null;
+  if (g.time_user_shift) {
+    label = label ? `${label} · shifted` : 'shifted';
+    bits.push(`${signed(g.time_shift_s ?? 0)} manual shift`);
+  }
+  return { label, title: bits.join('; ') };
+}
 
 /** The first of the photos in time order (undated last, then by id), or null for none (rv-19). */
 export function firstInTime<T extends Pick<PhotoGroup, 'capture_time' | 'group_id'>>(list: T[]): T | null {
@@ -527,8 +567,8 @@ export function relatedSession(candidates: PhotoGroup[], selected: PhotoGroup[],
   all.sort((a, b) => timeMs(a) - timeMs(b));
   const member = new Set<number>();
   if (step === 'day') {
-    const days = new Set(timedSel.map((g) => g.capture_time?.slice(0, 10)));
-    for (const g of all) if (days.has(g.capture_time?.slice(0, 10))) member.add(g.group_id);
+    const days = new Set(timedSel.map(wallDay)); // the wall date (sh-0b), so a shoot's local day holds together
+    for (const g of all) if (days.has(wallDay(g))) member.add(g.group_id);
   } else {
     let lo = all.findIndex((g) => sel.has(g.group_id));
     let hi = all.length - 1;

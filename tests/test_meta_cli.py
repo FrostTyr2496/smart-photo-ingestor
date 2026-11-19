@@ -78,6 +78,7 @@ def test_missing_scan_and_rescan(work, capsys) -> None:
     assert (point["utc_time"], point["source"], point["source_ref"], point["alt"]) == \
         ("2026-11-10T21:00:02+00:00", "catalog", f"group:{g1}", 35.0)
 
+    assert {r[0] for r in c.execute("SELECT subsec FROM capture_groups")} == {"12"}  # sh-0b: stored for every group
     assert run(capsys, "meta", "missing", "--volume", str(work))[1][-1]["gps"] == 1
     code, lines = run(capsys, "meta", "scan", "--volume", str(work))
     assert result(lines)["scanned"] == 0  # already read; --rescan re-reads them

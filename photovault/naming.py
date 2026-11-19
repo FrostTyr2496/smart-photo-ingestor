@@ -97,9 +97,9 @@ def vault_name(cfg: Config, row: dict) -> str | None:
     """The D-005 file name of a catalog group row (rv-18): the name the primary file has, or would get, on WORKING.
 
     ``row`` needs ``rel_path`` (the primary file's), ``canonical_stem``, ``shoot_id``, ``capture_time``,
-    ``shutter_count``, ``original_stem``, ``original_num`` and ``body_nickname`` (as ``repo.list_groups`` gives).
+    ``shutter_count``, ``original_stem``, ``original_num``, ``subsec`` and ``body_nickname`` (as ``repo.list_groups`` gives).
     A group with a shoot already has its stem (ingest keeps it); otherwise the stem comes from the same
-    ``canonical_stem`` ingest calls (ing-12). The catalog keeps no sub-second, so it is "00" there. None without a file.
+    ``canonical_stem`` ingest calls (ing-12). Its sub-second is the group's ``subsec`` (read by `meta scan`, sh-0b), "00" while unknown. None without a file.
     """
     rel = row.get("rel_path")
     if not rel:
@@ -115,7 +115,7 @@ def vault_name(cfg: Config, row: dict) -> str | None:
         member = Member(entry=entry, role="primary")
         group = GroupPlan(key=rel, members=[member], primary=member, shutter_count=row.get("shutter_count"),
                           capture_time=when, original_stem=row.get("original_stem") or "",
-                          original_num=row.get("original_num"))
+                          original_num=row.get("original_num"), subsec=row.get("subsec"))
         stem = canonical_stem(group, row.get("body_nickname") or "UNKNOWN", cfg.naming.template)
         return member_filename(stem, member, group)
     entry = FileEntry(rel_path=rel, abs_path=PurePosixPath(rel), size=0, mtime_ns=0, kind=classify(PurePosixPath(rel).name))  # type: ignore[arg-type]

@@ -323,18 +323,25 @@ def insert_group(
     original_stem: str,
     original_num: int | None,
     shoot_id: int | None,
+    subsec: str | None = None,
 ) -> int:
     """Insert a capture group and return its id."""
     cur = conn.execute(
         """
         INSERT INTO capture_groups (body_id, shutter_count, capture_time, capture_offset, time_source,
-                                    canonical_stem, original_stem, original_num, shoot_id, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    canonical_stem, original_stem, original_num, shoot_id, created_at, subsec)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (body_id, shutter_count, capture_time, capture_offset, time_source, canonical_stem, original_stem,
-         original_num, shoot_id, utcnow()),
+         original_num, shoot_id, utcnow(), subsec),
     )
     return int(cur.lastrowid)
+
+
+def set_subsec(conn: sqlite3.Connection, group_id: int, subsec: str | None) -> None:
+    """Store a group's EXIF SubSecTimeOriginal (sh-0b); a missing value leaves what is there."""
+    if subsec:
+        conn.execute("UPDATE capture_groups SET subsec = ? WHERE group_id = ?", (str(subsec), group_id))
 
 
 def get_job(conn: sqlite3.Connection, job_id: int) -> Row | None:
@@ -817,11 +824,12 @@ _TIME_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
 
 def _group_filter_sql(
     *, volume_id: str | None, shoot_id: int | None, missing: str | None, day: str | None = None,
-    after: str | None = None, before: str | None = None,
+    after: str | None = None, before: str | None = None, conn: sqlite3.Connection | None = None,
 ) -> tuple[str, list]:
     """WHERE clause (without the keyword) for group listings and counts. ``g`` is capture_groups, ``m`` group_meta.
 
-    ``day`` is ``YYYY-MM-DD`` of the camera's capture time (before any time shift), or ``UNDATED``. ``after`` and
+    ``day`` is the wall date (``YYYY-MM-DD``): the camera's capture date, except for groups in a shoot with a
+    ``local_offset`` (needs ``conn``), whose date is the instant in that offset (sh-0b); or ``UNDATED``. ``after`` and
     ``before`` (``YYYY-MM-DDTHH:MM:SS``, inclusive) bound the capture time; undated groups never match them.
     """
     clauses: list[str] = []
@@ -836,8 +844,16 @@ def _group_filter_sql(
         if day == UNDATED:
             clauses.append("g.capture_time IS NULL")
         elif re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
-            clauses.append("substr(g.capture_time, 1, 10) = ?")
-            params.append(day)
+            wall_ids = offset_shoot_wall_dates(conn) if conn is not None else {}
+            if wall_ids:
+                clauses.append(
+                    "((substr(g.capture_time, 1, 10) = ? AND (g.shoot_id IS NULL OR g.shoot_id NOT IN "
+                    "(SELECT shoot_id FROM shoots WHERE local_offset IS NOT NULL))) "
+                    "OR g.group_id IN (SELECT value FROM json_each(?)))")
+                params += [day, json.dumps([gid for gid, d in wall_ids.items() if d == day])]
+            else:
+                clauses.append("substr(g.capture_time, 1, 10) = ?")
+                params.append(day)
         else:
             raise ValueError(f"day must be YYYY-MM-DD or {UNDATED!r}, not {day!r}")
     if volume_id is not None:
@@ -888,7 +904,7 @@ def list_groups(
     is one of ``gps``, ``creator``, ``keywords``, ``any`` (see ``_group_filter_sql``).
     """
     where, params = _group_filter_sql(volume_id=volume_id, shoot_id=shoot_id, missing=missing, day=day, after=after,
-                                      before=before)
+                                      before=before, conn=conn)
     if volume_id is not None:
         preference, pref_params = "(i.volume_id = ?) DESC, (v.role = 'WORKING') DESC, i.instance_id", [volume_id]
     else:
@@ -897,7 +913,8 @@ def list_groups(
         f"""
         SELECT g.group_id, g.canonical_stem, g.capture_time, g.capture_offset, g.shoot_id,
                g.body_id AS body_id, g.sequence_id AS sequence_id,
-               g.shutter_count, g.original_stem, g.original_num,
+               g.shutter_count, g.original_stem, g.original_num, g.subsec,
+               s.local_offset AS shoot_local_offset,
                b.nickname AS body_nickname, s.name AS shoot_name, s.shoot_date AS shoot_date,
                {_GROUP_META_COLUMNS},
                loc.rel_path AS rel_path, loc.volume_id AS volume_id
@@ -974,25 +991,94 @@ def indexed_primary_files(conn: sqlite3.Connection, group_ids: Iterable[int]) ->
     return out
 
 
-def list_photo_days(conn: sqlite3.Connection, *, volume_id: str | None = None, missing: str | None = None) -> list[dict]:
-    """Days with photos, newest first: ``{"day", "groups", "bodies"}``. ``day`` is ``YYYY-MM-DD`` of the camera's
-    capture time, or ``UNDATED`` (listed last); ``bodies`` the camera nicknames that shot that day, sorted."""
-    where, params = _group_filter_sql(volume_id=volume_id, shoot_id=None, missing=missing)
+def offset_shoot_wall_dates(conn: sqlite3.Connection) -> dict[int, str]:
+    """``{group_id: wall date}`` for groups in a shoot that has a ``local_offset`` (sh-0b): the instant in that offset.
+    Empty until a reviewed shoot sets one, so the common case costs one small query."""
+    from photovault import timemodel
+
     rows = conn.execute(
+        """
+        SELECT g.group_id, g.body_id, g.capture_time, g.capture_offset, COALESCE(m.time_shift_s, 0) AS time_shift_s,
+               s.local_offset AS shoot_local_offset
+        FROM capture_groups g JOIN shoots s ON s.shoot_id = g.shoot_id AND s.local_offset IS NOT NULL
+        LEFT JOIN group_meta m ON m.group_id = g.group_id
+        WHERE g.capture_time IS NOT NULL
+        """).fetchall()
+    if not rows:
+        return {}
+    default = get_setting(conn, "default_offset", "+00:00")
+    clocks = timemodel.BodyClocks.load(conn)
+    out: dict[int, str] = {}
+    for r in rows:
+        info = timemodel.instant_info(r, default, clocks)
+        wall = timemodel.wall_clock(r, info.when if info else None)
+        if wall:
+            out[int(r["group_id"])] = wall[:10]
+    return out
+
+
+def list_photo_days(conn: sqlite3.Connection, *, volume_id: str | None = None, missing: str | None = None) -> list[dict]:
+    """Days with photos, newest first: ``{"day", "groups", "bodies"}``. ``day`` is the wall date ``YYYY-MM-DD``
+    (the camera's capture date, or the instant's date in the shoot's ``local_offset``, sh-0b), or ``UNDATED``
+    (listed last); ``bodies`` the camera nicknames that shot that day, sorted."""
+    where, params = _group_filter_sql(volume_id=volume_id, shoot_id=None, missing=missing)
+    wall_ids = offset_shoot_wall_dates(conn)
+    rows = conn.execute(
+        f"""
+        SELECT g.group_id, substr(g.capture_time, 1, 10) AS day, b.nickname AS body
+        FROM capture_groups g
+        LEFT JOIN group_meta m ON m.group_id = g.group_id
+        LEFT JOIN bodies b ON b.body_id = g.body_id
+        WHERE {where} AND g.shoot_id IN (SELECT shoot_id FROM shoots WHERE local_offset IS NOT NULL)
+        """,
+        params,
+    ).fetchall() if wall_ids else []
+    days: dict[str | None, dict] = {}
+
+    def add(day: str | None, n: int, bodies: set[str]) -> None:
+        d = days.setdefault(day, {"groups": 0, "bodies": set()})
+        d["groups"] += n
+        d["bodies"] |= bodies
+
+    for r in rows:
+        add(wall_ids.get(int(r["group_id"]), r["day"]), 1, {r["body"]} if r["body"] else set())
+    skip = " AND (g.shoot_id IS NULL OR g.shoot_id NOT IN (SELECT shoot_id FROM shoots WHERE local_offset IS NOT NULL))" if wall_ids else ""
+    for r in conn.execute(
         f"""
         SELECT substr(g.capture_time, 1, 10) AS day, COUNT(*) AS groups,
                group_concat(DISTINCT b.nickname) AS bodies
         FROM capture_groups g
         LEFT JOIN group_meta m ON m.group_id = g.group_id
         LEFT JOIN bodies b ON b.body_id = g.body_id
-        WHERE {where}
+        WHERE {where}{skip}
         GROUP BY day
-        ORDER BY day IS NULL, day DESC
         """,
         params,
-    ).fetchall()
-    return [{"day": r["day"] or UNDATED, "groups": r["groups"],
-             "bodies": sorted(b for b in (r["bodies"] or "").split(",") if b)} for r in rows]
+    ):
+        add(r["day"], r["groups"], {b for b in (r["bodies"] or "").split(",") if b})
+    ordered = sorted((d for d in days if d), reverse=True) + ([None] if None in days else [])
+    return [{"day": d or UNDATED, "groups": days[d]["groups"], "bodies": sorted(days[d]["bodies"])} for d in ordered]
+
+
+def list_body_clock(conn: sqlite3.Connection) -> list[Row]:
+    """Every ``body_clock`` row with its body's nickname, newest range first."""
+    return conn.execute(
+        "SELECT c.*, b.nickname AS body FROM body_clock c JOIN bodies b ON b.body_id = c.body_id "
+        "ORDER BY c.start_utc DESC, c.clock_id DESC").fetchall()
+
+
+def add_body_clock(conn: sqlite3.Connection, *, body_id: int, start_utc: str, end_utc: str, correction_s: int,
+                   source: str, accepted: bool = True) -> int:
+    """Insert a ``body_clock`` row and return its id."""
+    cur = conn.execute(
+        "INSERT INTO body_clock (body_id, start_utc, end_utc, correction_s, source, accepted, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (body_id, start_utc, end_utc, correction_s, source, 1 if accepted else 0, utcnow()))
+    return int(cur.lastrowid)
+
+
+def delete_body_clock(conn: sqlite3.Connection, clock_id: int) -> bool:
+    return conn.execute("DELETE FROM body_clock WHERE clock_id = ?", (clock_id,)).rowcount > 0
 
 
 def list_shoots(conn: sqlite3.Connection) -> list[Row]:

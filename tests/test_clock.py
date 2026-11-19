@@ -186,3 +186,13 @@ def test_shift_zero_already_matching(conn):
         _fix(conn, T0 + timedelta(days=10 + k), f"q{k}")
         _burst(conn, bid, T0 + timedelta(days=10 + k, hours=8), 5, 900 + 100 * k)
     assert clock.suggest_offsets(conn) == []
+
+
+def test_accepted_correction_stays_applied_and_resolves_the_suggestion(conn):
+    phone(conn)
+    bid, ids = frames(conn, "Zed", off_h=8)
+    s = clock.suggest_offsets(conn)[0]
+    assert s["body_id"] == bid and s["start_utc"] < s["end_utc"]
+    repo.add_body_clock(conn, body_id=bid, start_utc=s["start_utc"], end_utc=s["end_utc"],
+                        correction_s=s["delta_s"], source="phone")
+    assert clock.suggest_offsets(conn) == []  # the instants now line up with the phone

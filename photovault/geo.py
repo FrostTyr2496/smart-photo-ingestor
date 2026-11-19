@@ -1,7 +1,7 @@
 """Geotag suggestions (ui-3): match a frame to GPS fixes from other sources by capture time.
 
-Times: a group's UTC is its capture time (naive, or with `capture_offset`, else the `default_offset` setting) with
-`time_shift_s` added (the corrected clock). Stored and compared times are ISO-8601 UTC at whole seconds with a
+Times: a group's UTC is its instant (`photovault.timemodel`: capture time less its offset, plus `time_shift_s` and the
+accepted body clock correction). Stored and compared times are ISO-8601 UTC at whole seconds with a
 `+00:00` suffix, so string range queries in `geo_points` work.
 """
 
@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import bisect
 import math
-import re
 import sqlite3
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, Mapping
 
+from photovault import timemodel
 from photovault.catalog import repo
+from photovault.timemodel import BodyClocks, offset_tz  # noqa: F401  (offset_tz is re-exported)
 
 HIGH_S = 120
 MEDIUM_S = 900
@@ -24,18 +25,6 @@ NEAR_KM = 1.0  # "stayed put" when both ends are this close, or in the same plac
 FAR_S = 3 * 3600
 TIERS = ("high", "medium", "low", "far", "weak")  # best to worst; "hint" sits below them
 SCORE = {"high": 1.0, "medium": 0.8, "low": 0.6, "far": 0.4, "weak": 0.2, "hint": 0.1}
-_OFFSET_RE = re.compile(r"^([+-])(\d{2}):?(\d{2})$")
-
-
-def offset_tz(text: str) -> timezone:
-    """'+HH:MM' / '-HH:MM' / '+HHMM' / 'Z' to a fixed timezone."""
-    if text in ("Z", "z"):
-        return UTC
-    match = _OFFSET_RE.match(text.strip())
-    if not match:
-        raise ValueError(f"bad UTC offset {text!r}; expected +HH:MM")
-    sign = 1 if match.group(1) == "+" else -1
-    return timezone(sign * timedelta(hours=int(match.group(2)), minutes=int(match.group(3))))
 
 
 def utc_text(when: datetime) -> str:
@@ -43,23 +32,15 @@ def utc_text(when: datetime) -> str:
     return when.astimezone(UTC).isoformat(timespec="seconds")
 
 
-def _field(row: Mapping[str, Any] | sqlite3.Row, key: str) -> Any:
-    return row[key] if key in row.keys() else None
+def group_utc(row: Mapping[str, Any] | sqlite3.Row, default_offset: str,
+              clocks: BodyClocks | None = None) -> datetime | None:
+    """The instant of a capture group (UTC); None when there is no capture time. Delegates to `timemodel.instant`.
 
-
-def group_utc(row: Mapping[str, Any] | sqlite3.Row, default_offset: str) -> datetime | None:
-    """UTC of a capture group, corrected by its ``time_shift_s``; None when there is no capture time.
-
-    Needs ``capture_time``, ``capture_offset`` and (optionally) ``time_shift_s``; a missing shift counts as 0.
+    Needs ``capture_time``; uses ``capture_offset``, ``time_shift_s`` and, with ``clocks`` (a loaded `BodyClocks`) and
+    ``body_id``, the accepted body clock corrections. Missing fields count as absent.
     """
-    raw = _field(row, "capture_time")
-    if not raw:
-        return None
-    when = datetime.fromisoformat(str(raw))
-    if when.tzinfo is None:
-        when = when.replace(tzinfo=offset_tz(_field(row, "capture_offset") or default_offset or "+00:00"))
-    shift = int(_field(row, "time_shift_s") or 0)
-    return when.astimezone(UTC) + timedelta(seconds=shift)
+    found = timemodel.instant(row, default_offset=default_offset, clocks=clocks)
+    return found[0] if found else None
 
 
 def _confidence(abs_delta_s: float) -> str:
@@ -96,14 +77,15 @@ def session_of(conn: sqlite3.Connection, group_id: int, gap_s: int = 900) -> lis
     on the local time with a margin wide enough for any UTC offset and clock shift, then exact in Python.
     """
     default = repo.get_setting(conn, "default_offset", "+00:00")
+    clocks = BodyClocks.load(conn)
     row = conn.execute(
-        "SELECT g.capture_time, g.capture_offset, COALESCE(m.time_shift_s, 0) AS time_shift_s "
+        "SELECT g.body_id, g.capture_time, g.capture_offset, COALESCE(m.time_shift_s, 0) AS time_shift_s "
         "FROM capture_groups g LEFT JOIN group_meta m ON m.group_id = g.group_id WHERE g.group_id = ?",
         (group_id,),
     ).fetchone()
     if row is None:
         raise ValueError(f"no capture group {group_id}")
-    target = group_utc(row, default)
+    target = group_utc(row, default, clocks)
     if target is None:
         return []
     raw = datetime.fromisoformat(str(row["capture_time"])).replace(tzinfo=None)
@@ -111,10 +93,10 @@ def session_of(conn: sqlite3.Connection, group_id: int, gap_s: int = 900) -> lis
     lo, hi = (raw - margin).isoformat(timespec="seconds"), (raw + margin).isoformat(timespec="seconds")
     frames = []
     for r in conn.execute(
-        "SELECT g.group_id, g.canonical_stem, g.capture_time, g.capture_offset, COALESCE(m.time_shift_s, 0) AS time_shift_s "
+        "SELECT g.group_id, g.body_id, g.canonical_stem, g.capture_time, g.capture_offset, COALESCE(m.time_shift_s, 0) AS time_shift_s "
         "FROM capture_groups g LEFT JOIN group_meta m ON m.group_id = g.group_id "
         "WHERE g.capture_time >= ? AND g.capture_time <= ?", (lo, hi)):
-        when = group_utc(r, default)
+        when = group_utc(r, default, clocks)
         if when is not None and abs((when - target).total_seconds()) <= SESSION_CAP_S:
             frames.append({"group_id": r["group_id"], "stem": r["canonical_stem"], "utc": when})
     frames.sort(key=lambda f: (f["utc"], f["group_id"]))
@@ -207,7 +189,7 @@ def suggest(conn: sqlite3.Connection, group_id: int, *, window_s: int = 1800, li
     """
     row = conn.execute(
         """
-        SELECT g.capture_time, g.capture_offset, COALESCE(m.time_shift_s, 0) AS time_shift_s
+        SELECT g.body_id, g.capture_time, g.capture_offset, COALESCE(m.time_shift_s, 0) AS time_shift_s
         FROM capture_groups g LEFT JOIN group_meta m ON m.group_id = g.group_id
         WHERE g.group_id = ?
         """,
@@ -215,7 +197,7 @@ def suggest(conn: sqlite3.Connection, group_id: int, *, window_s: int = 1800, li
     ).fetchone()
     if row is None:
         raise ValueError(f"no capture group {group_id}")
-    target = group_utc(row, repo.get_setting(conn, "default_offset", "+00:00"))
+    target = group_utc(row, repo.get_setting(conn, "default_offset", "+00:00"), BodyClocks.load(conn))
     if target is None:
         return []
 

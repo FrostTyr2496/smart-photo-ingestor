@@ -29,6 +29,7 @@ import {
   fitBox,
   wrapIndex,
   dayOf,
+  timeTag,
   firstInTime,
   vaultCopyName,
   hasEdits,
@@ -202,6 +203,13 @@ describe('related photos', () => {
   it('takes the whole day in day mode', () => {
     const pool = [at(1, '2021-01-14T23:59:00'), at(2, '2021-01-15T01:00:00'), at(3, '2021-01-15T23:00:00'), at(4, '2021-01-16T00:00:00')];
     expect(ids(relatedSession(pool, [pool[1]!], 'day'))).toEqual([3]);
+  });
+
+  it('takes the day by wall_date when the server gives one (sh-0b)', () => {
+    const w = (id: number, t: string, wall: string) => at(id, t, { wall_date: wall });
+    // the first two were taken on the 15th by the camera but sit on the 16th in the shoot's zone
+    const pool = [w(1, '2021-01-15T23:00:00', '2021-01-16'), w(2, '2021-01-15T23:30:00', '2021-01-16'), w(3, '2021-01-16T08:00:00', '2021-01-16'), w(4, '2021-01-16T23:00:00', '2021-01-17')];
+    expect(ids(relatedSession(pool, [pool[0]!], 'day'))).toEqual([2, 3]);
   });
 
   it('returns nothing when the selection has no capture time', () => {
@@ -391,6 +399,17 @@ describe('firstInTime and dayOf (rv-19)', () => {
     expect(firstInTime([a, c, b])?.group_id).toBe(2);
     expect(firstInTime([c])?.group_id).toBe(3);
     expect(firstInTime([])).toBeNull();
+  });
+  it('names the day by wall_date first', () => {
+    expect(dayOf({ capture_time: '2026-01-02T23:00:00', wall_date: '2026-01-03' })).toBe('2026-01-03');
+  });
+  it('tags the time with its provenance (sh-0b)', () => {
+    const base = { time_correction_s: 0, time_user_shift: false, time_shift_s: 0, capture_offset: '-04:00' };
+    expect(timeTag({ ...base, time_provenance: 'exif_offset' })).toEqual({ label: 'camera offset', title: 'camera offset -04:00' });
+    expect(timeTag({ ...base, time_provenance: 'aligned', time_correction_s: 3600 })?.title).toBe('aligned to phone (+1 h)');
+    expect(timeTag({ ...base, time_provenance: 'assumed_offset' })?.label).toBe('assumed offset');
+    expect(timeTag({ ...base, time_provenance: 'assumed_offset', time_user_shift: true, time_shift_s: 120 })?.title).toContain('+2 min manual shift');
+    expect(timeTag({ ...base, time_provenance: null })).toBeNull();
   });
   it('names the day', () => {
     expect(dayOf({ capture_time: '2026-01-02T10:00:00' })).toBe('2026-01-02');

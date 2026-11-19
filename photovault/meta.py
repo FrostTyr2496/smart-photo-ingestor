@@ -15,6 +15,7 @@ from photovault import metadata, scan, xmp
 from photovault.catalog import repo
 from photovault.config import Config
 from photovault.geo import group_utc, offset_tz, utc_text
+from photovault.timemodel import BodyClocks
 from photovault.index import META_KINDS
 from photovault.protocol import Emitter
 
@@ -38,13 +39,13 @@ def scan_volume(conn: sqlite3.Connection, cfg: Config, mount: Path, volume_id: s
     """Read the primary file of each group on this volume and store its camera GPS.
 
     Groups that already have a ``group_meta`` row are skipped unless ``rescan``. With GPS: ``set_camera_gps`` and a
-    ``catalog`` geo point at the group's corrected UTC. Without: an empty ``group_meta`` row. Returns
+    ``catalog`` geo point at the group's instant. Every scanned group also gets its ``subsec`` (sh-0b). Without: an empty ``group_meta`` row. Returns
     ``{scanned, with_gps, errors}``. Unreadable files get no row, so the next scan retries them.
     """
     mount = Path(mount)
     rows = conn.execute(
         """
-        SELECT g.group_id, g.capture_time, g.capture_offset, COALESCE(m.time_shift_s, 0) AS time_shift_s,
+        SELECT g.group_id, g.body_id, g.capture_time, g.capture_offset, COALESCE(m.time_shift_s, 0) AS time_shift_s,
                i.rel_path, m.group_id AS has_meta
         FROM instances i
         JOIN assets a ON a.asset_id = i.asset_id AND a.group_role = 'primary'
@@ -62,6 +63,7 @@ def scan_volume(conn: sqlite3.Connection, cfg: Config, mount: Path, volume_id: s
         todo[r["group_id"]] = r
     work = list(todo.values())
     default_offset = repo.get_setting(conn, "default_offset", "+00:00")
+    clocks = BodyClocks.load(conn)
     counts = {"scanned": 0, "with_gps": 0, "errors": 0}
     emit.emit("progress", phase="meta", current=0, total=len(work), message=f"reading {mount}")
 
@@ -78,6 +80,7 @@ def scan_volume(conn: sqlite3.Connection, cfg: Config, mount: Path, volume_id: s
                     emit.emit("warning", code="read_error",
                               message=f"{r['rel_path']}: {result.errors.get(path, 'unreadable')}")
                     continue
+                repo.set_subsec(conn, gid, meta.get("SubSecTimeOriginal"))
                 gps = _gps(meta)
                 if gps is None:
                     repo.ensure_group_meta(conn, gid)
@@ -85,7 +88,7 @@ def scan_volume(conn: sqlite3.Connection, cfg: Config, mount: Path, volume_id: s
                 lat, lon, alt = gps
                 repo.set_camera_gps(conn, gid, lat=lat, lon=lon, alt=alt)
                 counts["with_gps"] += 1
-                when = group_utc(r, default_offset)
+                when = group_utc(r, default_offset, clocks)
                 if when is not None:
                     repo.upsert_geo_point(conn, utc_time=utc_text(when), lat=lat, lon=lon, alt=alt,
                                           source="catalog", source_ref=f"group:{gid}")

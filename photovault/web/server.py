@@ -24,6 +24,7 @@ import subprocess
 import sys
 import threading
 from collections import Counter, deque
+from datetime import UTC, datetime
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -32,7 +33,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from PIL import Image
 
-from photovault import activity, cards, clock, metadata, naming, preview, usage, volumes
+from photovault import activity, cards, clock, metadata, naming, preview, timemodel, usage, volumes
 from photovault.catalog import db, repo
 from photovault.config import ConfigError, load_config
 from photovault.drives import DEFAULT_MAC_FOLDER, VOLUMES_ROOT, scan_mounts
@@ -797,6 +798,15 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
         since = _int_param(query, "since", -1, -1, 2**62)
         return 200, app.runner.get(task_id).detail(since)
 
+    m = re.fullmatch(r"/api/body-clock/(\d+)/delete", path)
+    if m:
+        if method != "POST":
+            return 405, {"error": "method not allowed"}
+        with repo.transaction(conn):
+            if not repo.delete_body_clock(conn, int(m.group(1))):
+                raise NotFound("unknown body clock row")
+        return 200, {"deleted": int(m.group(1))}
+
     m = re.fullmatch(r"/api/groups/(\d+)/places", path)
     if m:
         if method != "GET":
@@ -865,6 +875,8 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
         ("GET", "/api/photo-days"): lambda: _photo_days(conn, query),
         ("POST", "/api/groups/meta"): lambda: _groups_meta(conn, body),
         ("GET", "/api/clock-suggestions"): lambda: {"suggestions": clock.suggest_offsets(conn)},
+        ("GET", "/api/body-clock"): lambda: {"rows": [dict(r) for r in repo.list_body_clock(conn)]},
+        ("POST", "/api/body-clock"): lambda: _post_body_clock(conn, body),
         ("GET", "/api/settings"): lambda: {"settings": _settings(conn)},
         ("POST", "/api/settings"): lambda: _post_settings(conn, body),
     }
@@ -1154,12 +1166,18 @@ def _groups(conn, query: dict, app: WebApp | None = None) -> dict:
         raise BadRequest(str(exc)) from exc
     default_offset = repo.get_setting(conn, "default_offset", SETTING_DEFAULTS["default_offset"]) or "+00:00"
     groups = [_group_row(r) for r in rows]
-    for g in groups:  # corrected UTC (clock shift applied) so related photos can be chained across zones (rv-16)
+    clocks = timemodel.BodyClocks.load(conn)  # once per request (sh-0b)
+    for g in groups:  # the instant (UTC) and the wall clock, with how the instant was found (sh-0b, D-080)
         try:
-            when = group_utc(g, default_offset)
+            info = timemodel.instant_info(g, default_offset, clocks)
         except ValueError:
-            when = None
-        g["utc_time"] = utc_text(when) if when else None
+            info = None
+        g["utc_time"] = utc_text(info.when) if info else None
+        g["time_provenance"] = info.provenance if info else None
+        g["time_correction_s"] = info.correction_s if info else 0
+        g["time_user_shift"] = info.user_shift if info else False
+        g["wall_time"] = timemodel.wall_clock(g, info.when if info else None)
+        g["wall_date"] = g["wall_time"][:10] if g["wall_time"] else None
     unhashed = [g["group_id"] for g in groups if g["rel_path"] is None]
     if unhashed:  # files indexed but not hashed yet: located through their index job (rv-7)
         found = repo.indexed_primary_files(conn, unhashed)
@@ -1235,6 +1253,33 @@ def _groups_meta(conn, body: Any) -> dict:
     except ValueError as exc:
         raise BadRequest(str(exc)) from exc
     return {"updated": updated}
+
+
+def _post_body_clock(conn, body: Any) -> dict:
+    """sp-7 Apply (sh-0b): an accepted ``body_clock`` row, the correction for one body over a UTC range."""
+    body = _body_dict(body)
+    body_id, corr = body.get("body_id"), body.get("correction_s")
+    for name, value in (("body_id", body_id), ("correction_s", corr)):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise BadRequest(f"{name} must be an integer")
+    source = body.get("source", "phone")
+    if source not in ("phone", "gps", "user"):
+        raise BadRequest("source must be phone, gps or user")
+    ends = []
+    for name in ("start_utc", "end_utc"):
+        try:
+            when = datetime.fromisoformat(str(body.get(name)))
+            ends.append(utc_text(when if when.tzinfo else when.replace(tzinfo=UTC)))
+        except (TypeError, ValueError) as exc:
+            raise BadRequest(f"{name} must be an ISO-8601 time") from exc
+    if ends[0] > ends[1]:
+        raise BadRequest("start_utc must not be after end_utc")
+    if conn.execute("SELECT 1 FROM bodies WHERE body_id = ?", (body_id,)).fetchone() is None:
+        raise BadRequest("unknown body_id")
+    with repo.transaction(conn):
+        clock_id = repo.add_body_clock(conn, body_id=body_id, start_utc=ends[0], end_utc=ends[1],
+                                       correction_s=corr, source=source)
+    return {"clock_id": clock_id}
 
 
 def _post_settings(conn, body: Any) -> dict:

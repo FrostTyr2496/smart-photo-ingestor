@@ -142,6 +142,7 @@ def plan_card_ingest(
                 original_stem=group.original_stem,
                 original_num=group.original_num,
                 shoot_id=shoot_id,
+                subsec=group.subsec,
             )
         for member in group.members:
             name = member_filename(stem, member, group)

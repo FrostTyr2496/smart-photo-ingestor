@@ -2,7 +2,7 @@
 
 The phone's GPS fixes (sources iphone/ipad/glasses) are the reference. The timeline is split into runs where the
 fix's `local_offset` stays the same (a trip). For each camera body and run, shifts from -14 h to +14 h in 15-min
-steps are tried on the frames' current corrected UTC, counting sessions (frames chained by <= 15 min) with a frame within +-10 min of a phone fix; only
+steps are tried on the frames' current instant (accepted body clock corrections applied), counting sessions (frames chained by <= 15 min) with a frame within +-10 min of a phone fix; only
 time-zone steps are tried (sp-7b, D-077), and the best must beat shift 0 by 3 sessions. A shift is
 suggested only when it is not 0, has at least `min_matches` sessions and at least twice the runner-up's. Judgement
 call: the runner-up ignores shifts within 1 h of the best, so the neighbouring steps do not count against it.
@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import sqlite3
 from bisect import bisect_left
-from datetime import datetime
+from datetime import UTC, datetime
 
 from photovault.catalog import repo
-from photovault.geo import group_utc
+from photovault.geo import utc_text
+from photovault.timemodel import BodyClocks, instant_info
 
 PHONE_SOURCES = ("iphone", "ipad", "glasses")
 STEP_S = 900
@@ -78,13 +79,14 @@ def _matches(sessions: list[list[float]], times: list[float], shift: int) -> int
 
 def suggest_offsets(conn: sqlite3.Connection, *, min_matches: int = MIN_SESSIONS) -> list[dict]:
     """Suggestions, one per (body, phone run). Each: body_id, body, first_date, last_date, frames, current_shifts,
-    delta_s, matches (= sessions_matched), sessions_matched, sessions_total, runner_up (sessions), and `groups`: [{time_shift_s (the suggested one), group_ids}] to apply."""
+    start_utc, end_utc (the range for a body_clock row), delta_s, matches (= sessions_matched), sessions_matched, sessions_total, runner_up (sessions), and `groups`: [{time_shift_s (the suggested one), group_ids}] to apply."""
     points = _phone_points(conn)
     if not points:
         return []
     times = [t for t, _ in points]
     runs = _runs(points)
     default_offset = repo.get_setting(conn, "default_offset", "+00:00")
+    clocks = BodyClocks.load(conn)  # accepted corrections stay applied (sh-0b); only a candidate is estimated
     rows = conn.execute(
         """SELECT g.group_id, g.body_id, b.nickname, g.capture_time, g.capture_offset,
                   COALESCE(m.time_shift_s, 0) AS time_shift_s
@@ -93,11 +95,12 @@ def suggest_offsets(conn: sqlite3.Connection, *, min_matches: int = MIN_SESSIONS
            WHERE g.body_id IS NOT NULL AND g.capture_time IS NOT NULL""").fetchall()
     by_body: dict[int, list[dict]] = {}
     for r in rows:
-        when = group_utc(r, default_offset)
-        if when is None:
+        info = instant_info(r, default_offset, clocks)
+        if info is None:
             continue
         by_body.setdefault(r["body_id"], []).append(
-            {"id": r["group_id"], "t": when.timestamp(), "shift": int(r["time_shift_s"]),
+            {"id": r["group_id"], "t": info.when.timestamp(), "pre": info.when.timestamp() - info.correction_s,
+             "shift": int(r["time_shift_s"]),
              "date": str(r["capture_time"])[:10], "nick": r["nickname"]})
 
     out: list[dict] = []
@@ -126,7 +129,10 @@ def suggest_offsets(conn: sqlite3.Connection, *, min_matches: int = MIN_SESSIONS
                 by_shift.setdefault(f["shift"] + best, []).append(f["id"])
             dates = sorted(f["date"] for f in chosen)
             out.append({
-                "body_id": body_id, "body": chosen[0]["nick"], "first_date": dates[0], "last_date": dates[-1],
+                "body_id": body_id, "body": chosen[0]["nick"],
+                # the range a body_clock row would cover, in instants before any correction (sh-0b)
+                "start_utc": utc_text(datetime.fromtimestamp(min(f["pre"] for f in chosen), UTC)),
+                "end_utc": utc_text(datetime.fromtimestamp(max(f["pre"] for f in chosen), UTC)), "first_date": dates[0], "last_date": dates[-1],
                 "frames": len(chosen), "current_shifts": sorted({f["shift"] for f in chosen}), "delta_s": best,
                 "matches": counts[best], "sessions_matched": counts[best], "sessions_total": len(sessions),
                 "runner_up": runner,
