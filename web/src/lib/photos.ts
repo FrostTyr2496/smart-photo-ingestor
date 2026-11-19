@@ -584,6 +584,29 @@ export function reachPhotos(reach: Reach, candidates: PhotoGroup[], selected: Ph
   return reach === 'selection' ? [] : relatedSession(candidates, selected, reach);
 }
 
+const SAME_SPOT_M = 25;
+
+/** Metres between two points (equirectangular; exact enough at these distances). */
+export function metresApart(aLat: number, aLon: number, bLat: number, bLon: number): number {
+  const k = Math.PI / 180;
+  const x = (bLon - aLon) * k * Math.cos(((aLat + bLat) / 2) * k);
+  const y = (bLat - aLat) * k;
+  return Math.sqrt(x * x + y * y) * 6371000;
+}
+
+/**
+ * The related photos a location edit may overwrite. With `onlyMissing`, a photo qualifies when it has no location, or
+ * when it still sits at a selected photo's current spot (within 25 m): it was placed together with the selection, so
+ * moving the pin must move it too. Photos placed anywhere else are left alone.
+ */
+export function placeCandidates(all: PhotoGroup[], selected: PhotoGroup[], onlyMissing: boolean): PhotoGroup[] {
+  if (!onlyMissing) return all;
+  const spots = selected.filter((g) => g.lat !== null && g.lon !== null).map((g) => [g.lat!, g.lon!] as const);
+  return all.filter(
+    (g) => g.lat === null || g.lon === null || spots.some(([la, lo]) => metresApart(la, lo, g.lat!, g.lon!) <= SAME_SPOT_M),
+  );
+}
+
 /** The photos a clock shift reaches: only frames from a camera body that is in the selection (matched on body_id). */
 export function clockPhotos(reach: ClockReach, candidates: PhotoGroup[], selected: PhotoGroup[], sessionGap: Gap): PhotoGroup[] {
   if (reach === 'selection') return [];

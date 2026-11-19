@@ -37,6 +37,7 @@ import {
   nearestWithLocation,
   NO_EDITS,
   planSaves,
+  placeCandidates,
   reachPhotos,
   relatedCounts,
   relatedSession,
@@ -146,7 +147,7 @@ export function PhotoInspector({
     const dayCount = relatedSession(rel.rows, selected, 'day').length;
     const sessionGap: Gap = placeReach === 'selection' ? 'auto' : placeReach;
     const placeAll = reachPhotos(placeReach, rel.rows, selected);
-    const placeList = onlyNoLoc ? placeAll.filter((g) => g.lat === null) : placeAll;
+    const placeList = placeCandidates(placeAll, selected, onlyNoLoc);
     const clock = clockPhotos(clockReach, rel.rows, selected, sessionGap);
     const extra: Record<ScopeName, number[]> = {
       place: keep(placeList).map((g) => g.group_id),
@@ -1040,7 +1041,7 @@ function AppliesTo({
       <ScopeRow label="Place" fields="GPS, place name" value={encode(placeReach)} options={opts} onChange={(v) => setPlaceReach(decode(v))} count={more(ticked)}>
         <label className="flex items-center gap-2 text-xs text-muted">
           <input type="checkbox" checked={onlyNoLoc} onChange={(e) => setOnlyNoLoc(e.target.checked)} />
-          Only without a location
+          Only without a location, or still at this photo's spot
         </label>
         {rel.fetched >= REL_LIMIT && <p className="text-xs text-faint">The list may be cut short: only the first {fmtInt(REL_LIMIT)} photos nearby were checked.</p>}
         {placeList.length > 0 && (

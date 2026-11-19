@@ -11,6 +11,7 @@ import {
   applyFields,
   autoStep,
   mapsUrl,
+  placeCandidates,
   buildFieldsByScope,
   clockPhotos,
   namedFolder,
@@ -472,5 +473,20 @@ describe('full size and which drive to plug in (rv-23)', () => {
     expect(fullOffline({ full_available: true }, on)).toBe(false);
     expect(offlineTitle(['PP 1'])).toBe('Full size on PP 1 — not connected');
     expect(offlineTitle([])).toBe('Not on any known drive');
+  });
+});
+
+describe('placeCandidates (moving an already saved location)', () => {
+  const g = (id: number, lat: number | null, lon: number | null) => ({ group_id: id, lat, lon }) as unknown as PhotoGroup;
+  const sel = [g(1, 10, 20)];
+  const all = [g(2, null, null), g(3, 10.0001, 20.0001), g(4, 10.01, 20)];
+  it('keeps unlocated photos and those still at the selection spot, skips photos placed elsewhere', () => {
+    expect(placeCandidates(all, sel, true).map((x) => x.group_id)).toEqual([2, 3]);
+  });
+  it('takes everything when the filter is off', () => {
+    expect(placeCandidates(all, sel, false).map((x) => x.group_id)).toEqual([2, 3, 4]);
+  });
+  it('only unlocated photos when the selection has no location yet', () => {
+    expect(placeCandidates(all, [g(1, null, null)], true).map((x) => x.group_id)).toEqual([2]);
   });
 });
