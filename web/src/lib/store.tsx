@@ -2,7 +2,10 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { api } from './api';
 import { readPref, writePref } from './prefs';
 import { argvWords, driveName, isHash, workflowSteps, liveStep, STEP_NAME, type WorkflowStep } from './labels';
-import type { Drive, ExtRun, RecentRun, StaleJob, TaskDetail, TaskRec, TaskSummary, CardInfo } from './types';
+import type { Drive, ExtRun, RecentRun, StaleJob, TaskDetail, TaskRec, TaskSummary, CardInfo, FileEvt } from './types';
+
+/** Files a running task's card lists (rv-34). */
+export const FILES_KEPT = 6;
 
 // Poll cadence.
 const TASK_FAST_MS = 1000; // poll running tasks this often
@@ -104,6 +107,12 @@ export function absorb(t: TaskRec, d: TaskDetail): TaskRec {
     else if (e.event === 'warning') n.note = e.message || e.code || '';
     else if (e.event === 'error') n.error = e.message || e.code || '';
     else if (e.event === 'progress' && e.message) n.note = e.message;
+    else if (e.event === 'item' && typeof e.src === 'string') {
+      const f: FileEvt = { state: String(e.state ?? ''), src: e.src };
+      if (typeof e.dst === 'string') f.dst = e.dst;
+      if (typeof e.error === 'string') f.error = e.error;
+      n.files = [...(n.files ?? []), f].slice(-FILES_KEPT);
+    }
   }
   if (n.startMs === null) n.startMs = Date.now();
   return n;

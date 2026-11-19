@@ -11,6 +11,9 @@ import {
   pace,
   shortLine,
   splitMessage,
+  splitPath,
+  statTiles,
+  fileState,
   stepView,
   recentTask,
   summarize,
@@ -129,6 +132,14 @@ describe('progress', () => {
     const base = { task_id: 1, state: 'running', exit_code: null, argv: task().argv, last_seq: 900, latest_progress: null };
     expect(absorb(task(), { ...base, job_id: 41, events: [{ event: 'progress', current: 750 }] }).jobId).toBe(41);
     expect(absorb(task(), { ...base, events: [{ event: 'result', job_id: 7 }] }).jobId).toBe(7);
+  });
+  it('keeps the last files a run handled, across polls (rv-34)', () => {
+    const base = { task_id: 1, state: 'running', exit_code: null, argv: task().argv, last_seq: 0, latest_progress: null };
+    const item = (i: number, extra = {}) => ({ event: 'item', state: 'committed', src: `DCIM/F${i}.NEF`, dst: `2026/F${i}.NEF`, ...extra });
+    let t = absorb(task(), { ...base, events: [1, 2, 3, 4].map((i) => item(i)) });
+    t = absorb(t, { ...base, events: [item(5), item(6), item(7, { state: 'failed', error: 'EIO' }), { event: 'progress', current: 7 }] });
+    expect(t.files?.map((f) => f.src)).toEqual(['DCIM/F2.NEF', 'DCIM/F3.NEF', 'DCIM/F4.NEF', 'DCIM/F5.NEF', 'DCIM/F6.NEF', 'DCIM/F7.NEF']);
+    expect(t.files?.at(-1)).toEqual({ state: 'failed', src: 'DCIM/F7.NEF', dst: '2026/F7.NEF', error: 'EIO' });
   });
 });
 
@@ -264,5 +275,28 @@ describe('displayLabel', () => {
     expect(displayLabel('Card: X')).toBe('X');
     expect(displayLabel('Backup Plus')).toBe('Backup Plus');
     expect(displayLabel(null)).toBe('');
+  });
+});
+
+describe('running-task files and stats (rv-34)', () => {
+  it('turns a copy message into tiles, flagging failures only when nonzero', () => {
+    expect(statTiles('27.9 GB copied · 182.8 MB/s · 0 failed')).toEqual([
+      { value: '27.9 GB', label: 'copied', warn: false },
+      { value: '182.8 MB/s', label: 'speed', warn: false },
+      { value: '0', label: 'failed', warn: false },
+    ]);
+    expect(statTiles('1.2 GB copied · 3 failed')[1]).toEqual({ value: '3', label: 'failed', warn: true });
+    expect(statTiles('fingerprinting source files')).toEqual([{ value: '', label: 'fingerprinting source files', warn: false }]);
+    expect(statTiles('')).toEqual([]);
+  });
+  it('splits a path into name and folder', () => {
+    expect(splitPath('DCIM/286NCZ_6/DSC_0412.NEF')).toEqual({ name: 'DSC_0412.NEF', dir: 'DCIM/286NCZ_6' });
+    expect(splitPath('a.NEF')).toEqual({ name: 'a.NEF', dir: '' });
+  });
+  it('words a file state by command', () => {
+    expect(fileState('committed', 'ingest').label).toBe('Copied');
+    expect(fileState('committed', 'card_clear').label).toBe('Deleted');
+    expect(fileState('skipped_dup', 'backup')).toEqual({ label: 'Already there', tone: 'muted' });
+    expect(fileState('failed', 'backup').tone).toBe('err');
   });
 });

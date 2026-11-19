@@ -1,9 +1,9 @@
 import { motion } from 'framer-motion';
 import { useState } from 'react';
 import { fmtElapsed, fmtInt, relTime } from '../lib/format';
-import { argvWords, hashOverall, isHash, longLine, pace, shortLine, splitMessage, summarize, taskTitle, unitFor, type Pace } from '../lib/labels';
+import { argvWords, commandKey, fileState, hashOverall, isHash, longLine, pace, shortLine, splitMessage, splitPath, statTiles, summarize, taskTitle, unitFor, type Pace } from '../lib/labels';
 import { useStore } from '../lib/store';
-import type { Drive, ExtRun, TaskRec } from '../lib/types';
+import type { Drive, ExtRun, FileEvt, TaskRec } from '../lib/types';
 import { Disclosure, Icon, StatePill } from './bits';
 import { ProgressBar } from './ProgressBar';
 
@@ -22,6 +22,10 @@ export interface TaskVM {
   origin: string | null;
   tech: string;
   pauseId: number | null;
+  /** The command, as `commandKey` names it ("ingest", "backup", "card_clear"…). */
+  kind: string;
+  /** The last files the run handled, newest last (rv-34). */
+  files: FileEvt[];
 }
 
 export function taskVM(t: TaskRec, drives: Drive[], now: number, driveFiles: Record<string, number> = {}): TaskVM {
@@ -41,6 +45,8 @@ export function taskVM(t: TaskRec, drives: Drive[], now: number, driveFiles: Rec
     origin: null,
     tech: `task ${t.id} · exit ${t.exitCode ?? '–'}\n${t.argv.length ? t.argv.join(' ') : '(not started yet)'}`,
     pauseId: t.id,
+    kind: commandKey(words),
+    files: t.files ?? [],
   };
 }
 
@@ -78,21 +84,130 @@ export function extVM(e: ExtRun, drives: Drive[], now: number, driveFiles: Recor
       : 'Started in a terminal. Counts come from the catalog; exact totals show for runs started after ui-11.',
     tech: `pid ${e.pid}${j ? ` · job ${j.job_id} (${j.kind})` : ''} · started ${e.started_at}\nphotovault ${words.join(' ')}`,
     pauseId: null,
+    kind: commandKey(words),
+    files: e.files ?? [],
   };
 }
 
+const TONE_TEXT = { go: 'text-go', muted: 'text-muted', err: 'text-err' } as const;
+const TONE_ICON = { go: 'check', muted: 'minus', err: 'x' } as const;
+
+/** The newest file a run handled (or the file a hash is reading): its name large, its folders below (rv-34). */
+function LatestFile({ vm }: { vm: TaskVM }) {
+  const last = vm.files[vm.files.length - 1];
+  const reading = !last && vm.path;
+  if (!last && !reading) return null;
+  const src = last ? last.src : vm.path;
+  const { name, dir } = splitPath(src);
+  const st = last ? fileState(last.state, vm.kind) : null;
+  return (
+    <div className="min-w-0 rounded-lg border border-line bg-bg/40 px-3 py-2.5">
+      <div className="flex items-center gap-2 text-2xs uppercase tracking-wide text-faint">
+        <span className="relative flex h-1.5 w-1.5">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-60" />
+          <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent" />
+        </span>
+        {reading ? 'Reading' : 'Latest file'}
+        {st && <span className={`ml-auto normal-case tracking-normal ${TONE_TEXT[st.tone]}`}>{st.label}</span>}
+      </div>
+      <p className="mt-1 truncate font-mono text-sm text-ink" title={src}>
+        {name}
+      </p>
+      <p className="truncate font-mono text-2xs text-faint" title={last?.dst ? `${src} → ${last.dst}` : src}>
+        {dir || '/'}
+        {last?.dst && <> → {splitPath(last.dst).dir || '/'}</>}
+      </p>
+      {last?.error && <p className="mt-1 line-clamp-2 text-xs text-err">{last.error}</p>}
+    </div>
+  );
+}
+
+/** The files before the latest one, newest first. */
+function RecentFiles({ vm }: { vm: TaskVM }) {
+  const earlier = vm.files.slice(0, -1).reverse();
+  if (!earlier.length) return null;
+  return (
+    <div className="min-w-0">
+      <p className="mb-1 text-2xs uppercase tracking-wide text-faint">Before that</p>
+      <ul className="flex flex-col">
+        {earlier.map((f, i) => {
+          const st = fileState(f.state, vm.kind);
+          const { name, dir } = splitPath(f.src);
+          return (
+            <li key={`${f.src}-${i}`} className="flex min-w-0 items-center gap-2 py-0.5 text-xs" title={f.error ? `${f.src}: ${f.error}` : f.dst ? `${f.src} → ${f.dst}` : f.src}>
+              <Icon name={TONE_ICON[st.tone]} size={11} className={`shrink-0 ${TONE_TEXT[st.tone]}`} />
+              <span className="min-w-0 shrink truncate font-mono text-ink/80">{name}</span>
+              <span className="min-w-0 flex-1 truncate font-mono text-2xs text-faint">{dir}</span>
+              <span className={`shrink-0 text-2xs ${TONE_TEXT[st.tone]}`}>{st.label}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+/** Done / total, the message's stats, and elapsed time as tiles. */
+function StatTiles({ vm }: { vm: TaskVM }) {
+  const p = vm.pace;
+  const tiles: { value: string; label: string; warn: boolean }[] = [];
+  if (p.total) tiles.push({ value: `${fmtInt(p.current)} / ${fmtInt(p.total)}`, label: vm.unit, warn: false });
+  else if (p.current) tiles.push({ value: fmtInt(p.current), label: vm.unit, warn: false });
+  const fromMsg = statTiles(vm.stats);
+  const prose = fromMsg.filter((t) => !t.value);
+  tiles.push(...fromMsg.filter((t) => t.value));
+  if (p.elapsedS) tiles.push({ value: fmtElapsed(p.elapsedS), label: 'elapsed', warn: false });
+  if (!tiles.length && !prose.length) return null;
+  return (
+    <>
+      {tiles.length > 0 && (
+        <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {tiles.map((t) => (
+            <div key={t.label + t.value} className="min-w-0 rounded-lg border border-line bg-bg/40 px-2.5 py-1.5">
+              <dd className={`truncate font-mono text-sm tabular ${t.warn ? 'text-err' : 'text-ink'}`}>{t.value}</dd>
+              <dt className="truncate text-2xs text-muted">{t.label}</dt>
+            </div>
+          ))}
+        </dl>
+      )}
+      {prose.map((t) => (
+        <p key={t.label} className="text-xs text-muted">
+          {t.label}
+        </p>
+      ))}
+    </>
+  );
+}
+
 /**
- * A running task. `compact` (the sidebar) shows the title, the bar and one line; the rest is behind Details.
- * The full card (home page) shows the details inline.
+ * A running task. `compact` (the sidebar, a card's page) shows the title, the bar, the latest file name and one line;
+ * the rest is behind Details. The full card (Tasks page, rv-34) shows stat tiles, the latest file and the ones before.
+ * `badge` labels the card in its header (a follow-up copy's "Then").
  */
-export function RunningCard({ vm, compact = false }: { vm: TaskVM; compact?: boolean }) {
+export function RunningCard({ vm, compact = false, badge }: { vm: TaskVM; compact?: boolean; badge?: string }) {
   const { pauseTask, pausing } = useStore();
   const [open, setOpen] = useState(false);
   const [techOpen, setTechOpen] = useState(false);
   const p = vm.pace;
   const isPausing = vm.pauseId !== null && pausing.has(vm.pauseId);
+  const last = vm.files[vm.files.length - 1];
 
-  const details = (
+  const footer = (
+    <>
+      {vm.note && <p className={`text-xs ${vm.note.warn ? 'text-maybe' : 'text-muted'}`}>{vm.note.text}</p>}
+      {vm.keepAwake && (
+        <p className="flex items-center gap-1.5 text-xs text-faint">
+          <Icon name="moon" size={12} /> Keeping the Mac awake
+        </p>
+      )}
+      {vm.origin && <p className="text-xs text-faint">{vm.origin}</p>}
+      <Disclosure summary="Technical details" open={techOpen} onToggle={setTechOpen} summaryClass="text-2xs">
+        <code className="block whitespace-pre-wrap break-all rounded-lg bg-bg/70 p-2 font-mono text-2xs text-faint">{vm.tech}</code>
+      </Disclosure>
+    </>
+  );
+
+  const compactDetails = (
     <div className="flex flex-col gap-1.5 text-xs text-muted">
       {longLine(p, vm.unit) && <p className="tabular">{longLine(p, vm.unit)}</p>}
       {vm.stats && <p className="tabular text-ink/80">{vm.stats}</p>}
@@ -101,26 +216,18 @@ export function RunningCard({ vm, compact = false }: { vm: TaskVM; compact?: boo
           {vm.path}
         </p>
       )}
-      {vm.note && <p className={vm.note.warn ? 'text-maybe' : ''}>{vm.note.text}</p>}
-      {vm.keepAwake && (
-        <p className="flex items-center gap-1.5 text-faint">
-          <Icon name="moon" size={12} /> Keeping the Mac awake
-        </p>
-      )}
-      {vm.origin && <p className="text-faint">{vm.origin}</p>}
-      <Disclosure summary="Technical details" open={techOpen} onToggle={setTechOpen} summaryClass="text-2xs">
-        <code className="block whitespace-pre-wrap break-all rounded-lg bg-bg/70 p-2 font-mono text-2xs text-faint">{vm.tech}</code>
-      </Disclosure>
+      {footer}
     </div>
   );
 
   return (
     <motion.article
       layout="position"
-      className={`group relative rounded-xl border border-line bg-raised/50 ${compact ? 'p-3' : 'p-4'} hover:border-line-strong`}
+      className={`group relative flex min-w-0 flex-col rounded-xl border border-line bg-raised/50 ${compact ? 'p-3' : 'p-4'} hover:border-line-strong`}
     >
       <div className="flex items-start gap-2">
         <h3 className={`min-w-0 flex-1 font-medium leading-snug ${compact ? 'text-sm' : 'text-base'}`}>
+          {badge && <span className="chip mb-1 mr-2 inline-flex border-line align-middle text-2xs uppercase tracking-wide text-muted">{badge}</span>}
           <span className="line-clamp-2" title={vm.title}>
             {vm.title}
           </span>
@@ -149,11 +256,28 @@ export function RunningCard({ vm, compact = false }: { vm: TaskVM; compact?: boo
         {p.perMin !== null && <span className="tabular text-faint">{fmtInt(p.perMin)}/min</span>}
       </div>
       {compact ? (
-        <Disclosure summary="Details" open={open} onToggle={setOpen} className="mt-1.5" summaryClass="text-2xs">
-          {details}
-        </Disclosure>
+        <>
+          {last && (
+            <p className="mt-1 truncate font-mono text-2xs text-faint" title={last.dst ? `${last.src} → ${last.dst}` : last.src}>
+              {splitPath(last.src).name}
+            </p>
+          )}
+          <Disclosure summary="Details" open={open} onToggle={setOpen} className="mt-1.5" summaryClass="text-2xs">
+            {compactDetails}
+          </Disclosure>
+        </>
       ) : (
-        <div className="mt-3">{details}</div>
+        <div className="mt-3 flex flex-col gap-3">
+          <StatTiles vm={vm} />
+          <LatestFile vm={vm} />
+          <RecentFiles vm={vm} />
+          {vm.files.length > 0 && vm.path && (
+            <p className="truncate font-mono text-2xs text-faint" title={vm.path}>
+              {vm.path}
+            </p>
+          )}
+          <div className="flex flex-col gap-1.5">{footer}</div>
+        </div>
       )}
     </motion.article>
   );

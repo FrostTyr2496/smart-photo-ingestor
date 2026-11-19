@@ -449,3 +449,18 @@ Rules for every task:
   - Verify: `cd web && npm run typecheck && npm test && npm run build`.
   - Result (2026-11-19): typecheck clean; 215 web tests pass (20 files, 16 new in `driveList.test.ts`); build
     committed. Not seen in a browser.
+
+- [x] 34. Tasks page: runs side by side, with stats and file names
+  - ID: rv-34 (user ask, 2026-11-19; D-117)
+  - Like the card page, an import and its follow-up copy sit side by side on Tasks (one column below `lg`); the copy
+    carries a "Then" badge. The full card shows stat tiles (files done / total, then the numbers in the progress
+    message such as copied bytes, speed and failures, then elapsed), the latest file handled (name large, source
+    folder → target folder, its state, any error), and the five before it (Copied / Already there / Failed;
+    Deleted for a card clear). A hash with no `item` events shows the file it is reading. The compact card (sidebar,
+    card page) adds the latest file name under its bar.
+  - File names come from the existing `item` events (no protocol change): the store keeps the last 6 per task;
+    terminal runs get the same through the progress file (`files`, last 6, written with the throttled progress).
+    `item` is emitted once a file is done, so "latest" is the file just finished, not the one in flight.
+  - Verify: `uv run pytest tests/test_activity.py -q`; `cd web && npm run typecheck && npm test && npm run build`.
+  - Result (2026-11-19): 28 activity tests pass (1 new); typecheck clean; 219 web tests pass (4 new); build
+    committed; `uv run pytest -q` → 796 passed, 4 skipped. Not seen in a browser.

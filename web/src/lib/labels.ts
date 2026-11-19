@@ -240,6 +240,38 @@ export function splitMessage(message: string | undefined): { stats: string; path
   return { stats: text.slice(0, at).replace(/, /g, ' · '), path: text.slice(at + ', reading '.length) };
 }
 
+/** A file an `item` event names (rv-34): how to word its state, and how loud. */
+export function fileState(state: string, kind: string): { label: string; tone: 'go' | 'muted' | 'err' } {
+  if (state === 'failed') return { label: 'Failed', tone: 'err' };
+  if (state === 'skipped_dup') return { label: 'Already there', tone: 'muted' };
+  if (state === 'committed') return { label: kind === 'card_clear' ? 'Deleted' : 'Copied', tone: 'go' };
+  return { label: state.replace(/_/g, ' '), tone: 'muted' };
+}
+
+/** "DCIM/286NCZ_6/DSC_0412.NEF" → { name: "DSC_0412.NEF", dir: "DCIM/286NCZ_6" }. */
+export function splitPath(path: string): { name: string; dir: string } {
+  const at = path.lastIndexOf('/');
+  return at < 0 ? { name: path, dir: '' } : { name: path.slice(at + 1), dir: path.slice(0, at) };
+}
+
+/**
+ * A progress message's stats ("27.9 GB copied · 182.8 MB/s · 0 failed") as tiles: a value and what it counts.
+ * A bare rate is labelled "speed". Text that does not start with a number is one tile with no value.
+ */
+export function statTiles(stats: string): { value: string; label: string; warn: boolean }[] {
+  return stats
+    .split(' · ')
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .map((p) => {
+      const m = /^([\d.,]+(?:\s*[KMGT]?B(?:\/s)?)?)(?:\s+(.*))?$/.exec(p);
+      if (!m) return { value: '', label: p, warn: false };
+      const value = m[1] ?? '';
+      const label = m[2] ?? (value.endsWith('/s') ? 'speed' : '');
+      return { value, label, warn: /fail|error/.test(label) && Number(value.replace(/,/g, '')) > 0 };
+    });
+}
+
 // ---------------------------------------------------------------- results
 
 const TIER_HEAD: Record<string, string> = {

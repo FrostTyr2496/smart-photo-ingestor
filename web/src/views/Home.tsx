@@ -121,7 +121,7 @@ function DriveChip({ mount, drives }: { mount: string; drives: Drive[] }) {
   );
 }
 
-/** One run (rv-31): its drives once in the header, the run's card, and any follow-up copy nested under it. */
+/** One run (rv-31): its drives once in the header, then the run's card with any follow-up copy beside it (rv-34). */
 function RunGroupBlock({ group, drives }: { group: RunGroup<Entry>; drives: Drive[] }) {
   return (
     <article className="card p-4">
@@ -135,16 +135,15 @@ function RunGroupBlock({ group, drives }: { group: RunGroup<Entry>; drives: Driv
           ))}
         </div>
       )}
-      <RunningCard vm={group.main.vm} />
-      {group.subs.length > 0 && (
-        <div className="mt-3 flex flex-col gap-3 border-l-2 border-line pl-3">
+      {group.subs.length > 0 ? (
+        <div className="grid items-start gap-3 lg:grid-cols-2">
+          <RunningCard vm={group.main.vm} />
           {group.subs.map((s) => (
-            <div key={s.key}>
-              <p className="mb-1 text-2xs font-medium uppercase tracking-wide text-muted">Then</p>
-              <RunningCard vm={s.vm} />
-            </div>
+            <RunningCard key={s.key} vm={s.vm} badge="Then" />
           ))}
         </div>
+      ) : (
+        <RunningCard vm={group.main.vm} />
       )}
     </article>
   );

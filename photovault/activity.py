@@ -35,6 +35,7 @@ from photovault.protocol import EXIT_PAUSED, Emitter
 ACTIVITY_DIR = "activity"
 WRITE_EVERY_S = 1.0      # newest progress is written at most this often (and on every phase change)
 UNTRACKED = frozenset({"serve"})
+FILES_KEPT = 6           # last `item` events kept in the progress file, newest last (rv-34)
 PS_ARGV = ("ps", "-axww", "-o", "pid=,ppid=,etime=,command=")
 # Commands with a sub-command: their first two words name the command, then the positional path follows.
 GROUP_COMMANDS = frozenset({"cards", "volumes", "meta", "lrcat", "report", "catalog"})
@@ -146,7 +147,7 @@ class ActivityEmitter(Emitter):
         self._path = activity_dir(home) / f"{os.getpid()}.json"
         self._state = {"v": 1, "pid": os.getpid(), "words": [w for w in words if w != "--json"],
                        "started_at": _iso(now), "phase": None, "phase_started_at": None, "progress": None,
-                       "warning": None, "warnings": 0, "updated_at": None}
+                       "warning": None, "warnings": 0, "files": [], "updated_at": None}
 
     def emit(self, event: str, **fields: Any) -> None:
         super().emit(event, **fields)
@@ -166,6 +167,13 @@ class ActivityEmitter(Emitter):
             return
         if event == "error":
             self._error = fields.get("message") or fields.get("code")
+        if event == "item":  # the files just handled, so a viewer can name them (rv-34)
+            files = s["files"]
+            files.append({k: fields[k] for k in ("state", "src", "dst", "error") if fields.get(k) is not None})
+            del files[:-FILES_KEPT]
+            if s["progress"] is not None and now - self._last_write >= WRITE_EVERY_S:
+                self._write(now)
+            return
         if event == "progress":
             phase = fields.get("phase")
             if phase != s["phase"]:
@@ -454,6 +462,7 @@ def snapshot(conn: sqlite3.Connection, home: Path, *, server_pid: int,
             "updated_at": f.get("updated_at") if f else None,
             "warning": f.get("warning") if f else None,
             "warnings": f.get("warnings", 0) if f else 0,
+            "files": f.get("files") or [] if f else [],
             "job": None,
         }
         if job is not None:

@@ -39,6 +39,14 @@ export interface TaskEvent {
   [key: string]: unknown;
 }
 
+/** One file a run handled: an `item` event (rv-34). `dst` is absent for a card clear. */
+export interface FileEvt {
+  state: string;
+  src: string;
+  dst?: string | null;
+  error?: string;
+}
+
 export interface TaskSummary {
   task_id: number;
   state: string;
@@ -71,6 +79,8 @@ export interface TaskRec {
   result: Record<string, unknown> | null;
   /** The run's job id once known: from the server's summary, or a result event. */
   jobId: number | null;
+  /** The last files the run handled, newest last (rv-34). */
+  files?: FileEvt[];
 }
 
 export interface ExtJob {
@@ -94,6 +104,8 @@ export interface ExtRun {
   phase_started_at?: string;
   warning?: string;
   warnings?: number;
+  /** The last files the run handled, newest last, from its progress file (rv-34). */
+  files?: FileEvt[];
 }
 
 /** One finished engine run, UI or terminal, from `<home>/activity/history.jsonl` (rv-30). */

@@ -91,6 +91,21 @@ def test_emitter_throttles_but_writes_every_phase_change(tmp_path: Path) -> None
     assert read_files(tmp_path)[0]["progress"]["phase"] == "done"
 
 
+def test_emitter_keeps_the_last_files_handled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    em = ActivityEmitter(io.StringIO())
+    em.track(tmp_path, ["ingest", "--source", "card", "--target", "ssd"])
+    em.emit("progress", phase="copy", current=0, total=20, message="")
+    clock = iter(range(int(activity.time.time()) + 10, 10**12, 5))  # every item is past the write throttle
+    monkeypatch.setattr(activity.time, "time", lambda: float(next(clock)))
+    for i in range(activity.FILES_KEPT + 2):
+        em.emit("item", job_id=1, seq=i, state="committed", src=f"DCIM/DSC_{i:04}.NEF", dst=f"2026/DSC_{i:04}.NEF")
+    em.emit("item", job_id=1, seq=99, state="failed", src="DCIM/BAD.NEF", dst="2026/BAD.NEF", error="EIO")
+    files = read_files(tmp_path)[0]["files"]
+    assert len(files) == activity.FILES_KEPT
+    assert files[-1] == {"state": "failed", "src": "DCIM/BAD.NEF", "dst": "2026/BAD.NEF", "error": "EIO"}
+    assert files[0]["src"] == "DCIM/DSC_0003.NEF"
+
+
 def test_quick_commands_and_serve_leave_no_file(tmp_path: Path) -> None:
     em = ActivityEmitter(io.StringIO())
     em.track(tmp_path, ["jobs"])
