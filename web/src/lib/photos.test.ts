@@ -19,6 +19,9 @@ import {
   placeEdits,
   placeLabel,
   copyName,
+  clamp,
+  fitBox,
+  wrapIndex,
   dayOf,
   firstInTime,
   vaultCopyName,
@@ -379,5 +382,22 @@ describe('firstInTime and dayOf (rv-19)', () => {
   it('names the day', () => {
     expect(dayOf({ capture_time: '2026-01-02T10:00:00' })).toBe('2026-01-02');
     expect(dayOf({ capture_time: null })).toBe(UNDATED);
+  });
+});
+
+describe('viewer helpers (rv-20)', () => {
+  it('wraps stepping at both ends', () => {
+    expect(wrapIndex(0, -1, 5)).toBe(4);
+    expect(wrapIndex(4, 1, 5)).toBe(0);
+    expect(wrapIndex(2, 1, 5)).toBe(3);
+    expect(wrapIndex(0, 1, 0)).toBe(0);
+  });
+  it('fits an image in a box without cropping', () => {
+    expect(fitBox(1000, 500, 1.5)).toEqual({ w: 750, h: 500 });
+    expect(fitBox(300, 500, 1.5)).toEqual({ w: 300, h: 200 });
+  });
+  it('clamps', () => {
+    expect(clamp(5, 0, 1)).toBe(1);
+    expect(clamp(-5, 0, 1)).toBe(0);
   });
 });

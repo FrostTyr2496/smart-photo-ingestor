@@ -1,4 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
+import { createPortal } from 'react-dom';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { CountUp, Icon } from '../components/bits';
 import { api } from '../lib/api';
@@ -14,6 +15,7 @@ import {
   monthRail,
   MONTHS,
   rangeIds,
+  wrapIndex,
   UNDATED,
   type Missing,
   type MissingCounts,
@@ -24,6 +26,7 @@ import {
 import { usePref } from '../lib/prefs';
 import { useStore } from '../lib/store';
 import { ClockBanner } from './ClockBanner';
+import { Lightbox } from './Lightbox';
 import { PhotoInspector } from './PhotoInspector';
 
 const reducedMotion = (): boolean => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
@@ -226,6 +229,36 @@ export function Photos() {
     return () => window.clearTimeout(t);
   }, [reveal, filterKey, days, loaded, loadDay, toast]);
 
+  // The full-screen viewer (rv-20): steps through the open photo's day, as loaded, and the selection follows.
+  const [viewerId, setViewerId] = useState<number | null>(null);
+  const viewerList = useMemo(() => {
+    if (viewerId === null) return [];
+    for (const s of Object.values(loaded)) if (s.groups.some((g) => g.group_id === viewerId)) return s.groups;
+    return [];
+  }, [viewerId, loaded]);
+  const viewerIndex = viewerList.findIndex((g) => g.group_id === viewerId);
+  const openViewer = useCallback((g: PhotoGroup) => {
+    if (!g.volume_id) return;
+    setSel(new Map([[g.group_id, g]]));
+    anchor.current = g.group_id;
+    setViewerId(g.group_id);
+  }, []);
+  const closeViewer = useCallback(() => {
+    const id = viewerId;
+    setViewerId(null);
+    if (id !== null) window.setTimeout(() => document.querySelector<HTMLElement>(`[data-gid="${id}"]`)?.focus({ preventScroll: true }), 0);
+  }, [viewerId]);
+  const stepViewer = useCallback(
+    (d: number) => {
+      const next = viewerList[wrapIndex(viewerIndex, d, viewerList.length)];
+      if (!next) return;
+      setViewerId(next.group_id);
+      setSel(new Map([[next.group_id, next]]));
+      anchor.current = next.group_id;
+    },
+    [viewerList, viewerIndex],
+  );
+
   const clear = useCallback(() => setSel(new Map()), []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -314,6 +347,7 @@ export function Photos() {
                   flash={flash}
                   allSelected={(loaded[d.day]?.groups.length ?? 0) >= d.groups && (loaded[d.day]?.groups ?? []).every((g) => sel.has(g.group_id))}
                   onTile={onTile}
+                  onOpen={openViewer}
                   onSelectDay={() => void selectDay(d)}
                   connected={(id) => (id ? byVolume.get(id)?.mounted ?? false : false)}
                 />
@@ -332,11 +366,15 @@ export function Photos() {
               transition={{ type: 'spring', stiffness: 420, damping: 36 }}
               className="fixed bottom-2 right-2 top-16 z-20 w-[min(380px,calc(100vw-1rem))] xl:sticky xl:top-[72px] xl:bottom-auto xl:right-auto xl:z-auto xl:w-auto xl:self-start"
             >
-              <PhotoInspector selected={selected} pool={pool} settings={settings} windowS={windowS} onClear={clear} onSaved={onSaved} onRelated={onRelated} savedEpoch={savedEpoch} onShowInAll={showInAll} />
+              <PhotoInspector selected={selected} pool={pool} settings={settings} windowS={windowS} onClear={clear} onSaved={onSaved} onRelated={onRelated} savedEpoch={savedEpoch} onShowInAll={showInAll} onOpenViewer={openViewer} />
             </motion.div>
           )}
         </AnimatePresence>
       </div>
+      {createPortal(
+        <AnimatePresence>{viewerId !== null && viewerIndex >= 0 && <Lightbox key="viewer" list={viewerList} index={viewerIndex} onClose={closeViewer} onStep={stepViewer} />}</AnimatePresence>,
+        document.body,
+      )}
     </div>
   );
 }
@@ -382,6 +420,7 @@ function DaySection({
   flash,
   allSelected,
   onTile,
+  onOpen,
   onSelectDay,
   connected,
 }: {
@@ -393,6 +432,7 @@ function DaySection({
   flash: number | null;
   allSelected: boolean;
   onTile: (g: PhotoGroup, e: MouseEvent) => void;
+  onOpen: (g: PhotoGroup) => void;
   onSelectDay: () => void;
   connected: (volumeId: string | null) => boolean;
 }) {
@@ -424,7 +464,7 @@ function DaySection({
       {state && groups.length > 0 ? (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(112px,1fr))] gap-1.5 pb-3">
           {groups.map((g) => (
-            <Tile key={g.group_id} g={g} on={selected.has(g.group_id)} related={related.has(g.group_id)} flash={flash === g.group_id} connected={connected(g.volume_id)} onTile={onTile} />
+            <Tile key={g.group_id} g={g} on={selected.has(g.group_id)} related={related.has(g.group_id)} flash={flash === g.group_id} connected={connected(g.volume_id)} onTile={onTile} onOpen={onOpen} />
           ))}
         </div>
       ) : (
@@ -455,7 +495,7 @@ function DaySection({
   );
 }
 
-const Tile = memo(function Tile({ g, on, related, flash, connected, onTile }: { g: PhotoGroup; on: boolean; related: boolean; flash: boolean; connected: boolean; onTile: (g: PhotoGroup, e: MouseEvent) => void }) {
+const Tile = memo(function Tile({ g, on, related, flash, connected, onTile, onOpen }: { g: PhotoGroup; on: boolean; related: boolean; flash: boolean; connected: boolean; onTile: (g: PhotoGroup, e: MouseEvent) => void; onOpen: (g: PhotoGroup) => void }) {
   const [failed, setFailed] = useState(false);
   const name = g.canonical_stem || `Photo ${g.group_id}`;
   return (
@@ -465,6 +505,14 @@ const Tile = memo(function Tile({ g, on, related, flash, connected, onTile }: { 
       data-gid={g.group_id}
       title={`${name}${g.capture_time ? ` · ${g.capture_time.replace('T', ' ')}` : ''}${g.place_name ? ` · ${g.place_name}` : ''}`}
       onClick={(e) => onTile(g, e)}
+      onDoubleClick={() => onOpen(g)}
+      onKeyDown={(e) => {
+        if (e.key === ' ' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+          e.preventDefault(); // Space opens the viewer; it no longer toggles the selection
+          onOpen(g);
+        }
+      }}
+      onKeyUp={(e) => e.key === ' ' && e.preventDefault()}
       className={`group relative aspect-square overflow-hidden rounded-lg bg-ink/5 ${related && !on ? '' : 'outline-none'} ring-offset-2 ring-offset-bg transition-shadow focus-visible:ring-2 focus-visible:ring-accent/60 ${flash ? 'ring-[5px] ring-accent motion-safe:animate-[pulse_0.7s_ease-in-out_2]' : on ? 'ring-[3px] ring-accent' : related ? 'outline-dashed outline-2 outline-accent/70 outline-offset-[-2px]' : ''}`}
     >
       {failed || !g.volume_id ? (

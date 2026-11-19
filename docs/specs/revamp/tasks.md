@@ -205,7 +205,7 @@ Rules for every task:
   - Verify: `cd web && npm run typecheck && npm test`; **[user]** check in the browser.
   - Result (2026-11-18): inspector button "Show in All Photos" clears drive and missing filters, loads the first selected photo's day (further pages if needed), centres the tile (`scrollIntoView({block:'center'})`, smooth unless reduced motion) and pulses its ring twice. Helpers `dayOf`, `firstInTime` tested. Not seen in a browser.
 
-- [ ] 20. Full-screen viewer (lightbox), modelled on the user's website
+- [x] 20. Full-screen viewer (lightbox), modelled on the user's website
   - ID: rv-20 (user ask, 2026-11-18). Reference: the user's `Lightbox.js` and `ZoomView.js` (a copy is given to the
     agent; never commit them, and port the behaviour rather than the code).
   - Open from a tile (double-click or Space), and from the inspector's preview (click). It shows the photo uncropped
@@ -219,3 +219,4 @@ Rules for every task:
     cached under `<home>/previews/`. The thumbnail shows until it loads.
   - Verify: `uv run pytest tests/test_web_api.py -q -k preview`; `cd web && npm run typecheck && npm test`; **[user]**
     browser check.
+  - Result (2026-11-18): `Lightbox.tsx` + `ZoomView.tsx`, portalled from Photos; opens on double-click or Space on a tile and by clicking the inspector preview. Keys ←/→ (wrap, selection follows), Esc (leaves zoom first), I, F; swipe; click zooms to 100% and drag pans. `GET /api/groups/<id>/preview` (JpgFromRaw then PreviewImage) caches under `<home>/previews/`; thumbnail blurred until it loads. Reduced motion respected. API test `-k preview`, helper tests pass. Not seen in a browser.

@@ -81,6 +81,17 @@ export function dayLabel(day: string): string {
   return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+export const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, v));
+
+/** The index `d` steps from `i` in a list of `n`, wrapping at both ends (the viewer's arrows). */
+export const wrapIndex = (i: number, d: number, n: number): number => (n <= 0 ? 0 : (((i + d) % n) + n) % n);
+
+/** The size an image of `ratio` (width / height) takes when contained in a `w` by `h` box. */
+export function fitBox(w: number, h: number, ratio: number): { w: number; h: number } {
+  const fw = Math.min(w, h * ratio);
+  return { w: fw, h: fw / ratio };
+}
+
 /** The timeline day a photo sits under: the camera's capture date, or UNDATED (as the server groups them). */
 export const dayOf = (g: Pick<PhotoGroup, 'capture_time'>): string => (g.capture_time ? g.capture_time.slice(0, 10) : UNDATED);
 

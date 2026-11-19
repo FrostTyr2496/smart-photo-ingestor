@@ -100,6 +100,7 @@ export function PhotoInspector({
   onRelated,
   savedEpoch,
   onShowInAll,
+  onOpenViewer,
 }: {
   selected: PhotoGroup[];
   pool: PhotoGroup[];
@@ -110,6 +111,7 @@ export function PhotoInspector({
   onRelated: (ids: number[]) => void;
   savedEpoch: number;
   onShowInAll: () => void;
+  onOpenViewer: (g: PhotoGroup) => void;
 }) {
   const { toast } = useStore();
   const [pend, setPend] = useState<Pending>(NO_EDITS);
@@ -235,7 +237,7 @@ export function PhotoInspector({
       </div>
 
       <div className="flex flex-col gap-5 overflow-y-auto px-4 py-4">
-        {n === 1 && first && <Preview group={first} />}
+        {n === 1 && first && <Preview group={first} onOpen={() => onOpenViewer(first)} />}
 
         <Section title="Location">
           <p className="text-xs text-muted">
@@ -363,11 +365,18 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function Preview({ group }: { group: PhotoGroup }) {
+function Preview({ group, onOpen }: { group: PhotoGroup; onOpen: () => void }) {
   const [failed, setFailed] = useState(false);
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="flex aspect-[3/2] items-center justify-center overflow-hidden rounded-lg bg-ink/5">
+      <button
+        type="button"
+        onClick={onOpen}
+        disabled={failed}
+        title="Open full screen"
+        aria-label="Open full screen"
+        className="flex aspect-[3/2] cursor-zoom-in items-center justify-center overflow-hidden rounded-lg bg-ink/5 disabled:cursor-default"
+      >
         {failed ? (
           <span className="flex flex-col items-center gap-1 text-xs text-faint">
             <Icon name="image" size={20} />
@@ -376,7 +385,7 @@ function Preview({ group }: { group: PhotoGroup }) {
         ) : (
           <img src={`/api/groups/${group.group_id}/thumb`} alt="" className="h-full w-full object-contain" onError={() => setFailed(true)} />
         )}
-      </div>
+      </button>
       {group.rel_path && <p className="truncate font-mono text-2xs text-faint" title={group.rel_path}>{group.rel_path}</p>}
     </div>
   );
