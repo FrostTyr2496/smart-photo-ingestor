@@ -62,7 +62,8 @@ function Shell() {
               aria-hidden={hidden}
               {...(hidden ? ({ inert: '' } as object) : {})}
             >
-              <div className="w-[340px]">
+              {/* Sticky on this box, not only on the aside: a sticky element needs a taller parent to stick in. */}
+              <div className="sticky top-[72px] w-[340px]">
                 <Sidebar route={route} />
               </div>
             </motion.div>
