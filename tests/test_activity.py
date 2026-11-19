@@ -228,3 +228,85 @@ def test_unknown_process_list_reports_no_stale_jobs(conn, tmp_path: Path, monkey
     monkeypatch.setattr(activity, "list_processes", lambda: None)
     snap = snapshot(conn, tmp_path, server_pid=SERVER)
     assert snap == {**snap, "activity": [], "stale_jobs": [], "processes_known": False}
+
+
+# --------------------------------------------------------------------------- history (rv-30)
+
+def test_close_appends_a_finished_run_to_the_history(tmp_path: Path) -> None:
+    em = ActivityEmitter(io.StringIO())
+    em.track(tmp_path, ["--json", "hash", "/Volumes/X"])
+    em.emit("progress", phase="hash", current=1, total=2, message="")
+    em.emit("result", hashed=2, size="1 MB", rows=[{"a": 1}])
+    em.close(0)
+    (run,) = activity.read_history(tmp_path)
+    assert run["words"] == ["hash", "/Volumes/X"] and run["pid"] == os.getpid()
+    assert run["state"] == "done" and run["exit_code"] == 0
+    assert run["result"] == {"hashed": 2, "size": "1 MB"}  # lists are dropped
+    assert run["started_at"] and run["finished_at"] and run["error"] is None
+    assert read_files(tmp_path) == []  # the progress file is still removed
+
+
+def test_history_records_failures_pauses_and_quick_runs_without_progress(tmp_path: Path) -> None:
+    for words, code in ((["index", "/Volumes/A"], 1), (["ingest", "--source", "/a", "--target", "/b"], 4),
+                        (["card-status", "/Volumes/C"], None)):
+        em = ActivityEmitter(io.StringIO())
+        em.track(tmp_path, words)
+        if code == 1:
+            em.emit("error", code="OSError", message="disk gone")
+        em.close(code)
+    runs = activity.read_history(tmp_path)
+    assert [r["words"][0] for r in runs] == ["card-status", "ingest", "index"]  # newest first
+    assert [r["state"] for r in runs] == ["failed", "paused", "failed"]
+    assert runs[2]["error"] == "disk gone"
+
+
+def test_listing_commands_and_serve_leave_no_history(tmp_path: Path) -> None:
+    for words in (["jobs"], ["serve"], ["--json", "drives"], ["volumes", "list"], ["cards", "list"], ["metrics"]):
+        em = ActivityEmitter(io.StringIO())
+        em.track(tmp_path, words)
+        em.emit("result", n=1)
+        em.close(0)
+    assert activity.read_history(tmp_path) == []
+
+
+def test_history_is_trimmed_and_skips_bad_lines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(activity, "HISTORY_TRIM_BYTES", 500)
+    monkeypatch.setattr(activity, "HISTORY_KEEP", 5)
+    activity.history_path(tmp_path).parent.mkdir(parents=True)
+    activity.history_path(tmp_path).write_text("not json\n")
+    for i in range(40):
+        activity.append_history(tmp_path, {"words": ["hash", f"/x{i}"], "state": "done"})
+    runs = activity.read_history(tmp_path, limit=100)
+    assert runs[0]["words"] == ["hash", "/x39"]
+    assert len(activity.history_path(tmp_path).read_text().splitlines()) < 40
+    assert len(activity.read_history(tmp_path, limit=2)) == 2
+
+
+def test_big_results_keep_their_scalars(tmp_path: Path) -> None:
+    em = ActivityEmitter(io.StringIO())
+    em.track(tmp_path, ["cards", "check", "/Volumes/C"])
+    em.emit("result", tier="green", counts={"backed_up": {"files": 3}}, blob={"x": "y" * 5000})
+    em.close(0)
+    assert activity.read_history(tmp_path)[0]["result"] == {"tier": "green"}
+    em2 = ActivityEmitter(io.StringIO())
+    em2.track(tmp_path, ["cards", "check", "/Volumes/C"])
+    em2.emit("result", tier="green", counts={"backed_up": {"files": 3}})
+    em2.close(0)
+    assert activity.read_history(tmp_path)[0]["result"]["counts"] == {"backed_up": {"files": 3}}
+
+
+def test_cli_run_lands_in_the_history_and_the_snapshot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("PHOTOVAULT_HOME", str(home))
+    assert cli.main(["--json", "catalog", "init"]) == 0
+    folder = tmp_path / "folder"
+    folder.mkdir()
+    cli.main(["--json", "index", str(folder)])
+    runs = activity.read_history(home)
+    assert [r["words"][0] for r in runs] == ["index"]
+    c = db.connect(home / "catalog.sqlite")
+    try:
+        snap = activity.snapshot(c, home, server_pid=-1, processes=[])
+    finally:
+        c.close()
+    assert snap["recent"][0]["words"][0] == "index"

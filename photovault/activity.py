@@ -9,6 +9,11 @@ Two sources, both read-only:
   the time of the newest write.
 
 Liveness comes from `ps`, so a job left `running` by a run that died is reported as stale, not as live.
+
+**History (rv-30).** At exit, `ActivityEmitter.close` appends one line per finished run (UI or terminal) to
+`<home>/activity/history.jsonl`: its words, times, exit state, final `result` and last error. Listing and query
+commands are left out. The file is a viewer aid like the progress files: trimmed to the newest `HISTORY_KEEP`
+lines, safe to delete, never read by the engine.
 """
 
 from __future__ import annotations
@@ -25,7 +30,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TextIO
 
-from photovault.protocol import Emitter
+from photovault.protocol import EXIT_PAUSED, Emitter
 
 ACTIVITY_DIR = "activity"
 WRITE_EVERY_S = 1.0      # newest progress is written at most this often (and on every phase change)
@@ -33,6 +38,13 @@ UNTRACKED = frozenset({"serve"})
 PS_ARGV = ("ps", "-axww", "-o", "pid=,ppid=,etime=,command=")
 # Commands with a sub-command: their first two words name the command, then the positional path follows.
 GROUP_COMMANDS = frozenset({"cards", "volumes", "meta", "lrcat", "report", "catalog"})
+HISTORY_NAME = "history.jsonl"
+HISTORY_KEEP = 200       # lines kept after a trim
+HISTORY_TRIM_BYTES = 512 * 1024
+RESULT_MAX_CHARS = 4000  # a bigger result keeps only its scalar fields
+# Commands that list or query and change nothing: not worth a line in the history.
+QUIET_COMMANDS = frozenset({"serve", "drives", "jobs", "metrics", "volumes list", "volumes probe", "cards list",
+                            "meta missing", "catalog init"})
 
 
 def _iso(t: float) -> str:
@@ -41,6 +53,70 @@ def _iso(t: float) -> str:
 
 def activity_dir(home: Path) -> Path:
     return Path(home) / ACTIVITY_DIR
+
+
+def history_path(home: Path) -> Path:
+    return activity_dir(home) / HISTORY_NAME
+
+
+def _quiet(words: list[str]) -> bool:
+    plain = [w for w in words if not w.startswith("-")]
+    return not plain or plain[0] in QUIET_COMMANDS or " ".join(plain[:2]) in QUIET_COMMANDS
+
+
+def run_state(exit_code: int | None) -> str:
+    """The task state for an exit code, as the web runner names it."""
+    if exit_code == 0:
+        return "done"
+    if exit_code == EXIT_PAUSED:
+        return "paused"
+    return "failed"
+
+
+def _small_result(fields: dict[str, Any]) -> dict[str, Any]:
+    """The result without its lists (row dumps), and only its scalars when still too big."""
+    out = {k: v for k, v in fields.items() if not isinstance(v, list)}
+    try:
+        if len(json.dumps(out, default=str)) <= RESULT_MAX_CHARS:
+            return out
+    except (TypeError, ValueError):
+        pass
+    return {k: v for k, v in out.items() if v is None or isinstance(v, (str, int, float, bool))}
+
+
+def append_history(home: Path, entry: dict[str, Any]) -> None:
+    """Append one run to the history; trim it when it grows past `HISTORY_TRIM_BYTES`. Never raises."""
+    path = history_path(home)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:  # one short write: concurrent runs do not interleave
+            fh.write(json.dumps(entry, default=str) + "\n")
+        if path.stat().st_size > HISTORY_TRIM_BYTES:
+            lines = path.read_text(encoding="utf-8").splitlines()[-HISTORY_KEEP:]
+            tmp = path.with_name(path.name + ".tmp")
+            tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            os.replace(tmp, path)
+    except Exception:  # noqa: BLE001 - a viewer aid must never break a run
+        pass
+
+
+def read_history(home: Path, limit: int = 30) -> list[dict]:
+    """The newest `limit` finished runs, newest first. Unreadable lines are skipped."""
+    try:
+        lines = history_path(home).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    out: list[dict] = []
+    for line in reversed(lines):
+        if len(out) >= limit:
+            break
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(entry, dict) and isinstance(entry.get("words"), list):
+            out.append(entry)
+    return out
 
 
 # --------------------------------------------------------------------------- writer
@@ -58,11 +134,15 @@ class ActivityEmitter(Emitter):
         self._state: dict[str, Any] = {}
         self._written = False
         self._last_write = 0.0
+        self._home: Path | None = None
+        self._result: dict[str, Any] | None = None
+        self._error: str | None = None
 
     def track(self, home: Path, words: list[str]) -> None:
         if not words or words[0] in UNTRACKED:
             return
         now = time.time()
+        self._home = Path(home)
         self._path = activity_dir(home) / f"{os.getpid()}.json"
         self._state = {"v": 1, "pid": os.getpid(), "words": [w for w in words if w != "--json"],
                        "started_at": _iso(now), "phase": None, "phase_started_at": None, "progress": None,
@@ -81,6 +161,11 @@ class ActivityEmitter(Emitter):
         s = self._state
         now = time.time()
         force = False
+        if event == "result":
+            self._result = _small_result(fields)
+            return
+        if event == "error":
+            self._error = fields.get("message") or fields.get("code")
         if event == "progress":
             phase = fields.get("phase")
             if phase != s["phase"]:
@@ -110,12 +195,20 @@ class ActivityEmitter(Emitter):
         except OSError:
             pass
 
-    def close(self) -> None:
+    def close(self, exit_code: int | None = None) -> None:
+        """Remove the progress file and add the run to the history (rv-30). `exit_code` None = it crashed."""
         if self._path is not None and self._written:
             try:
                 self._path.unlink(missing_ok=True)
             except OSError:
                 pass
+        if self._path is not None and self._home is not None and not _quiet(self._state.get("words", [])):
+            s = self._state
+            append_history(self._home, {
+                "v": 1, "pid": s["pid"], "words": s["words"], "started_at": s["started_at"],
+                "finished_at": _iso(time.time()), "exit_code": exit_code, "state": run_state(exit_code),
+                "result": self._result, "error": self._error, "warnings": s["warnings"],
+                "warning": s["warning"]})
         self._path = None
 
 
@@ -371,8 +464,9 @@ def snapshot(conn: sqlite3.Connection, home: Path, *, server_pid: int,
         stale = [{k: j[k] for k in ("job_id", "kind", "label", "created_at")}
                  for j in jobs if j["job_id"] not in claimed]
     return {"activity": activity, "stale_jobs": stale, "processes_known": procs is not None,
-            "now": _iso(now)}
+            "recent": read_history(home), "now": _iso(now)}
 
 
-__all__ = ["ActivityEmitter", "EngineProcess", "activity_dir", "guess_words", "job_counts", "list_processes",
-           "parse_etime", "parse_ps", "pause_ownerless", "read_progress_files", "running_jobs", "snapshot"]
+__all__ = ["ActivityEmitter", "EngineProcess", "activity_dir", "append_history", "guess_words", "history_path",
+           "job_counts", "list_processes", "parse_etime", "parse_ps", "pause_ownerless", "read_history",
+           "read_progress_files", "run_state", "running_jobs", "snapshot"]

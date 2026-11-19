@@ -92,6 +92,19 @@ export interface ExtRun {
   warnings?: number;
 }
 
+/** One finished engine run, UI or terminal, from `<home>/activity/history.jsonl` (rv-30). */
+export interface RecentRun {
+  pid: number;
+  words: string[];
+  started_at: string;
+  finished_at: string;
+  exit_code: number | null;
+  state: string;
+  result: Record<string, unknown> | null;
+  error: string | null;
+  warnings?: number;
+}
+
 export interface StaleJob {
   job_id: number;
   kind: string;

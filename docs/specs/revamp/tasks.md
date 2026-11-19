@@ -384,3 +384,18 @@ Rules for every task:
     Photos yet" when the file is in no photo; "No preview" when its drive was never connected with the preview read.
     Leaving the row, pressing, scrolling or opening the menu hides it. No server change.
   - Result (2026-11-19): `cd web && npm run typecheck && npm test` → clean. Build committed. Browser check pending.
+
+- [x] 30. Recently run tasks on the Tasks page
+  - ID: rv-30 (user ask, 2026-11-19; D-109)
+  - Finished runs used to show only inside a busy drive's card (3 at most), were lost when `serve` restarted, and
+    runs with no mount or started in a terminal never showed. Now every engine run except listing and query
+    commands (`QUIET_COMMANDS`: serve, drives, jobs, metrics, volumes list/probe, cards list, meta missing,
+    catalog init) appends one line at exit to `<home>/activity/history.jsonl` (`ActivityEmitter.close(exit_code)`):
+    words, start and finish times, exit code and state (0 done, 4 paused, else failed; none = crashed), the final
+    `result` without its lists (scalars only past 4,000 chars) and the last error. Trimmed to 200 lines past 512 KB.
+  - `GET /api/activity` adds `recent` (newest 30). Tasks shows "Recently run": the newest 8 with a "Show all" button,
+    each with its title, plain-words result (same `summarize` as UI tasks) and how long ago it ended. A UI task's
+    end re-reads it at once; the "terminal run has ended" toast now points there. No schema or protocol change.
+  - Verify: `uv run pytest tests/test_activity.py -q`; `cd web && npm run typecheck && npm test`.
+  - Result (2026-11-19): 33 activity tests pass; web 168 tests clean; full suite 772 passed, 4 skipped. Build
+    committed. Browser check pending.

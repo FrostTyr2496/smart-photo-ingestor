@@ -68,7 +68,7 @@ task's commit:
 ```
 
 ## Next
-0. **[user] browser check of right-click (rv-28), Show in Photos landing on the photo (rv-27 fix 2) and the file-list
+0. **[user] browser check of Recently run on Tasks (rv-30), right-click (rv-28), Show in Photos landing on the photo (rv-27 fix 2) and the file-list
    hover preview (rv-29)**, after restarting `serve`. Also the **[user] visual check of the new UI (rv-1..rv-7, rv-12..15)**: restart `serve` (it picks up drive rename and the
    faster drive list). In Photos, connect a drive, check that thumbnails load, then save a location and keywords on a few photos. Also the older
    **[user] visual check (ui-5..15, card-3):** restart `uv run photovault serve` (it picks up ui-11..15), try the
@@ -121,12 +121,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-109 (user+agent): rv-30 Recently run on Tasks, from `<home>/activity/history.jsonl` written by every engine run at exit.
 - D-108 (user): bk-7 Make green copies yellow card files onto a connected second drive; follow jobs also copy skipped-as-present files.
 - D-107 (agent): right-click menus (Shift = browser menu); Show in Photos jumps then holds the tile centred.
 - D-106 (agent+user): ing-14 plan reuses the card check's rows; `--limit` takes the next N undone frames.
 - D-105 (agent): rec-1 recommend() returns candidates + pair; card read on WORKING, copy on the best other drive.
-- D-104 (agent): bk-3 judgement calls: skip files already on the target, 120 s planned grace, second-drive dry run.
-- D-103 (user): copy-target recommendations by connected drives, file system, speed, space and copies.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

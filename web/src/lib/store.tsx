@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { api } from './api';
 import { readPref, writePref } from './prefs';
 import { argvWords, driveName, isHash, workflowSteps, liveStep, STEP_NAME, type WorkflowStep } from './labels';
-import type { Drive, ExtRun, StaleJob, TaskDetail, TaskRec, TaskSummary, CardInfo } from './types';
+import type { Drive, ExtRun, RecentRun, StaleJob, TaskDetail, TaskRec, TaskSummary, CardInfo } from './types';
 
 // Poll cadence.
 const TASK_FAST_MS = 1000; // poll running tasks this often
@@ -39,6 +39,8 @@ interface Store {
   tasks: TaskRec[]; // newest first
   elsewhere: ExtRun[];
   stale: StaleJob[];
+  /** Finished runs, UI or terminal, newest first (rv-30). */
+  recent: RecentRun[];
   cards: CardInfo[];
   pausing: Set<number>;
   /** Files on each drive (by mount) that a hash is running on, so a resumed hash shows the drive's progress. */
@@ -105,6 +107,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [taskMap, setTaskMap] = useState<Map<number, TaskRec>>(new Map());
   const [elsewhere, setElsewhere] = useState<ExtRun[]>([]);
   const [stale, setStale] = useState<StaleJob[]>([]);
+  const [recent, setRecent] = useState<RecentRun[]>([]);
   const [cards, setCards] = useState<CardInfo[]>([]);
   const [pausing, setPausing] = useState<Set<number>>(new Set());
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
@@ -153,14 +156,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadActivity = useCallback(async () => {
-    const d = await api<{ activity: ExtRun[]; stale_jobs: StaleJob[] }>('GET', '/api/activity');
+    const d = await api<{ activity: ExtRun[]; stale_jobs: StaleJob[]; recent?: RecentRun[] }>('GET', '/api/activity');
     const next = d.activity || [];
     const gone = elsewhereRef.current.filter((e) => !next.some((x) => x.pid === e.pid));
     elsewhereRef.current = next;
     setElsewhere(next);
     setStale(d.stale_jobs || []);
+    setRecent(d.recent || []);
     if (gone.length) {
-      toast(`${gone.length === 1 ? 'A run' : `${gone.length} runs`} started in a terminal has ended. See its terminal for the result.`);
+      toast(`${gone.length === 1 ? 'A run' : `${gone.length} runs`} started in a terminal has ended. Its result is under Recently run on Tasks.`);
       setEpoch((n) => n + 1);
       loadDrives().catch(() => {});
     }
@@ -232,6 +236,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           });
           setEpoch((n) => n + 1);
           loadDrives().catch(() => {});
+          lastActivity = 0; // read the history now, so the run shows under Recently run (rv-30)
         }
         if (Date.now() - lastActivity >= ACTIVITY_MS) {
           lastActivity = Date.now();
@@ -468,6 +473,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     tasks,
     elsewhere,
     stale,
+    recent,
     cards,
     pausing,
     driveFiles,

@@ -160,7 +160,7 @@ export function RunningCard({ vm, compact = false }: { vm: TaskVM; compact?: boo
 }
 
 /** A finished task: one row with its outcome. */
-export function FinishedRow({ t, drives }: { t: TaskRec; drives: Drive[] }) {
+export function FinishedRow({ t, drives, when }: { t: TaskRec; drives: Drive[]; when?: string }) {
   const s = summarize(t);
   const icon = t.state === 'done' ? 'check' : t.state === 'paused' ? 'pause' : 'x';
   const tone = t.state === 'done' ? 'text-go bg-go/10' : t.state === 'paused' ? 'text-maybe bg-maybe/10' : 'text-err bg-err/10';
@@ -170,9 +170,12 @@ export function FinishedRow({ t, drives }: { t: TaskRec; drives: Drive[] }) {
         <Icon name={icon} size={11} />
       </span>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm text-ink/90" title={taskTitle(t.argv, drives)}>
-          {taskTitle(t.argv, drives)}
-        </p>
+        <div className="flex items-baseline gap-2">
+          <p className="min-w-0 flex-1 truncate text-sm text-ink/90" title={taskTitle(t.argv, drives)}>
+            {taskTitle(t.argv, drives)}
+          </p>
+          {when && <span className="shrink-0 text-xs text-muted">{when}</span>}
+        </div>
         <p className={`line-clamp-2 text-xs ${s.problem ? 'text-err' : 'text-muted'}`} title={s.text}>
           {s.text}
         </p>

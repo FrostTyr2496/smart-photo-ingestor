@@ -15,6 +15,7 @@ import {
   staleText,
   summarize,
   taskMounts,
+  recentTask,
   taskTitle,
 } from '../lib/labels';
 import { badgeCount } from '../lib/actions';
@@ -23,6 +24,8 @@ import { hrefFor } from '../lib/route';
 import { useStore } from '../lib/store';
 import { useActions } from '../lib/useActions';
 import type { Drive, StaleJob, TaskRec } from '../lib/types';
+
+const RECENT_SHOWN = 8; // finished runs listed before "Show all" (rv-30)
 
 interface Dev {
   key: string;
@@ -112,8 +115,9 @@ function DeviceBlock({ dev, idle }: { dev: Dev; idle: boolean }) {
 
 /** The home page (ui-14): what is running, grouped by the drive it runs on, then the idle drives. */
 export function Home() {
-  const { drives, tasks, elsewhere, stale, now, loaded, driveFiles } = useStore();
+  const { drives, tasks, elsewhere, stale, recent, now, loaded, driveFiles } = useStore();
   const [staleOpen, setStaleOpen] = useState(false);
+  const [allRecent, setAllRecent] = useState(false);
   const { actions } = useActions();
   const urgent = badgeCount(actions, now || Date.now());
 
@@ -219,6 +223,27 @@ export function Home() {
                 <DeviceBlock dev={dev} idle />
               </motion.div>
             ))}
+          </div>
+        </section>
+      )}
+
+      {recent.length > 0 && (
+        <section>
+          <h2 className="label mb-2">Recently run</h2>
+          <div className="card flex flex-col p-2">
+            {(allRecent ? recent : recent.slice(0, RECENT_SHOWN)).map((r, i) => (
+              <FinishedRow
+                key={`${r.pid}-${r.finished_at}`}
+                t={recentTask(r, i)}
+                drives={drives}
+                when={relTime(r.finished_at, now || Date.now()) || r.finished_at}
+              />
+            ))}
+            {recent.length > RECENT_SHOWN && (
+              <button type="button" className="btn mt-1 h-7 self-start px-2.5 text-xs" onClick={() => setAllRecent((v) => !v)}>
+                {allRecent ? 'Show fewer' : `Show all (${recent.length})`}
+              </button>
+            )}
           </div>
         </section>
       )}

@@ -1,7 +1,7 @@
 // What people read about drives and tasks. Wording ported from the earlier plain-JS UI, so both
 // say the same thing; the API keeps its own values.
 import { fmtBytes, fmtDate, fmtElapsed, fmtInt, fmtLeft, plural, relTime } from './format';
-import type { Drive, ExtRun, Progress, Run, StaleJob, StepInfo, TaskRec } from './types';
+import type { Drive, ExtRun, Progress, RecentRun, Run, StaleJob, StepInfo, TaskRec } from './types';
 
 export type RoleKey = 'card' | 'working' | 'legacy' | 'master' | 'unset';
 
@@ -263,6 +263,24 @@ export function summarize(t: TaskRec): { text: string; problem: boolean } {
     return { text: text ? `${why} ${text}` : why, problem: true };
   }
   return { text: text || 'Finished.', problem: false };
+}
+
+/** A finished run from the history as a task record, so `summarize` and `taskTitle` read it the same way. */
+export function recentTask(r: RecentRun, i: number): TaskRec {
+  return {
+    id: -1 - i,
+    argv: r.words || [],
+    state: r.state,
+    exitCode: r.exit_code,
+    lastSeq: 0,
+    keepAwake: false,
+    progress: null,
+    final: true,
+    startMs: Date.parse(r.started_at) || null,
+    note: '',
+    error: r.error || '',
+    result: r.result,
+  };
 }
 
 /** One line per catalog run on the drive view. */

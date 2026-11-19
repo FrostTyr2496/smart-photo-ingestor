@@ -798,7 +798,7 @@ def main(argv: list[str] | None = None) -> int:
         if recorder is not None:
             metrics.install(None)
             recorder.close(code)
-        emit.close()
+        emit.close(code)
 
 
 if __name__ == "__main__":

@@ -40,7 +40,7 @@ as task-execution §6 describes.
 | `photovault/lrcat.py` | `referenced_paths`, `mark_lr_referenced` (read-only Lightroom catalog reader) | idx-3 |
 | `photovault/report.py` | `duplicates`, `coverage`, `unreadable`, `write_markdown` (duplicate and coverage report) | idx-4, idx-11 |
 | `photovault/metrics.py` | `Recorder`, `install`, `measure`, `report`, `backfill`: lifetime I/O per drive in `<home>/metrics.sqlite`, not the catalog (D-054). Reads the catalog read-only with its own SQL (drive keys, backfill); it never writes it | met-1 |
-| `photovault/activity.py` | `ActivityEmitter` (an `Emitter` subclass writing `<home>/activity/<pid>.json`), `snapshot` (runs not started by the UI) | ui-11 |
+| `photovault/activity.py` | `ActivityEmitter` (an `Emitter` subclass writing `<home>/activity/<pid>.json`), `snapshot` (runs not started by the UI, plus `recent`), the run history `<home>/activity/history.jsonl` (`append_history`, `read_history`) | ui-11, rv-30 |
 | `photovault/sequences.py` | `detect_runs`, `classify_run`, `detect_bursts` | seq-1, seq-2 |
 | `photovault/sequence_eval.py` | `segment_flat`, `segment_exposure`, `segment_burst`, `segment_search`, `score` (evaluation harness, not used by the engine) | eval-1 |
 | `photovault/preview.py` | `preview_luma` | seq-3 |

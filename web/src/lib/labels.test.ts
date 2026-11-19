@@ -12,6 +12,7 @@ import {
   shortLine,
   splitMessage,
   stepView,
+  recentTask,
   summarize,
   taskMounts,
   taskTitle,
@@ -206,5 +207,22 @@ describe('drive setup helpers', () => {
     const q = setupProblem({ error: 'boom', exitCode: 1 }, 'apfs');
     expect(q.readOnly).toBe(false);
     expect(q.lines).toEqual(['boom']);
+  });
+});
+
+describe('recentTask (rv-30)', () => {
+  const base = { pid: 7, started_at: '2026-11-19T10:00:00Z', finished_at: '2026-11-19T10:05:00Z', warnings: 0 };
+  it('reads a finished hash from the history like a UI task', () => {
+    const t = recentTask({ ...base, words: ['hash', '/mnt/x'], exit_code: 0, state: 'done', error: null,
+      result: { hashed: 2, size: '1 GB', skipped: 0, unreadable: 0, deferred: 0 } }, 0);
+    expect(t.final).toBe(true);
+    expect(summarize(t).text).toBe('Hashed 2 files (1 GB). 0 already done, 0 unreadable, 0 deferred.');
+  });
+  it('shows the error of a failed run, and a run that crashed without one', () => {
+    const failed = recentTask({ ...base, words: ['index', '/x'], exit_code: 1, state: 'failed', error: 'disk gone', result: null }, 1);
+    expect(summarize(failed)).toEqual({ text: 'disk gone', problem: true });
+    const crashed = recentTask({ ...base, words: ['index', '/x'], exit_code: null, state: 'failed', error: null, result: null }, 2);
+    expect(summarize(crashed).problem).toBe(true);
+    expect(failed.id).not.toBe(crashed.id);
   });
 });
