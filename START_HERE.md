@@ -81,7 +81,7 @@ task's commit:
 4. **Curation (spec `docs/specs/curation`, D-069):** wave 1 is approved and ready: ing-13, idx-9, idx-10, idx-14,
    seq-1b (then seq-2), rv-11; then lr-0, set-1; cu-0 / dd-0 / ro-0 are proposals first. **Phone + related
    (D-070..D-079):** rv-16, sp-2, sp-3, sp-7, sp-7b, sp-8, rv-10, rv-17..rv-24 done. **Shoots (spec
-   `docs/specs/shoots`, D-080, V7 landed):** sh-0b time model + sh-3 review mode (agents), then sh-1 planner +
+   `docs/specs/shoots`, D-080, V7 landed):** sh-0b time model and sh-3 review mode done (D-083); next sh-1 planner +
    calibration, sh-2, sh-4 apply/undo, sh-5; sh-6/sh-7 proposals. sp-6 and dv-0 wait.
 5. **Card backup (spec `docs/specs/backup`, D-050..D-052):** bk-1 drive health, bk-3 backup job (after ing-13),
    vn-1 volume name on hover, then bk-2, bk-4, vn-2, vn-3. bk-5 [user]: plug in and assign the 12 TB. Metrics:
@@ -94,7 +94,9 @@ task's commit:
   (sp-3), Copy name (rv-18), Maps links (rv-17), the farther suggestions (sp-8), Show in All Photos (rv-19), the
   full-screen viewer (rv-20), the condensed headers and filter chips (rv-21), hiding the sidebar with `[` (rv-22),
   full size vs "plug in PP 1" plus the grid's unplugged icon (rv-23), the expandable map / "Refine on map" (rv-24).
-  No clock banners should show now (sp-7b).
+  No clock banners should show now (sp-7b). Then run `uv run photovault --json meta scan --rescan "<mount>"` on each
+  connected drive so `subsec` fills in (sh-0b), and try the review mode on test data:
+  `PHOTOVAULT_DEV_PLAN=tests/fixtures/plans/shoots-fixture.json uv run photovault serve` → `#/review/shoots` (sh-3).
 - **Push the archive branch?** Run `git push -u origin archive/v0-cli-2026-11-11` if you want it on GitHub.
   (`main` is pushed.)
 - **Corpus gaps (fnd-7):** the wish list still lacks a Z6II pair, a night run, a GoPro set and an iPhone
@@ -102,16 +104,17 @@ task's commit:
 - **X9 sample:** should `testdata/x9_sample/` move into `testdata/corpus/x9/` (D-017)?
 - The exFAT answer looked cut off ("honestly considering…"). Tell us if you are weighing APFS after all.
 - **eval-1, last question:** the boundary check from memory (the other three are answered, D-069). See the review file.
-- **Curation proposals (D-069):** cu-0 (schema V6), dd-0 (duplicate quarantine), ro-0 (shoot folder layout) each
+- **Curation proposals (D-069):** cu-0 (now schema V8), dd-0 (duplicate quarantine), ro-0 (shoot folder layout) each
   come back as a review for your approval before any code.
 - **lrcat mark:** run it on a copy of one catalog (guide step 3) or say you are skipping it for now. Keep Lightroom
   closed while you do.
 
 ## Recent decisions
+- D-083 (agent): sh-0b time model (`timemodel.py`, body clocks, wall dates, subsec) and sh-3 review mode landed.
+- D-082 (user): the map centres on the selection or its top suggestion (a faint ring until Use).
+- D-081 (user): moving a saved location also moves related photos still at the same spot (25 m).
 - D-080 (user): shoot tagging approved (two-time model, trips, tz per shoot, names, V7, catalog-only apply in a review mode).
-- D-079 (agent): rv-24 expandable map window.
 - D-078 (agent): rv-21..rv-23 and sp-7b judgement calls; 0 clock banners on the real catalog; full previews cached in the home.
-- D-077 (user): false clock banners → sp-7b; a suggested town was right; rv-22 sidebar; rv-23 full size + plug-in prompt.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.
