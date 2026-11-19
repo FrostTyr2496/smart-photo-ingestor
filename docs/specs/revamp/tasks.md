@@ -243,3 +243,13 @@ Rules for every task:
     The header loads it lazily for one photo. Day stats come from the rows already fetched, plus the day's count.
   - Verify: `uv run pytest tests/test_web_api.py -q -k detail`; `cd web && npm run typecheck && npm test`;
     **[user]** browser check.
+
+- [ ] 22. Hideable left sidebar
+  - ID: rv-22 (user ask, 2026-11-18)
+  - The drives sidebar (`web/src/views/Sidebar.tsx`, laid out in `App.tsx`) collapses to nothing, giving the page its full
+    width. Ways to toggle it: a button in the header, `[` as a keyboard shortcut (ignored while typing in a field), and a
+    small "Drives" handle on the left edge when hidden. The state is remembered with `usePref`. Collapsing and expanding
+    animate with Framer Motion (instant under reduced motion). On narrow screens, where it already overlays or stacks,
+    keep the current behaviour and add only the toggle. The sticky inspector and month rail must still line up after a
+    toggle.
+  - Verify: `cd web && npm run typecheck && npm test`; **[user]** browser check.

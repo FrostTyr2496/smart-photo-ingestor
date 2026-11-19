@@ -213,3 +213,21 @@ reference folder read into `geo_points`) and `geo.suggest` (time-matched suggest
     four photos from the spot check (`docs/private/` notes).
   - Result (2026-11-18): `geo.session_of`, `suggest(reach_s, extended)` with session, far/weak and hint rows plus
     `score`; setting `match_reach_s` (12 h); Suggestions and Settings UI; `places_near` stays on windowed points.
+
+- [ ] 7b. **[stronger]** Time-zone suggestions count independent evidence, not frames
+  - ID: sp-7b (user check, 2026-11-18, D-077). Fixes sp-7.
+  - Found on the real catalog: all four banners were false. Each rested on **one** session, with one burst or
+    timelapse (up to 1,376 frames) landing near one phone photo after the shift (4.25 h, 10 h, 1.75 h, 8.25 h). In one case
+    another session already matched with no shift at all.
+  - `photovault/clock.py` `suggest_offsets`:
+    - Count **distinct sessions** (frames chained by ≤ 15 min of instant, as in `geo.session_of`) that have a phone point
+      within ±10 min after the shift, not frames. Report `sessions_matched` and `sessions_total`.
+    - Suggest only when the best shift has ≥ 3 matched sessions and ≥ 2× the runner-up's (counting only shifts more
+      than 1 h away), *and* beats shift 0 by at least 3 sessions.
+    - Candidate shifts are time-zone steps only: whole hours, plus :30 and :45 (offsets that exist), from −14 h to +14 h.
+      Drift of a few minutes stays manual.
+    - The banner text uses sessions ("3 separate outings line up after the shift").
+  - Verify: `uv run pytest tests/test_clock.py -q`, adding these cases: a single 1,000-frame timelapse with one phone photo
+    (no suggestion); three outings 8 h off (suggestion); a 4.25 h candidate never offered; shift 0 already matching (no
+    suggestion). Then rerun on the real catalog read-only and report the counts in the Result line (expected: the four
+    false banners are gone).
