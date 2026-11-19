@@ -6,6 +6,12 @@ import {
   matchesFilter,
   connectedFrames,
   reviewSections,
+  fromServerRows,
+  sha1Hex,
+  shootId,
+  toServerRows,
+  type DecisionRow,
+  type StoredDecision,
   tally,
   undoDecision,
   type Decision,
@@ -52,6 +58,10 @@ const plan: Plan = {
 // distinct, ordered starts for the first shoot too
 plan.shoots[0]!.start_instant = '2026-03-01T10:00:00+00:00';
 plan.shoots[0]!.end_instant = '2026-03-01T12:00:00+00:00';
+
+// the planner's ids for the halves of s:b (groups 5-10) cut after 6
+const B1 = shootId(5, 6);
+const B2 = shootId(7, 10);
 
 const run = (...ds: NewDecision[]): Decision[] => ds.reduce<Decision[]>((acc, d) => addDecision(acc, d), []);
 const get = (ds: Decision[], id: string) => effectivePlan(plan, ds).shoots.find((s) => s.proposal_id === id)!;
@@ -105,8 +115,8 @@ describe('review reducer', () => {
   it('splits at a gap into two shoots with the right group ranges and counts', () => {
     const ds = run({ kind: 'split', id: 's:b', after_group_id: 6 });
     const p = effectivePlan(plan, ds);
-    const left = p.shoots.find((s) => s.proposal_id === 's:b/1')!;
-    const right = p.shoots.find((s) => s.proposal_id === 's:b/2')!;
+    const left = p.shoots.find((s) => s.proposal_id === B1)!;
+    const right = p.shoots.find((s) => s.proposal_id === B2)!;
     expect(p.shoots.some((s) => s.proposal_id === 's:b')).toBe(false);
     expect(left.group_ids).toEqual([5, 6]);
     expect(right.group_ids).toEqual([7, 8, 9, 10]);
@@ -120,7 +130,7 @@ describe('review reducer', () => {
     expect(left.gaps.concat(right.gaps).some((g) => g.after_group_id === 6)).toBe(false);
     expect(left.points.length + right.points.length).toBe(6);
     expect(left.state).toBe('undecided');
-    expect(p.trips[0]!.shoot_ids).toEqual(['s:a', 's:b/1', 's:b/2']);
+    expect(p.trips[0]!.shoot_ids).toEqual(['s:a', B1, B2]);
   });
 
   it('does nothing for a split that is not between two groups', () => {
@@ -189,8 +199,8 @@ describe('undo and bookkeeping', () => {
   });
 
   it('undoing a split turns later decisions on its halves into no-ops', () => {
-    const ds = run({ kind: 'split', id: 's:b', after_group_id: 6 }, { kind: 'accept', id: 's:b/1' });
-    expect(effectivePlan(plan, ds).shoots.find((s) => s.proposal_id === 's:b/1')!.state).toBe('accepted');
+    const ds = run({ kind: 'split', id: 's:b', after_group_id: 6 }, { kind: 'accept', id: B1 });
+    expect(effectivePlan(plan, ds).shoots.find((s) => s.proposal_id === B1)!.state).toBe('accepted');
     const p = effectivePlan(plan, undoDecision(ds, 1));
     expect(p.shoots).toHaveLength(3);
     expect(p.shoots.every((s) => s.state === 'undecided')).toBe(true);
@@ -245,7 +255,50 @@ describe('review order (sh-3b)', () => {
   it('split keeps the drives and merge adds them up', () => {
     const merged = effectivePlan(p2, run({ kind: 'merge', id: 's:a', with: 'next' })).shoots[0]!;
     expect(merged.volumes).toEqual([vol('arch', 90), vol('work', 10)]);
-    const halves = effectivePlan(p2, run({ kind: 'split', id: 's:b', after_group_id: 6 })).shoots.filter((s) => s.proposal_id.startsWith('s:b/'));
+    const halves = effectivePlan(p2, run({ kind: 'split', id: 's:b', after_group_id: 6 })).shoots.filter((s) => [B1, B2].includes(s.proposal_id));
     expect(halves.map((h) => h.volumes)).toEqual([p2.shoots[1]!.volumes, p2.shoots[1]!.volumes]);
+  });
+});
+
+describe('stored decisions (sh-2)', () => {
+  it('ids match the planner (sha1 of "first-last")', () => {
+    expect(sha1Hex('')).toBe('da39a3ee5e6b4b0d3255bfef95601890afd80709');
+    expect(sha1Hex('a'.repeat(100))).toBe('7f9000257a4918d7072655ea468540cdcbd42e0c');
+    expect(shootId(101, 140)).toBe('s:ec9e106b0943e1a5');
+    expect(B1).toBe('s:5ea949b329c4990e');
+    expect(effectivePlan(plan, run({ kind: 'merge', id: 's:a', with: 'next' })).shoots[0]!.proposal_id).toBe(shootId(1, 10));
+  });
+
+  it('reads accepted and renamed shoots from a re-plan', () => {
+    const q: Plan = { ...plan, shoots: [{ ...plan.shoots[0]!, state: 'accepted', name: { value: 'Mine', source: 'user', alternatives: [] } }, ...plan.shoots.slice(1)] };
+    const s = effectivePlan(q, []).shoots[0]!;
+    expect([s.state, s.renamed]).toEqual(['accepted', true]);
+  });
+
+  it('expands the batch actions into accepts and folds them back', () => {
+    const p = effectivePlan(plan, []);
+    const trip = toServerRows({ kind: 'accept_trip', id: 't:1' }, p, 'b1');
+    expect(trip.map((r) => [r.proposal_id, r.kind])).toEqual([['s:a', 'accept'], ['s:b', 'accept']]);
+    const unflagged = toServerRows({ kind: 'accept_all_unflagged' }, p, 'b2');
+    expect(unflagged.map((r) => r.proposal_id)).toEqual(['s:a', 's:c']); // s:b is flagged
+    expect(toServerRows({ kind: 'merge', id: 's:a', with: 'next' }, p, 'x')).toEqual([{ proposal_id: 's:a', kind: 'merge', payload: { with: 'next' } }]);
+
+    let n = 10;
+    const stored: StoredDecision[] = [
+      { proposal_id: 's:b', kind: 'split', payload: { after_group_id: 6 } } as DecisionRow,
+      ...trip,
+      { proposal_id: B1, kind: 'rename', payload: { value: 'Harbour Moonrise' } } as DecisionRow,
+      ...unflagged,
+    ].map((r) => ({ ...r, decision_id: ++n }));
+    const ds = fromServerRows(stored);
+    expect(ds.map((d) => [d.kind, d.seq, d.rows])).toEqual([
+      ['split', 11, [11]],
+      ['accept_trip', 12, [12, 13]],
+      ['rename', 14, [14]],
+      ['accept_all_unflagged', 15, [15, 16]],
+    ]);
+    const eff = effectivePlan(plan, ds);
+    expect(eff.shoots.find((s) => s.proposal_id === B1)!.name.value).toBe('Harbour Moonrise');
+    expect(eff.shoots.every((s) => s.state === 'accepted' || s.flags.length > 0)).toBe(true);
   });
 });

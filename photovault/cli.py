@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+import re
 import signal
 import sqlite3
 import sys
@@ -10,7 +12,7 @@ import uuid
 import webbrowser
 from pathlib import Path
 
-from photovault import cards, meta, metrics, phone, report, volumes
+from photovault import cards, meta, metrics, phone, report, shoots, volumes
 from photovault import activity
 from photovault.activity import ActivityEmitter
 from photovault.drives import CLI_DRIVE_KEYS, VOLUMES_ROOT, scan_mounts
@@ -374,6 +376,27 @@ def cmd_metrics_backfill(args, cfg, emit) -> int:
     return EXIT_OK
 
 
+def _day(text: str) -> str:
+    """argparse type for --from/--to: a YYYY-MM-DD date."""
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        raise argparse.ArgumentTypeError("use YYYY-MM-DD")
+    return text
+
+
+def cmd_shoots_plan(args, cfg, emit) -> int:
+    """Propose trips and shoots and write the plan file (sh-2). Reads the catalog; writes only <home>/plans/."""
+    if args.gap_h <= 0:
+        emit.emit("error", code="usage", message="--gap-h must be above 0")
+        return EXIT_USAGE
+    conn = _open(cfg)
+    emit.emit("progress", phase="plan", message="planning shoots")
+    path = shoots.write_plan(conn, cfg.home, gap_h=args.gap_h, frm=args.frm, to=args.to)
+    result = json.loads(path.read_text(encoding="utf-8"))
+    emit.emit("result", plan_id=result["plan_id"], path=str(path), decisions_through=result["decisions_through"],
+              **result["summary"])
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="photovault", description="Verified card imports and a multi-drive catalog.")
     p.add_argument("--json", action="store_true", help="emit JSON lines (protocol v1)")
@@ -493,6 +516,14 @@ def build_parser() -> argparse.ArgumentParser:
     mxs = mx.add_subparsers(dest="sub")
     mxs.add_parser("backfill", help="estimate past work from the catalog (before live counting began)").set_defaults(
         func=cmd_metrics_backfill)
+
+    sh = sub.add_parser("shoots", help="trips and shoots proposed by time and place").add_subparsers(
+        dest="sub", required=True)
+    shp = sh.add_parser("plan", help="propose trips and shoots for review (reads the catalog; writes a plan file)")
+    shp.add_argument("--from", dest="frm", type=_day, metavar="YYYY-MM-DD", help="first capture day to plan")
+    shp.add_argument("--to", type=_day, metavar="YYYY-MM-DD", help="last capture day to plan")
+    shp.add_argument("--gap-h", type=float, default=8, help="hours without photos that start a new shoot (8)")
+    shp.set_defaults(func=cmd_shoots_plan)
 
     j = sub.add_parser("jobs", help="recent jobs")
     j.add_argument("--limit", type=int, default=20)

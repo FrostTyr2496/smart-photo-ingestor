@@ -2,8 +2,10 @@
 // pane. A decision is a small record; the "effective plan" the UI renders is the base plan with every decision folded
 // in, in order. Nothing here writes anything: Apply arrives with sh-4.
 //
-// TODO(sh-2): decisions are kept in the browser (usePref, per plan_id). When POST /api/shoots/decisions lands, send
-// each Decision there and load them from GET /api/shoots/decisions; `effectivePlan(plan, decisions)` stays as is.
+// sh-2: decisions live in the catalog (`shoot_plan_decisions`, through /api/shoots/decisions). The page loads the plan
+// and the decisions made after it (`decisions_through`), and replays those; `toServerRows` / `fromServerRows` map a
+// review action to the stored rows and back. Split and merge pieces get the planner's id (`shootId`), so a decision
+// on a piece still applies when the server re-plans.
 
 export type NameSource = 'folder' | 'phone' | 'other_folder' | 'fallback' | 'user' | string;
 
@@ -35,6 +37,8 @@ export interface PlanShoot {
   gaps: Gap[];
   flags: string[];
   locked: boolean;
+  /** Set by the planner when a stored decision accepted or skipped the shoot. */
+  state?: 'accepted' | 'skipped';
   /** The drives holding the frames, most frames first (sh-1). Older plans lack it. */
   volumes?: PlanVolume[];
 }
@@ -54,13 +58,16 @@ export interface PlanTrip {
 export interface Plan {
   plan_id: string;
   created_at: string;
+  /** The newest stored decision already folded into this plan (sh-2); absent in older plans and the fixture. */
+  decisions_through?: number;
   params: Record<string, number | string | null>;
   summary: { frames: number; shoots: number; trips: number; unassigned: number; locked: number; flagged: number };
   trips: PlanTrip[];
   shoots: PlanShoot[];
 }
 
-export type Decision = { seq: number } & (
+/** `rows`: the stored decision ids behind this one (sh-2); several for "Accept trip" and "Accept all unflagged". */
+export type Decision = { seq: number; rows?: number[] } & (
   | { kind: 'accept'; id: string }
   | { kind: 'skip'; id: string }
   | { kind: 'rename'; id: string; value: string; source?: NameSource }
@@ -72,10 +79,10 @@ export type Decision = { seq: number } & (
   | { kind: 'accept_all_unflagged' }
 );
 /** A decision before it gets its sequence number. */
-export type NewDecision = Decision extends infer D ? (D extends unknown ? Omit<D, 'seq'> : never) : never;
+export type NewDecision = Decision extends infer D ? (D extends unknown ? Omit<D, 'seq' | 'rows'> : never) : never;
 
 export type ShootState = 'undecided' | 'accepted' | 'skipped';
-export interface EffShoot extends PlanShoot {
+export interface EffShoot extends Omit<PlanShoot, 'state'> {
   state: ShootState;
   renamed: boolean;
   /** Made by a split or merge here, so counts, dates and points are estimates. */
@@ -111,8 +118,37 @@ const share = (total: number, left: number, all: number): [number, number] => {
 };
 
 export function fromPlanShoot(s: PlanShoot): EffShoot {
-  return { ...s, state: 'undecided', renamed: false, derived: false, rejected: [] };
+  return { ...s, state: s.state ?? 'undecided', renamed: s.name.source === 'user', derived: false, rejected: [] };
 }
+
+// ---- proposal ids: the planner's `_sha("s:", first, last)` (photovault/shoots.py) ----
+
+export function sha1Hex(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  const len = bytes.length;
+  const words = new Uint32Array((((len + 8) >> 6) + 1) * 16);
+  for (let i = 0; i < len; i++) words[i >> 2]! |= bytes[i]! << (24 - (i % 4) * 8);
+  words[len >> 2]! |= 0x80 << (24 - (len % 4) * 8);
+  words[words.length - 1] = len * 8;
+  const w = new Uint32Array(80);
+  let [a, b, c, d, e] = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0];
+  const rol = (x: number, n: number) => (x << n) | (x >>> (32 - n));
+  for (let blk = 0; blk < words.length; blk += 16) {
+    for (let t = 0; t < 80; t++) w[t] = t < 16 ? words[blk + t]! : rol(w[t - 3]! ^ w[t - 8]! ^ w[t - 14]! ^ w[t - 16]!, 1);
+    let [A, B, C, D, E] = [a, b, c, d, e];
+    for (let t = 0; t < 80; t++) {
+      const f = t < 20 ? (B & C) | (~B & D) : t < 40 ? B ^ C ^ D : t < 60 ? (B & C) | (B & D) | (C & D) : B ^ C ^ D;
+      const k = t < 20 ? 0x5a827999 : t < 40 ? 0x6ed9eba1 : t < 60 ? 0x8f1bbcdc : 0xca62c1d6;
+      const tmp = (rol(A, 5) + f + E + k + w[t]!) | 0;
+      [E, D, C, B, A] = [D, C, rol(B, 30), A, tmp];
+    }
+    [a, b, c, d, e] = [(a + A) | 0, (b + B) | 0, (c + C) | 0, (d + D) | 0, (e + E) | 0];
+  }
+  return [a, b, c, d, e].map((x) => (x >>> 0).toString(16).padStart(8, '0')).join('');
+}
+
+/** The planner's id for a shoot running from group `first` to group `last`. */
+export const shootId = (first: number, last: number): string => `s:${sha1Hex(`${first}-${last}`).slice(0, 16)}`;
 
 /** Cut a shoot after a group (at one of its gaps) into two. Counts, bodies, located and points are shared by group
  *  count, so they are estimates (`derived`). Returns null when the cut is not between two groups. */
@@ -133,9 +169,9 @@ export function splitShoot(s: EffShoot, afterGroupId: number): [EffShoot, EffSho
   }
   const pc = Math.round((s.points.length * leftIds.length) / n);
   const set = new Set(leftIds);
-  const mk = (suffix: string, ids: number[], isLeft: boolean): EffShoot => ({
+  const mk = (ids: number[], isLeft: boolean): EffShoot => ({
     ...s,
-    proposal_id: `${s.proposal_id}/${suffix}`,
+    proposal_id: shootId(ids[0]!, ids[ids.length - 1]!),
     group_ids: ids,
     counts: { frames: isLeft ? fl : fr, by_body: isLeft ? bl : br, located: isLeft ? ll : lr },
     sample_group_ids: s.sample_group_ids.filter((g) => (set.has(g) === isLeft)),
@@ -150,7 +186,7 @@ export function splitShoot(s: EffShoot, afterGroupId: number): [EffShoot, EffSho
     derived: true,
     name: isLeft ? s.name : { ...s.name, alternatives: [...s.name.alternatives] },
   });
-  return [mk('1', leftIds, true), mk('2', rightIds, false)];
+  return [mk(leftIds, true), mk(rightIds, false)];
 }
 
 const gapSeconds = (a: EffShoot, b: EffShoot): number | null => {
@@ -174,7 +210,7 @@ export function mergeShoots(a: EffShoot, b: EffShoot): EffShoot {
   const last = a.group_ids[a.group_ids.length - 1]!;
   return {
     ...a,
-    proposal_id: `${a.proposal_id}+${b.proposal_id}`,
+    proposal_id: shootId(a.group_ids[0]!, b.group_ids[b.group_ids.length - 1]!),
     group_ids: [...a.group_ids, ...b.group_ids],
     counts: { frames: a.counts.frames + b.counts.frames, by_body: sumBodies(a.counts.by_body, b.counts.by_body), located: a.counts.located + b.counts.located },
     sample_group_ids: [...a.sample_group_ids, ...b.sample_group_ids].slice(0, 12),
@@ -312,6 +348,72 @@ export function addDecision(decisions: Decision[], d: NewDecision): Decision[] {
 /** Undo one decision by its sequence number. Later ones that depended on it become no-ops when replayed. */
 export function undoDecision(decisions: Decision[], seq: number): Decision[] {
   return decisions.filter((d) => d.seq !== seq);
+}
+
+// ---- stored rows (sh-2) ----
+
+export interface StoredDecision {
+  decision_id: number;
+  proposal_id: string;
+  kind: 'accept' | 'split' | 'merge' | 'skip' | 'rename' | 'reject_name' | 'move';
+  payload: Record<string, unknown>;
+  decided_at?: string;
+}
+export type DecisionRow = Omit<StoredDecision, 'decision_id' | 'decided_at'>;
+
+/** The rows to store for one review action, against the plan as it stands. "Accept trip" and "Accept all unflagged"
+ *  become one `accept` per shoot they touch, sharing `batch`; an action that touches nothing gives no rows. */
+export function toServerRows(d: NewDecision, p: EffPlan, batch: string): DecisionRow[] {
+  switch (d.kind) {
+    case 'accept':
+    case 'skip':
+      return [{ proposal_id: d.id, kind: d.kind, payload: {} }];
+    case 'rename':
+      return [{ proposal_id: d.id, kind: 'rename', payload: { value: d.value, ...(d.source ? { source: d.source } : {}) } }];
+    case 'reject_name':
+      return [{ proposal_id: d.id, kind: 'reject_name', payload: { value: d.value } }];
+    case 'split':
+      return [{ proposal_id: d.id, kind: 'split', payload: { after_group_id: d.after_group_id } }];
+    case 'merge':
+      return [{ proposal_id: d.id, kind: 'merge', payload: { with: d.with } }];
+    case 'move':
+      return [{ proposal_id: d.id, kind: 'move', payload: { trip_id: d.trip_id } }];
+    case 'accept_trip':
+      return p.shoots
+        .filter((s) => s.trip_id === d.id && !s.locked)
+        .map((s) => ({ proposal_id: s.proposal_id, kind: 'accept', payload: { batch, ui: 'accept_trip', trip: d.id } }));
+    case 'accept_all_unflagged':
+      return p.shoots
+        .filter((s) => !s.locked && s.state === 'undecided' && s.flags.length === 0)
+        .map((s) => ({ proposal_id: s.proposal_id, kind: 'accept', payload: { batch, ui: 'accept_all_unflagged' } }));
+  }
+}
+
+/** Stored rows back to review decisions, in order; the rows of one batch become the one action that made them. */
+export function fromServerRows(rows: StoredDecision[]): Decision[] {
+  const out: Decision[] = [];
+  const batches = new Map<string, Decision>();
+  for (const r of rows) {
+    const p = r.payload;
+    const batch = typeof p.batch === 'string' ? p.batch : null;
+    if (batch && batches.has(batch)) {
+      batches.get(batch)!.rows!.push(r.decision_id);
+      continue;
+    }
+    const base = { seq: r.decision_id, rows: [r.decision_id] };
+    let d: Decision;
+    if (batch && p.ui === 'accept_trip' && typeof p.trip === 'string') d = { ...base, kind: 'accept_trip', id: p.trip };
+    else if (batch && p.ui === 'accept_all_unflagged') d = { ...base, kind: 'accept_all_unflagged' };
+    else if (r.kind === 'rename') d = { ...base, kind: 'rename', id: r.proposal_id, value: String(p.value ?? ''), ...(typeof p.source === 'string' ? { source: p.source } : {}) };
+    else if (r.kind === 'reject_name') d = { ...base, kind: 'reject_name', id: r.proposal_id, value: String(p.value ?? '') };
+    else if (r.kind === 'split') d = { ...base, kind: 'split', id: r.proposal_id, after_group_id: Number(p.after_group_id) };
+    else if (r.kind === 'merge') d = { ...base, kind: 'merge', id: r.proposal_id, with: p.with === 'prev' ? 'prev' : 'next' };
+    else if (r.kind === 'move') d = { ...base, kind: 'move', id: r.proposal_id, trip_id: typeof p.trip_id === 'string' ? p.trip_id : null };
+    else d = { ...base, kind: r.kind, id: r.proposal_id };
+    if (batch) batches.set(batch, d);
+    out.push(d);
+  }
+  return out;
 }
 
 const nameOf = (p: EffPlan, id: string): string => p.trips.find((t) => t.proposal_id === id)?.name.value ?? p.shoots.find((s) => s.proposal_id === id)?.name.value ?? 'a shoot';

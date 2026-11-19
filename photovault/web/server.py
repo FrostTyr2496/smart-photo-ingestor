@@ -24,6 +24,7 @@ import subprocess
 import sys
 import threading
 from collections import Counter, deque
+from contextlib import nullcontext as _nullcontext
 import time
 from datetime import UTC, datetime, timedelta
 from dataclasses import dataclass
@@ -34,7 +35,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from PIL import Image
 
-from photovault import actions, activity, cards, clock, metadata, naming, preview, timemodel, usage, volumes
+from photovault import actions, activity, cards, clock, metadata, naming, preview, shoots, timemodel, usage, volumes
 from photovault.catalog import db, repo
 from photovault.config import ConfigError, load_config
 from photovault.drives import DEFAULT_MAC_FOLDER, VOLUMES_ROOT, scan_mounts
@@ -295,11 +296,26 @@ def build_argv(cmd: str, args: dict) -> list[str]:
         _allow_only(args, {"mount", "dry_run"})
         argv = ["meta", "sidecars", "--volume", _path_arg(args, "mount")]
         return argv + (["--dry-run"] if _bool_arg(args, "dry_run") else [])
+    if cmd == "shoots_plan":
+        _allow_only(args, {"from", "to", "gap_h"})
+        argv = ["shoots", "plan"]
+        for key, flag in (("from", "--from"), ("to", "--to")):
+            day = _text_arg(args, key, required=False)
+            if day is not None:
+                if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
+                    raise BadRequest(f"{key!r} must be YYYY-MM-DD")
+                argv += [flag, day]
+        gap = args.get("gap_h")
+        if gap is not None:
+            if isinstance(gap, bool) or not isinstance(gap, (int, float)) or not 0 < gap <= 240:
+                raise BadRequest("'gap_h' must be a number of hours above 0")
+            argv += ["--gap-h", str(gap)]
+        return argv
     raise BadRequest(f"unknown command {cmd!r}")
 
 
 ALLOWED_CMDS = ("assign", "ingest", "resume", "card_status", "card_check", "index", "hash", "meta_scan",
-                "meta_refs", "meta_sidecars")
+                "meta_refs", "meta_sidecars", "shoots_plan")
 
 
 # --------------------------------------------------------------------------- app and helpers
@@ -878,6 +894,11 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
         ("GET", "/api/activity"): lambda: activity.snapshot(conn, app.home, server_pid=os.getpid()),
         ("GET", "/api/actions"): lambda: _actions(app, conn, query),
         ("GET", "/api/shoots/plan"): lambda: _shoots_plan(app),
+        ("POST", "/api/shoots/plan"): lambda: {"task_id": app.runner.start(build_argv("shoots_plan", _body_dict(
+            body or {})))},
+        ("GET", "/api/shoots/decisions"): lambda: _shoot_decisions(conn, "list", query, body),
+        ("POST", "/api/shoots/decisions"): lambda: _shoot_decisions(conn, "add", query, body),
+        ("POST", "/api/shoots/decisions/delete"): lambda: _shoot_decisions(conn, "delete", query, body),
         ("GET", "/api/shoots"): lambda: {"shoots": [dict(r) for r in repo.list_shoots(conn)]},
         ("GET", "/api/groups"): lambda: _groups(conn, query, app),
         ("GET", "/api/photo-days"): lambda: _photo_days(conn, query),
@@ -954,7 +975,8 @@ def _action_state(app: WebApp, conn, action_id: str, verb: str, body: Any) -> di
 
 def _shoots_plan(app: WebApp) -> dict:
     """``GET /api/shoots/plan`` (sh-3): the newest ``<home>/plans/shoots-*.json``, read-only. ``PHOTOVAULT_DEV_PLAN=<path>``
-    serves that file instead (development and the fixture). 404 when there is none; sh-2 adds the planner."""
+    serves that file instead (development and the fixture). 404 when there is none; ``POST`` (or `shoots plan`)
+    makes one."""
     override = os.environ.get("PHOTOVAULT_DEV_PLAN")
     if override:
         path = Path(override)
@@ -970,6 +992,50 @@ def _shoots_plan(app: WebApp) -> dict:
         raise NotFound("no plan yet") from exc
     except (OSError, ValueError) as exc:
         raise BadRequest(f"the plan file could not be read: {exc}") from exc
+
+
+# With PHOTOVAULT_DEV_PLAN the review runs on a fixture whose ids mean nothing in the catalog, and a rejected name
+# would join the real stoplist, so its decisions live in memory for the life of the server instead.
+_DEV_DECISIONS: dict[str, sqlite3.Connection] = {}
+_DEV_LOCK = threading.Lock()
+
+
+def _dev_decisions_conn(override: str) -> sqlite3.Connection:
+    conn = _DEV_DECISIONS.get(override)
+    if conn is None:
+        conn = sqlite3.connect(":memory:", check_same_thread=False, isolation_level=None)
+        conn.row_factory = sqlite3.Row
+        conn.execute("CREATE TABLE shoot_plan_decisions (decision_id INTEGER PRIMARY KEY, proposal_id TEXT NOT NULL, "
+                     "kind TEXT NOT NULL, payload_json TEXT NOT NULL, decided_at TEXT NOT NULL)")
+        _DEV_DECISIONS[override] = conn
+    return conn
+
+
+def _shoot_decisions(conn, verb: str, query: dict, body: Any) -> dict:
+    """sh-2: the review decisions. ``GET ?after=N`` lists those after id N; ``POST`` stores one
+    ``{proposal_id, kind, payload}`` or ``{"decisions": [...]}`` (all or none); ``POST …/delete
+    {"decision_ids": [...]}`` undoes them."""
+    override = os.environ.get("PHOTOVAULT_DEV_PLAN")
+    with _DEV_LOCK if override else _nullcontext():
+        target = _dev_decisions_conn(override) if override else conn
+        if verb == "list":
+            return {"decisions": shoots.list_decisions(target, _int_param(query, "after", 0, 0, 2**62)),
+                    "dev": bool(override)}
+        body = _body_dict(body)
+        if verb == "add":
+            items = body.get("decisions") if "decisions" in body else [body]
+            if not isinstance(items, list) or not items or len(items) > 5000:
+                raise BadRequest("decisions must be a list of 1 to 5000 decisions")
+            try:
+                with repo.transaction(target):
+                    return {"decisions": shoots.add_decisions(target, items)}
+            except ValueError as exc:
+                raise BadRequest(str(exc)) from exc
+        ids = body.get("decision_ids")
+        if not isinstance(ids, list) or not ids or not all(isinstance(i, int) and not isinstance(i, bool) for i in ids):
+            raise BadRequest("decision_ids must be a non-empty list of whole numbers")
+        with repo.transaction(target):
+            return {"deleted": shoots.delete_decisions(target, ids)}
 
 
 FILE_STATES = ("indexed", "verified", "mismatch", "missing")

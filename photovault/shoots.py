@@ -2,7 +2,9 @@
 
 `plan` reads the catalog and returns a dry-run proposal of trips and shoots in the plan-file format of
 `docs/specs/shoots/tasks.md`; it writes nothing. `calibrate` scores the boundary step against the date-prefixed
-folders. `write_plan` is the only writer, and it writes one JSON file under ``<home>/plans``.
+folders. `write_plan` writes one JSON file under ``<home>/plans``. The review decisions (sh-2) are rows in
+``shoot_plan_decisions``: `add_decisions`, `list_decisions` and `delete_decisions` are the only writers of the catalog
+here, and they touch that table only.
 
 Every comparison uses the instant (`timemodel`); the wall clock gives the shoot date, display and names.
 """
@@ -483,20 +485,99 @@ def _trip_dict(members: list[dict], pid: str | None = None) -> dict:
 
 # ---------------------------------------------------------------- decisions
 
+DECISION_KINDS = ("accept", "split", "merge", "skip", "rename", "reject_name", "move")  # the V7 CHECK
+_PAYLOAD_KEYS = {"accept": set(), "skip": set(), "split": {"after_group_id"}, "merge": {"with"},
+                 "rename": {"value", "source"}, "reject_name": {"value"}, "move": {"trip_id"}}
+# Every kind may also carry these: `batch` groups the rows of one review action ("Accept trip", "Accept all
+# unflagged"), so they are listed and undone together; `ui` names that action and `trip` its trip.
+_BATCH_KEYS = {"batch", "ui", "trip"}
+
+
+def _load_payload(text: str | None) -> dict:
+    try:
+        payload = json.loads(text or "{}")
+    except ValueError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def _decisions(conn: sqlite3.Connection) -> list[dict]:
     try:
         rows = conn.execute(
-            "SELECT proposal_id, kind, payload_json FROM shoot_plan_decisions ORDER BY decision_id").fetchall()
+            "SELECT decision_id, proposal_id, kind, payload_json FROM shoot_plan_decisions "
+            "ORDER BY decision_id").fetchall()
     except sqlite3.OperationalError:
         return []
-    out = []
-    for r in rows:
-        try:
-            payload = json.loads(r["payload_json"] or "{}")
-        except ValueError:
-            payload = {}
-        out.append({"id": r["proposal_id"], "kind": r["kind"], **(payload if isinstance(payload, dict) else {})})
-    return out
+    return [{**_load_payload(r["payload_json"]), "id": r["proposal_id"], "kind": r["kind"],
+             "decision_id": r["decision_id"]} for r in rows]
+
+
+def check_decision(d: Any) -> tuple[str, str, dict]:
+    """Validate one ``{proposal_id, kind, payload}``; raise ValueError with a plain message."""
+    if not isinstance(d, dict):
+        raise ValueError("a decision must be an object")
+    pid, kind, payload = d.get("proposal_id"), d.get("kind"), d.get("payload", {})
+    if not isinstance(pid, str) or not re.fullmatch(r"[st]:[0-9a-f]{6,40}", pid):
+        raise ValueError("proposal_id must be a shoot (s:…) or trip (t:…) id")
+    if kind not in DECISION_KINDS:
+        raise ValueError(f"kind must be one of: {', '.join(DECISION_KINDS)}")
+    if payload is None:
+        payload = {}
+    if not isinstance(payload, dict):
+        raise ValueError("payload must be an object")
+    extra = set(payload) - _PAYLOAD_KEYS[kind] - _BATCH_KEYS
+    if extra:
+        raise ValueError(f"{kind}: unexpected payload keys {', '.join(sorted(extra))}")
+    if pid.startswith("t:") and kind != "rename":
+        raise ValueError(f"{kind} applies to a shoot, not a trip")
+    if kind == "split":
+        g = payload.get("after_group_id")
+        if isinstance(g, bool) or not isinstance(g, int):
+            raise ValueError("split needs after_group_id (a whole number)")
+    elif kind == "merge" and payload.get("with") not in ("prev", "next"):
+        raise ValueError("merge needs with: prev or next")
+    elif kind in ("rename", "reject_name"):
+        v = payload.get("value")
+        if not isinstance(v, str) or not v.strip() or len(v) > 200:
+            raise ValueError(f"{kind} needs a value (1-200 characters)")
+        if kind == "rename" and not isinstance(payload.get("source", "user"), str):
+            raise ValueError("source must be text")
+    elif kind == "move":
+        t = payload.get("trip_id")
+        if t is not None and not (isinstance(t, str) and re.fullmatch(r"t:[0-9a-f]{6,40}", t)):
+            raise ValueError("move needs trip_id: a trip id or null")
+    for k in ("batch", "ui", "trip"):
+        if k in payload and not isinstance(payload[k], str):
+            raise ValueError(f"{k} must be text")
+    return pid, kind, payload
+
+
+def add_decisions(conn: sqlite3.Connection, decisions: list[Any], *, now: datetime | None = None) -> list[dict]:
+    """Store review decisions in order, all or none. The caller holds the transaction."""
+    checked = [check_decision(d) for d in decisions]
+    at = (now or datetime.now(UTC)).isoformat(timespec="seconds")
+    ids = []
+    for pid, kind, payload in checked:
+        cur = conn.execute("INSERT INTO shoot_plan_decisions (proposal_id, kind, payload_json, decided_at) "
+                           "VALUES (?,?,?,?)", (pid, kind, json.dumps(payload, ensure_ascii=False), at))
+        ids.append(cur.lastrowid)
+    return [d for d in list_decisions(conn) if d["decision_id"] in set(ids)]
+
+
+def list_decisions(conn: sqlite3.Connection, after: int = 0) -> list[dict]:
+    """Decisions with an id above `after`, oldest first, as ``{decision_id, proposal_id, kind, payload, decided_at}``."""
+    rows = conn.execute("SELECT decision_id, proposal_id, kind, payload_json, decided_at FROM shoot_plan_decisions "
+                        "WHERE decision_id > ? ORDER BY decision_id", (after,)).fetchall()
+    return [{"decision_id": r["decision_id"], "proposal_id": r["proposal_id"], "kind": r["kind"],
+             "payload": _load_payload(r["payload_json"]), "decided_at": r["decided_at"]} for r in rows]
+
+
+def delete_decisions(conn: sqlite3.Connection, ids: list[int]) -> int:
+    """Undo: remove decisions by id. Returns how many went. The caller holds the transaction."""
+    gone = 0
+    for i in ids:
+        gone += conn.execute("DELETE FROM shoot_plan_decisions WHERE decision_id = ?", (i,)).rowcount
+    return gone
 
 
 def _replay_structure(items: list[Item], segs: list[tuple[int, int]], decisions: list[dict]) -> list[tuple[int, int]]:
@@ -619,6 +700,8 @@ def plan(conn: sqlite3.Connection, *, gap_h: float = 8, split_km: float = 50, me
     plan_id = "shoots-" + now.strftime("%Y%m%d-%H%M%S")
     return {
         "plan_id": plan_id, "created_at": now.isoformat(timespec="seconds"),
+        # the newest decision already folded in (sh-2): review replays only the ones after it
+        "decisions_through": max((d["decision_id"] for d in decisions), default=0),
         "params": {"gap_h": gap_h, "split_km": split_km, "merge_h": merge_h, "region_km": region_km,
                    "from": frm, "to": to},
         "summary": {"frames": total_frames, "shoots": len(shoots), "trips": len(trips), "unassigned": unassigned,

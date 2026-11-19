@@ -1,16 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../lib/api';
 import { usePref } from '../../lib/prefs';
 import { useStore } from '../../lib/store';
 import {
-  addDecision,
   describeAll,
   effectivePlan,
+  fromServerRows,
   matchesFilter,
   reviewSections,
   tally,
-  undoDecision,
+  toServerRows,
   type Decision,
+  type StoredDecision,
   type EffTrip,
   type NewDecision,
   type Plan,
@@ -33,9 +34,43 @@ const FILTERS: { key: ReviewFilter; label: string }[] = [
 const btn = 'inline-flex h-7 items-center rounded-full border border-line px-2.5 text-xs text-muted hover:border-line-strong hover:text-ink disabled:opacity-40';
 const primary = 'inline-flex h-7 items-center rounded-full border border-maybe/50 bg-maybe/15 px-3 text-xs font-medium text-maybe hover:bg-maybe/25 disabled:opacity-40';
 
+interface Replan {
+  busy: boolean;
+  run: () => void;
+}
+
+/** Run the planner as a task (sh-2) and call `done` when it has written a new plan. */
+function useReplan(done: () => void): Replan {
+  const { startTask, toast } = useStore();
+  const [busy, setBusy] = useState(false);
+  const run = useCallback(() => {
+    void (async () => {
+      setBusy(true);
+      try {
+        const id = await startTask('shoots_plan', {});
+        if (id === null) return;
+        for (;;) {
+          await new Promise((r) => window.setTimeout(r, 1000));
+          const t = await api<{ state: string }>('GET', `/api/tasks/${id}?since=-1`);
+          if (t.state === 'running') continue;
+          if (t.state === 'done') done();
+          else toast('The planner did not finish. See Tasks for its log.', 'err');
+          return;
+        }
+      } catch (e) {
+        toast((e as Error).message, 'err');
+      } finally {
+        setBusy(false);
+      }
+    })();
+  }, [startTask, toast, done]);
+  return { busy, run };
+}
+
 export function ReviewShoots() {
   const [plan, setPlan] = useState<Plan | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
   useEffect(() => {
     let alive = true;
     api<Plan>('GET', '/api/shoots/plan')
@@ -44,19 +79,24 @@ export function ReviewShoots() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [reload]);
+  const replan = useReplan(useCallback(() => setReload((n) => n + 1), []));
 
-  if (plan) return <Review key={plan.plan_id} plan={plan} />;
+  if (plan) return <Review key={plan.plan_id} plan={plan} replan={replan} />;
   return (
     <div className="flex flex-col gap-4">
-      <ModeBar plan={null} pending={0} />
+      <ModeBar plan={null} pending={0} replan={replan} />
       <div className="rounded-2xl border border-line bg-surface/60 p-6 text-sm text-muted">
         {err === null ? (
           'Loading the plan…'
         ) : err === 'no plan yet' ? (
           <>
             <p className="text-base text-ink">No plan yet.</p>
-            <p className="mt-1">The planner arrives with sh-1 and sh-2. To try this view now, start the server with <code className="font-mono text-ink">PHOTOVAULT_DEV_PLAN=tests/fixtures/plans/shoots-fixture.json uv run photovault serve</code>.</p>
+            <p className="mt-1">The planner reads the catalog and proposes trips and shoots by time and place. It changes nothing: you review the proposal here first.</p>
+            <button type="button" className={`${primary} mt-3`} disabled={replan.busy} onClick={replan.run}>
+              {replan.busy ? 'Planning…' : 'Make a plan'}
+            </button>
+            <p className="mt-2 text-xs">Or in a terminal: <code className="font-mono text-ink">uv run photovault --json shoots plan</code></p>
           </>
         ) : (
           `The plan could not be loaded: ${err}`
@@ -66,7 +106,7 @@ export function ReviewShoots() {
   );
 }
 
-function ModeBar({ plan, pending, counts }: { plan: Plan | null; pending: number; counts?: ReturnType<typeof tally> }) {
+function ModeBar({ plan, pending, counts, replan }: { plan: Plan | null; pending: number; counts?: ReturnType<typeof tally>; replan: Replan }) {
   return (
     <div className="sticky top-14 z-20 -mx-1 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-maybe/50 bg-bg/90 px-4 py-2.5 backdrop-blur-xl" role="status">
       <span className="inline-flex items-center gap-2 text-sm font-semibold text-maybe">
@@ -79,6 +119,11 @@ function ModeBar({ plan, pending, counts }: { plan: Plan | null; pending: number
         </span>
       )}
       <span className="ml-auto flex items-center gap-2">
+        {plan && (
+          <button type="button" className={btn} disabled={replan.busy} onClick={replan.run} title="Plan again from the catalog, with every saved decision folded in">
+            {replan.busy ? 'Planning…' : 'Re-plan'}
+          </button>
+        )}
         <button type="button" disabled className={primary} title="Apply arrives with sh-4">
           Apply
         </button>
@@ -90,14 +135,61 @@ function ModeBar({ plan, pending, counts }: { plan: Plan | null; pending: number
   );
 }
 
-function Review({ plan }: { plan: Plan }) {
-  // TODO(sh-2): load and save these through /api/shoots/decisions instead of the browser.
-  const [decisions, setDecisions] = usePref<Decision[]>(`review.shoots.${plan.plan_id}`, []);
+let batchSeq = 0;
+const newBatch = (): string => `b${Date.now().toString(36)}${(batchSeq++).toString(36)}`;
+
+function Review({ plan, replan }: { plan: Plan; replan: Replan }) {
+  // sh-2: the decisions made after this plan, from the catalog. Earlier ones are already part of the plan.
+  const [decisions, setDecisions] = useState<Decision[]>([]);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [dev, setDev] = useState(false);
+  const { toast } = useStore();
   const [filter, setFilter] = useState<ReviewFilter>('all');
   const eff = useMemo(() => effectivePlan(plan, decisions), [plan, decisions]);
+  // The saves run one after another; each reads the list as the previous save left it, not as it was at the click.
+  const decRef = useRef<Decision[]>([]);
+  const commit = (next: Decision[]) => {
+    decRef.current = next;
+    setDecisions(next);
+  };
   const lines = useMemo(() => describeAll(plan, decisions), [plan, decisions]);
   const counts = tally(eff);
-  const decide = (d: NewDecision) => setDecisions((ds) => addDecision(ds, d));
+  useEffect(() => {
+    let alive = true;
+    api<{ decisions: StoredDecision[]; dev?: boolean }>('GET', `/api/shoots/decisions?after=${plan.decisions_through ?? 0}`)
+      .then((r) => {
+        if (!alive) return;
+        commit(fromServerRows(r.decisions));
+        setDev(Boolean(r.dev));
+      })
+      .catch((e: Error) => alive && setLoadErr(e.message));
+    return () => {
+      alive = false;
+    };
+  }, [plan]);
+  // One save at a time, so the stored order is the order of the clicks.
+  const queue = useRef<Promise<void>>(Promise.resolve());
+  const enqueue = (job: () => Promise<void>) => {
+    queue.current = queue.current.then(job).catch((e: Error) => toast(`Not saved: ${e.message}`, 'err'));
+  };
+  const decide = (d: NewDecision) =>
+    enqueue(async () => {
+      const rows = toServerRows(d, effectivePlan(plan, decRef.current), newBatch());
+      if (rows.length === 0) {
+        toast('Nothing to accept.');
+        return;
+      }
+      const r = await api<{ decisions: StoredDecision[] }>('POST', '/api/shoots/decisions', { decisions: rows });
+      const ids = r.decisions.map((x) => x.decision_id);
+      commit([...decRef.current, { ...d, seq: ids[0]!, rows: ids } as Decision]);
+    });
+  const undo = (seq: number) =>
+    enqueue(async () => {
+      const d = decRef.current.find((x) => x.seq === seq);
+      if (!d) return;
+      await api('POST', '/api/shoots/decisions/delete', { decision_ids: d.rows ?? [d.seq] });
+      commit(decRef.current.filter((x) => x.seq !== seq));
+    });
   const [connectedFirst, setConnectedFirst] = usePref<boolean>('review.shoots.connectedFirst', true);
   const { drives } = useStore();
   const mountedKey = drives.filter((d) => d.mounted && d.volume_id).map((d) => d.volume_id).sort().join('|');
@@ -106,7 +198,8 @@ function Review({ plan }: { plan: Plan }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <ModeBar plan={plan} pending={decisions.length} counts={counts} />
+      <ModeBar plan={plan} pending={decisions.length} counts={counts} replan={replan} />
+      {loadErr && <p className="text-sm text-err">The saved decisions could not be loaded: {loadErr}</p>}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Review shoots</h1>
@@ -157,7 +250,7 @@ function Review({ plan }: { plan: Plan }) {
                 {lines.map((l, i) => (
                   <li key={l.seq} className="flex items-start justify-between gap-2 rounded-lg px-2 py-1 text-xs hover:bg-ink/5">
                     <span className="min-w-0"><span className="text-faint">{i + 1}.</span> {l.text}</span>
-                    <button type="button" className="shrink-0 text-muted underline hover:text-ink" onClick={() => setDecisions((ds) => undoDecision(ds, l.seq))}>
+                    <button type="button" className="shrink-0 text-muted underline hover:text-ink" onClick={() => undo(l.seq)}>
                       Undo
                     </button>
                   </li>
@@ -165,7 +258,11 @@ function Review({ plan }: { plan: Plan }) {
               </ol>
             )}
           </div>
-          <p className="text-2xs text-faint">Decisions are kept in this browser until Apply arrives (sh-4).</p>
+          <p className="text-2xs text-faint">
+            {dev
+              ? 'Fixture plan: decisions are kept in server memory only and go when the server stops.'
+              : 'Each decision is saved in the catalog as you make it. Re-plan folds them into a new plan; nothing else changes until Apply.'}
+          </p>
         </aside>
       </div>
     </div>

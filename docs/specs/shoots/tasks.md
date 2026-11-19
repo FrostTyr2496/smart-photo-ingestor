@@ -27,6 +27,7 @@ Rules for every task:
 {
   "plan_id": "shoots-20261118-210000",
   "created_at": "2026-11-18T21:00:00+00:00",
+  "decisions_through": 0,
   "params": {"gap_h": 8, "split_km": 50, "merge_h": 36, "region_km": 300, "from": null, "to": null},
   "summary": {"frames": 65194, "shoots": 171, "trips": 35, "unassigned": 0, "locked": 0, "flagged": 40},
   "trips": [
@@ -53,6 +54,8 @@ Rules for every task:
 }
 ```
 
+- `decisions_through` is the newest `shoot_plan_decisions.decision_id` already folded into the plan (sh-2). Review
+  replays only the decisions after it, so none is applied twice.
 - `sample_group_ids` holds at most 12 ids: first, last, and evenly spaced in between.
 - `points` holds at most 50.
 - `volumes` lists the drives holding the shoot's frames (primary files, indexed or verified), most frames first, so review
@@ -100,12 +103,19 @@ Rules for every task:
     more than 50 km, two bodies, a locked shoot, a decision replayed after a re-plan).
   - Result (2026-11-18): `photovault/shoots.py` (`plan`, `calibrate`, `write_plan`); 27 tests in `tests/test_shoots.py`. Calibration on the real catalog (65,194 frames, 17 date-prefixed folders as truth; recall counts a folder's start and end edges): gap_h 4 / 6 / 8 / 12 gave 207 / 188 / 182 / 169 shoots, precision 0.54 / 0.55 / 0.58 / 0.59, recall 0.79 / 0.72 / 0.72 / 0.72, folders kept whole 7 / 8 / 8 / 8 of 17 (the rest are multi-day folders, i.e. trips). Default `gap_h` stays 8. A real plan: 182 shoots, 36 trips, 135 flagged, 30 `local_offset` proposals, 2.3 s, 115 MB.
 
-- [ ] 3. `shoots plan` CLI and the plan API
+- [x] 3. `shoots plan` CLI and the plan API
   - ID: sh-2 (after sh-1).
   - `photovault shoots plan [--from] [--to] [--gap-h]` writes the plan file and prints the summary (JSON lines).
   - `GET /api/shoots/plan` returns the latest plan; `POST /api/shoots/plan` runs a new one as a task.
   - `POST /api/shoots/decisions {proposal_id, kind, payload}` stores a decision. `GET /api/shoots/decisions` lists them.
   - Verify: `uv run pytest tests/test_shoots_api.py -q`.
+  - Result (2026-11-18): `photovault shoots plan` (writes the plan, prints `plan_id`, `path`, the summary); `POST /api/shoots/plan`
+    and `/api/run` `shoots_plan` start it as a task. `GET/POST /api/shoots/decisions` (one or `{"decisions": [...]}`, all or
+    none) and, beyond the spec, `POST /api/shoots/decisions/delete {decision_ids}` for undo. The plan records
+    `decisions_through`; review loads only the decisions after it and saves each action as it is made, with a Re-plan button.
+    "Accept trip" and "Accept all unflagged" are stored as `accept` rows sharing a `batch` (no new kinds). Split and merge
+    pieces carry the planner's ids, so later decisions on them replay. A `PHOTOVAULT_DEV_PLAN` fixture keeps its decisions
+    in server memory. `tests/test_shoots_api.py` 18 passed; full suite 682 passed; web 112.
 
 - [x] 4. Review mode: a separate dry-run pane
   - ID: sh-3. Built first against fixture plans in this format; wired to the live API when sh-2 lands.
