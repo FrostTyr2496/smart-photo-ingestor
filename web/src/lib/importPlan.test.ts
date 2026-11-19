@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { backupArgs, batchLimit, pairMounts, batchLine, importArgs, importJobId, inputsKey, overCapacity, readPlan, readSecond, tierAfterImport } from './importPlan';
+import { backupArgs, batchLimit, pairMounts, batchLine, importArgs, importJobId, inputsKey, overCapacity, progressLine, readPlan, readSecond, tierAfterImport } from './importPlan';
 
 const result = { event: 'result', files: 20, groups: 10, limit: 10, groups_total: 240, files_total: 480, planned_bytes: 100, planned: '100 B',
   target_free: '1 KB', target_free_bytes: 1000, folders: [{ folder: 'a', files: 20 }], sample: ['x -> y'], kinds: { raw: 10 } };
@@ -90,5 +90,27 @@ describe('pairMounts (rec-1)', () => {
   });
   it('gives empty strings when there is no pair', () => {
     expect(pairMounts({ candidates: [], pair: { read: null, copy: null, note: '' } })).toEqual({ first: '', second: '' });
+  });
+});
+
+describe('batchLine with frames already on the target (D-106)', () => {
+  it('counts only what is still to copy', () => {
+    const p = readPlan([{ ...result, already_on_target: { frames: 40, files: 80 } }]).plan!;
+    expect(p.already).toEqual({ frames: 40, files: 80 });
+    expect(batchLine(p)).toBe('20 of 400 files still to copy (10 of 200 frames)');
+  });
+});
+
+describe('progressLine (ing-14)', () => {
+  it('is empty without progress events', () => {
+    expect(progressLine([{ event: 'warning', message: 'x' }])).toBe('');
+  });
+  it('shows phase, counts and message of the newest progress event', () => {
+    const ev = [
+      { event: 'progress', phase: 'scan', current: 0, total: 0, message: 'scanning' },
+      { event: 'progress', phase: 'metadata', current: 2366, total: 2386, message: 'metadata: 2,366 from the catalog, 20 read from the card' },
+    ];
+    expect(progressLine(ev)).toBe('metadata · 2,366 / 2,386 · metadata: 2,366 from the catalog, 20 read from the card');
+    expect(progressLine(ev.slice(0, 1))).toBe('scan · scanning');
   });
 });

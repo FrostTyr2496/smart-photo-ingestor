@@ -25,10 +25,12 @@ MASTER volume (the Mac folder counts as one volume). A card file is:
 - `only_on_card` and `unchecked`: unchanged.
 LEGACY copies never count toward green: they are drives the engine does not manage.
 
-**Batch (`--limit N`, D-090).** The plan keeps the first N capture groups in capture-time order (a RAW+JPEG pair or
-a photo and its sidecars stay together; groups with no time sort last, by card path). The job's items are only
-those groups. Running the same import again without `--limit` plans the whole card; files already verified on the
-target are skipped (`skipped_dup`, D-036), so a batch is never copied twice.
+**Batch (`--limit N`, D-090, amended by D-106).** The plan keeps the next N capture groups in capture-time order
+that are not already done (a RAW+JPEG pair or a photo and its sidecars stay together; groups with no time sort
+last, by card path). A group is done when every member's card file is unchanged and hashed and its asset has a
+`verified` instance on the target; done groups are not planned but still reserve their names. The result's
+`already_on_target` reports them. Running the same import again without `--limit` plans the whole card; files
+already verified on the target are skipped (`skipped_dup`, D-036), so a batch is never copied twice.
 
 ## Tasks
 

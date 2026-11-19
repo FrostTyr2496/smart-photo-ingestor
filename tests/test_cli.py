@@ -354,3 +354,86 @@ def test_volumes_assign_change_role(capsys, env) -> None:
 def test_volumes_assign_change_role_refuses_cards(capsys, env) -> None:
     code, lines = run(capsys, "volumes", "assign", str(env["card"]), "--role", "WORKING", "--change-role")
     assert code == 1
+
+
+def _dry(capsys, env) -> tuple[dict, list[dict]]:
+    code, lines = run(capsys, "ingest", "--source", str(env["card"]), "--target", str(env["work"]),
+                      "--name", "Night Test", "--dry-run")
+    assert code == 0, lines
+    res = dict(result(lines))
+    for k in ("job_id", "ts", "target_free", "target_free_bytes"):
+        res.pop(k, None)
+    return res, lines
+
+
+def _spy_reads(monkeypatch) -> list:
+    seen: list = []
+
+    def spy(paths, **kw):  # noqa: ANN001
+        seen.extend(paths)
+        return fake_read(paths, **kw)
+
+    monkeypatch.setattr(metadata, "read_metadata", spy)
+    return seen
+
+
+def test_plan_after_card_check_reads_no_metadata_and_matches(env, capsys, monkeypatch) -> None:
+    """ing-14: a planned import of a checked card comes from the catalog, with the same names as a fresh read."""
+    assign(capsys, env)
+    fresh, _ = _dry(capsys, env)
+    assert fresh["files"] == 6 and fresh["sample"]
+    code, _ = run(capsys, "cards", "check", str(env["card"]))
+    assert code == 0
+    seen = _spy_reads(monkeypatch)
+    again, lines = _dry(capsys, env)
+    assert seen == []
+    assert again == fresh
+    msgs = [e["message"] for e in lines if e["event"] == "progress" and e.get("phase") == "metadata"]
+    assert "metadata: 6 from the catalog, 0 read from the card" in msgs
+
+
+def test_plan_after_card_check_rereads_a_changed_file(env, capsys, monkeypatch) -> None:
+    assign(capsys, env)
+    run(capsys, "cards", "check", str(env["card"]))
+    changed = env["card"] / "DCIM" / "100NZ6_2" / "DSC_0002.NEF"
+    changed.write_bytes(os.urandom(123_456))
+    seen = _spy_reads(monkeypatch)
+    _dry(capsys, env)
+    # The whole DSC_0002 pair is read (a mixed bucket is never half from the catalog), nothing else.
+    assert sorted(p.name for p in seen) == ["DSC_0002.JPG", "DSC_0002.NEF"]
+
+
+def test_plan_of_an_unchecked_card_reads_everything(env, capsys, monkeypatch) -> None:
+    assign(capsys, env)
+    seen = _spy_reads(monkeypatch)
+    _dry(capsys, env)
+    assert len(seen) == 6
+
+
+def test_limit_skips_frames_already_on_the_target(env, capsys) -> None:
+    """D-106: `--limit N` picks the next N frames not yet copied; a changed card file is not done."""
+    assign(capsys, env)
+    src = ["--source", str(env["card"]), "--target", str(env["work"])]
+    code, lines = run(capsys, "ingest", *src, "--limit", "1")
+    assert code == 0 and result(lines)["copied"] == 2
+    code, lines = run(capsys, "ingest", *src, "--limit", "1", "--dry-run")
+    plan = result(lines)
+    assert plan["already_on_target"] == {"frames": 1, "files": 2}
+    assert (plan["groups"], plan["files"], plan["groups_total"]) == (1, 2, 3)
+    assert all("DSC_0002" in s for s in plan["sample"])
+    batch = next(e for e in lines if e["event"] == "warning" and e["code"] == "batch")
+    assert "1 of 2 frames still to copy (1 already on the target)" in batch["message"]
+
+    run(capsys, "ingest", *src, "--limit", "1")
+    code, lines = run(capsys, "ingest", *src)
+    assert code == 0 and result(lines)["copied"] == 2 and result(lines)["skipped_dup"] == 4
+    assert len(media_files(env["work"])) == 6
+
+    # no limit: same plan as before, but the count is reported
+    plan = result(run(capsys, "ingest", *src, "--dry-run")[1])
+    assert plan["files"] == 6 and plan["already_on_target"] == {"frames": 3, "files": 6}
+
+    # a card file changed after the copy is no longer done
+    (env["card"] / "DCIM" / "100NZ6_2" / "DSC_0003.JPG").write_bytes(os.urandom(777))
+    plan = result(run(capsys, "ingest", *src, "--limit", "5", "--dry-run")[1])
+    assert plan["already_on_target"] == {"frames": 2, "files": 4} and plan["groups"] == 1

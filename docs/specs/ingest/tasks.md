@@ -318,3 +318,18 @@ Rules:
     - a policy-met candidate with the same size and partial hash but different bytes: 1 call, the file is copied.
   - Verify: `uv run pytest tests/test_baseline_hash.py -q`
   - _Design:_ system-design §4; D-036, D-042
+
+- [x] 14. **[stronger]** Plan an import from the card check's catalog rows instead of re-reading the card
+  - ID: ing-14
+  - Blocks on: ing-13
+  - Why: the web dry run took about a minute on a 2,386-file card and Apply repeated it, because
+    `plan_card_ingest` ran ExifTool and `partial_sha256` on every file even after `cards check`.
+  - In `plan_card_ingest`, rebuild the grouping metadata from capture groups for files whose instance is
+    unchanged (size, mtime within 2 s) and linked to a group; read only the rest; reuse stored partial hashes.
+    Progress says `metadata: N from the catalog, M read from the card`. `--limit` skips done frames (D-106). The
+    Import dialog shows the task's latest progress line and says "Next N frames".
+  - Verify: `uv run pytest tests/test_cli.py tests/test_ingest_faults.py tests/test_cards.py tests/test_backup.py -q`
+  - _Design:_ system-design §4; D-090, D-106
+  - Result (2026-11-19): verify command, `npm run typecheck && npm test && npm run build` and `uv run pytest -q`
+    pass. A plan after a card check reads 0 files with ExifTool and is identical to a fresh plan; a changed file's
+    whole stem is re-read. Real-card timing is not measured (the user's card).

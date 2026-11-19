@@ -13,6 +13,7 @@ import sqlite3
 import time
 from collections import Counter
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Callable
 
@@ -20,7 +21,8 @@ from photovault import metadata, volumes
 from photovault.catalog import repo
 from photovault.config import Config
 from photovault.copy_engine import CopyError, _hash_uncached, copy_verified, sweep_partials
-from photovault.groups import build_groups
+from photovault.groups import base_stem, build_groups
+from photovault.index import group_links, unchanged
 from photovault.hashing import partial_sha256, sha256_file
 from photovault.naming import body_nickname, canonical_stem, check_unique, dest_dir, member_filename, shoot_date
 from photovault.protocol import Emitter, human_bytes
@@ -76,6 +78,53 @@ def _batch(groups: list, limit: int | None) -> set[int]:
     return set(sorted(range(len(groups)), key=key)[:limit])
 
 
+def _catalog_meta(conn: sqlite3.Connection, source_id: str, media: list) -> dict:
+    """ing-14: the metadata `build_groups` needs, rebuilt from the card check's catalog rows (no ExifTool).
+
+    A (folder, stem) bucket qualifies only when every media file in it has an unchanged instance (same size,
+    mtime within 2 s) linked by an index job to one capture group that has a body, shutter count and capture
+    time. Anything else is left for `read_metadata`, so mixed buckets are read whole.
+    """
+    existing = repo.volume_instances(conn, source_id)
+    links = group_links(conn, source_id)
+    buckets: dict[tuple[str, str], list] = {}
+    for e in media:
+        buckets.setdefault((str(PurePosixPath(e.rel_path).parent), base_stem(e).upper()), []).append(e)
+    gids = sorted({g for g, _ in links.values()})
+    rows: dict[int, sqlite3.Row] = {}
+    for i in range(0, len(gids), 500):
+        part = gids[i:i + 500]
+        for r in conn.execute(
+            "SELECT g.*, b.model AS model, b.serial AS serial FROM capture_groups g JOIN bodies b ON b.body_id = g.body_id "
+            f"WHERE g.group_id IN ({','.join('?' * len(part))})", part,
+        ).fetchall():
+            rows[int(r["group_id"])] = r
+    out: dict = {}
+    for files in buckets.values():
+        gid: set[int] = set()
+        for e in files:
+            key = repo.path_key(e.rel_path)
+            link = links.get(key)
+            if link is None or not unchanged(existing.get(key), e):
+                gid = set()
+                break
+            gid.add(link[0])
+        row = rows.get(next(iter(gid))) if len(gid) == 1 else None
+        if row is None or not row["serial"] or row["shutter_count"] is None or not row["capture_time"]:
+            continue
+        try:
+            when = datetime.fromisoformat(row["capture_time"])
+        except ValueError:
+            continue
+        m: dict = {"Model": row["model"], "CameraSerialNumber": row["serial"], "ShutterCount": row["shutter_count"],
+                   "SubSecTimeOriginal": row["subsec"], "OffsetTimeOriginal": row["capture_offset"]}
+        if row["time_source"] != "mtime":  # build_groups falls back to the file's mtime by itself
+            m.update(DateTimeOriginal=when, CaptureTimeSource=row["time_source"])
+        for e in files:
+            out[e.abs_path] = m
+    return out
+
+
 def plan_card_ingest(
     conn: sqlite3.Connection, cfg: Config, *, source: Path, target: Path, shoot_name: str | None, emit: Emitter,
     limit: int | None = None,
@@ -99,10 +148,21 @@ def plan_card_ingest(
     media = [e for e in entries if e.kind in META_KINDS]
     emit.emit("progress", phase="metadata", current=0, total=len(media), message=f"{len(entries)} files found")
 
-    def on_progress(done: int, total: int) -> None:
-        emit.emit("progress", phase="metadata", current=done, total=total, message="reading metadata")
+    cat_meta = _catalog_meta(conn, source_id, media)
+    todo = [e for e in media if e.abs_path not in cat_meta]
+    if cat_meta:
+        emit.emit("progress", phase="metadata", current=len(cat_meta), total=len(media),
+                  message=f"metadata: {len(cat_meta):,} from the catalog, {len(todo):,} read from the card")
+    if todo:
+        base = len(cat_meta)
 
-    result = metadata.read_metadata([e.abs_path for e in media], workers=cfg.exiftool_workers, progress=on_progress)
+        def on_progress(done: int, total: int) -> None:
+            emit.emit("progress", phase="metadata", current=base + done, total=len(media), message="reading metadata")
+
+        result = metadata.read_metadata([e.abs_path for e in todo], workers=cfg.exiftool_workers, progress=on_progress)
+    else:
+        result = metadata.MetadataResult()
+    result.meta.update(cat_meta)
     for path, err in sorted(result.errors.items()):
         emit.emit("warning", code="metadata", message=f"{path.relative_to(source)}: {err}")
     groups = build_groups(entries, result.meta)
@@ -121,7 +181,22 @@ def plan_card_ingest(
                 g.serial = g.serial or serial
                 body_inferred += 1
 
-    keep = _batch(groups, limit)
+    # D-106: a frame is done when every member's card file is unchanged, hashed, and has a verified copy on the target.
+    known = repo.volume_instances(conn, source_id)
+    on_target = {int(r[0]) for r in conn.execute(
+        "SELECT DISTINCT asset_id FROM instances WHERE volume_id = ? AND state = 'verified' AND asset_id IS NOT NULL",
+        (target_row["volume_id"],))}
+    done: set[int] = set()
+    for gi, g in enumerate(groups):
+        if all(unchanged(known.get(repo.path_key(m.entry.rel_path)), m.entry)
+               and known[repo.path_key(m.entry.rel_path)]["asset_id"] in on_target for m in g.members):
+            done.add(gi)
+    done_files = sum(len(groups[gi].members) for gi in done)
+    if limit is None:
+        keep = set(range(len(groups)))  # done files become skipped_dup at run time (D-036)
+    else:
+        pool = [gi for gi in range(len(groups)) if gi not in done]
+        keep = {pool[i] for i in _batch([groups[gi] for gi in pool], limit)}
     groups_total, files_total = len(groups), sum(len(g.members) for g in groups)
     items: list[dict] = []
     folders: Counter[str] = Counter()
@@ -180,8 +255,10 @@ def plan_card_ingest(
     emit.emit("progress", phase="partial-hash", current=0, total=len(items), message="fingerprinting source files")
     for i, it in enumerate(items, 1):
         e = it["entry"]
+        old = known.get(repo.path_key(e.rel_path))
+        partial = old["partial_sha256"] if unchanged(old, e) and old["partial_sha256"] else partial_sha256(e.abs_path)
         repo.upsert_instance(conn, volume_id=source_id, rel_path=e.rel_path, size=e.size, mtime_ns=e.mtime_ns,
-                             kind=e.kind, state="indexed", partial_sha256=partial_sha256(e.abs_path))
+                             kind=e.kind, state="indexed", partial_sha256=partial)
         if i % 500 == 0:
             emit.emit("progress", phase="partial-hash", current=i, total=len(items), message="")
 
@@ -211,8 +288,8 @@ def plan_card_ingest(
         emit.emit("warning", code="no_space", message=f"needs {human_bytes(planned_bytes)}, target has {human_bytes(free)} free")
     if limit is not None:
         emit.emit("warning", code="batch",
-                  message=f"batch: {len(keep)} of {groups_total} frames ({len(items)} of {files_total} files); "
-                  "run the import again without a limit for the rest")
+                  message=f"batch: {len(keep)} of {groups_total - len(done):,} frames still to copy "
+                  f"({len(done):,} already on the target); run the import again for the rest")
     emit.emit(
         "result",
         job_id=job_id,
@@ -221,6 +298,7 @@ def plan_card_ingest(
         limit=limit,
         groups_total=groups_total,
         files_total=files_total,
+        already_on_target={"frames": len(done), "files": done_files},
         kinds=dict(kinds),
         planned_bytes=planned_bytes,
         planned=human_bytes(planned_bytes),

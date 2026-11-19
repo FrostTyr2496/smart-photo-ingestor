@@ -41,6 +41,8 @@ export interface ImportPlan {
   limit: number | null;
   groups_total: number;
   files_total: number;
+  /** Frames and files already verified on the target (D-106); a batch counts only the rest. */
+  already: { frames: number; files: number };
   planned_bytes: number;
   planned: string;
   target_free: string;
@@ -58,6 +60,11 @@ export interface PlanRead {
 
 const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
 
+function readAlready(v: unknown): { frames: number; files: number } {
+  const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
+  return { frames: num(o.frames), files: num(o.files) };
+}
+
 /** What a finished dry run said: its `result`, its warnings (without the "dry run" notice) and its error, if any. */
 export function readPlan(events: TaskEvent[]): PlanRead {
   const out: PlanRead = { plan: null, warnings: [], error: '' };
@@ -71,6 +78,7 @@ export function readPlan(events: TaskEvent[]): PlanRead {
         limit: typeof e.limit === 'number' ? e.limit : null,
         groups_total: num(e.groups_total),
         files_total: num(e.files_total),
+        already: readAlready(e.already_on_target),
         planned_bytes: num(e.planned_bytes),
         planned: String(e.planned ?? ''),
         target_free: String(e.target_free ?? 'unknown'),
@@ -94,7 +102,9 @@ export const tierAfterImport = (secondDrive: boolean): 'needs_backup' | 'backed_
 /** "20 of 480 files" for a batch, "480 files" for the whole card. */
 export function batchLine(p: ImportPlan): string {
   const f = (n: number) => `${n.toLocaleString('en-US')} ${n === 1 ? 'file' : 'files'}`;
-  if (p.limit !== null && p.files_total > p.files) return `${p.files.toLocaleString('en-US')} of ${f(p.files_total)} (${p.groups} of ${p.groups_total} frames)`;
+  const files = p.files_total - p.already.files;
+  const frames = p.groups_total - p.already.frames;
+  if (p.limit !== null && files > p.files) return `${p.files.toLocaleString('en-US')} of ${f(files)}${p.already.files > 0 ? ' still to copy' : ''} (${p.groups} of ${frames} frames)`;
   return f(p.files);
 }
 
@@ -156,4 +166,17 @@ export interface TargetAnswer {
 export function pairMounts(a: TargetAnswer): { first: string; second: string } {
   const mount = (id: string | null) => a.candidates.find((c) => c.volume_id === id)?.mount ?? '';
   return { first: mount(a.pair.read), second: mount(a.pair.copy) };
+}
+
+/** The newest progress event as one line for the Import dialog ("metadata 120 / 2,386 · reading metadata"); '' before any. */
+export function progressLine(events: TaskEvent[]): string {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (!e || e.event !== 'progress') continue;
+    const cur = typeof e.current === 'number' ? e.current : 0;
+    const tot = typeof e.total === 'number' ? e.total : 0;
+    const count = tot > 0 ? `${cur.toLocaleString('en-US')} / ${tot.toLocaleString('en-US')}` : '';
+    return [typeof e.phase === 'string' ? e.phase : '', count, e.message ?? ''].filter(Boolean).join(' · ');
+  }
+  return '';
 }

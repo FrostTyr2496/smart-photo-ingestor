@@ -12,6 +12,7 @@ import {
   inputsKey,
   overCapacity,
   pairMounts,
+  progressLine,
   readPlan,
   readSecond,
   tierAfterImport,
@@ -41,6 +42,7 @@ export function ImportDialog({ card, onClose }: { card: { mount: string; label: 
   const [plan, setPlan] = useState<ImportPlan | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [error, setError] = useState('');
+  const [progress, setProgress] = useState('');
   const [plannedKey, setPlannedKey] = useState('');
   const run = useRef(0); // ignore a dry run's answer once the dialog moved on
 
@@ -84,12 +86,13 @@ export function ImportDialog({ card, onClose }: { card: { mount: string; label: 
   const applyReady = phase === 'planned' && Boolean(plan) && plannedKey === key && Boolean(plan && plan.files > 0);
 
   /** Wait for a dry-run task to leave `running`; null when the dialog moved on. */
-  const waitDone = async (id: number, mine: number): Promise<TaskDetail | null> => {
+  const waitDone = async (id: number, mine: number, onEvents?: (d: TaskDetail) => void): Promise<TaskDetail | null> => {
     for (;;) {
       await new Promise((r) => window.setTimeout(r, 700));
       if (run.current !== mine) return null;
       const d = await api<TaskDetail>('GET', `/api/tasks/${id}?since=-1`);
       if (d.state !== 'running') return d;
+      onEvents?.(d);
     }
   };
 
@@ -97,6 +100,7 @@ export function ImportDialog({ card, onClose }: { card: { mount: string; label: 
     if (!inputs) return;
     const mine = ++run.current;
     setPhase('planning');
+    setProgress('');
     setPlan(null);
     setWarnings([]);
     setError('');
@@ -107,7 +111,7 @@ export function ImportDialog({ card, onClose }: { card: { mount: string; label: 
       return;
     }
     try {
-      const d = await waitDone(id, mine);
+      const d = await waitDone(id, mine, (t) => setProgress(progressLine(t.events)));
       if (!d) return;
       const read = readPlan(d.events);
       if (!read.plan || d.state !== 'done') {
@@ -233,8 +237,8 @@ export function ImportDialog({ card, onClose }: { card: { mount: string; label: 
       <div className="grid grid-cols-2 gap-3">
         <Field label="Batch size">
           <select value={choice} onChange={(e) => setChoice(e.target.value as BatchChoice)} className={sel}>
-            <option value="10">First 10 frames</option>
-            <option value="100">First 100 frames</option>
+            <option value="10">Next 10 frames</option>
+            <option value="100">Next 100 frames</option>
             <option value="all">Whole card</option>
             <option value="custom">Custom…</option>
           </select>
@@ -263,7 +267,11 @@ export function ImportDialog({ card, onClose }: { card: { mount: string; label: 
       )}
       {!hasTarget && <p className="text-xs text-maybe">No working drive is connected. Plug one in or set one up first.</p>}
 
-      {phase === 'planning' && <div className="card h-24 animate-pulse" />}
+      {phase === 'planning' && (
+        <div className="card h-24 animate-pulse p-3 text-sm text-muted" role="status">
+          {progress || 'Planning…'}
+        </div>
+      )}
       {phase === 'failed' && <p className="text-sm text-err">{error}</p>}
       {plan && phase === 'planned' && (
         <PlanView plan={plan} warnings={warnings} stale={plannedKey !== key} target={mountName(target, drives)} second={secondPlan} />
@@ -281,7 +289,8 @@ function PlanView({ plan, warnings, stale, target, second }: { plan: ImportPlan;
       <p className="font-medium">{plan.files === 0 ? 'Nothing to copy: every file is already on the drive.' : batchLine(plan)}</p>
       <p className="text-xs text-muted">
         {plan.groups.toLocaleString('en-US')} frames
-        {plan.limit !== null && plan.groups_total > plan.groups ? ` of ${plan.groups_total.toLocaleString('en-US')} on the card` : ''} · {plan.planned} to copy
+        {plan.limit !== null && plan.groups_total - plan.already.frames > plan.groups ? ` of ${(plan.groups_total - plan.already.frames).toLocaleString('en-US')} still to copy` : ''} · {plan.planned} to copy
+        {plan.already.frames > 0 ? ` · ${plan.already.frames.toLocaleString('en-US')} frames already on ${target}` : ''}
         · {plan.target_free} free on {target}
       </p>
       {short && <p className="text-xs text-err">The drive does not have enough free space.</p>}
