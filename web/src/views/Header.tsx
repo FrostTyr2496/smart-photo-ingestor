@@ -4,7 +4,9 @@ import { ProgressBar } from '../components/ProgressBar';
 import { extVM, taskVM } from '../components/TaskCard';
 import { springs } from '../lib/motion';
 import { type Route } from '../lib/route';
+import { badgeCount } from '../lib/actions';
 import { useStore } from '../lib/store';
+import { useActions, useActionsPolling } from '../lib/useActions';
 import { worstTier } from '../lib/tiers';
 
 const TIER_DOT: Record<string, string> = {
@@ -54,7 +56,7 @@ function GlobalProgress() {
   );
 }
 
-function NavItem({ label, href, active, external, dot, title }: { label: string; href: string; active: boolean; external?: boolean; dot?: string; title?: string }) {
+function NavItem({ label, href, active, external, dot, title, badge }: { label: string; href: string; active: boolean; external?: boolean; dot?: string; title?: string; badge?: number }) {
   return (
     <a
       href={href}
@@ -67,6 +69,11 @@ function NavItem({ label, href, active, external, dot, title }: { label: string;
         {dot && <span className={`h-2 w-2 rounded-full ${dot}`} aria-hidden="true" />}
         {label}
         {external && <Icon name="external" size={11} className="opacity-50" />}
+        {badge ? (
+          <span className="min-w-[1.125rem] rounded-full bg-err px-1 text-center font-mono text-2xs leading-[1.125rem] text-white" aria-label={`${badge} need attention`}>
+            {badge}
+          </span>
+        ) : null}
       </span>
     </a>
   );
@@ -75,6 +82,9 @@ function NavItem({ label, href, active, external, dot, title }: { label: string;
 export function Header({ route, sidebarHidden, onToggleSidebar }: { route: Route; sidebarHidden: boolean; onToggleSidebar: () => void }) {
   const { cards } = useStore();
   const worst = worstTier(cards);
+  useActionsPolling();
+  const { actions } = useActions();
+  const urgent = badgeCount(actions, Date.now());
   return (
     <header className="sticky top-0 z-30 border-b border-line bg-bg/70 backdrop-blur-xl">
       <div className="mx-auto flex h-14 max-w-[1600px] items-center gap-4 px-4">
@@ -104,6 +114,7 @@ export function Header({ route, sidebarHidden, onToggleSidebar }: { route: Route
           aria-label="Main"
         >
           <NavItem label="Tasks" href="#/" active={route.view === 'home'} />
+          <NavItem label="Actions" href="#/actions" active={route.view === 'actions'} badge={urgent} title="What to do next" />
           <NavItem label="Photos" href="#/photos" active={route.view === 'photos'} title="Photos (being rebuilt)" />
           <NavItem label="Review" href="#/review/shoots" active={route.view === 'review'} dot="bg-maybe" title="Review shoots (dry run)" />
           <NavItem

@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { isTypingTarget, modalOpen } from './lib/keys';
 import { usePref } from './lib/prefs';
 import { routeKey, useRoute } from './lib/route';
+import { Actions } from './views/Actions';
 import { Cards } from './views/Cards';
 import { StoreProvider, useStore } from './lib/store';
 import { ThemeProvider } from './lib/theme';
@@ -105,6 +106,8 @@ function Shell() {
                   <Photos />
                 ) : route.view === 'review' ? (
                   <ReviewShoots />
+                ) : route.view === 'actions' ? (
+                  <Actions />
                 ) : route.view === 'settings' ? (
                   <Settings />
                 ) : (

@@ -16,6 +16,7 @@ export interface Toast {
   id: number;
   text: string;
   kind: 'ok' | 'err';
+  action?: { label: string; run: () => void };
 }
 
 export interface ConfirmAsk {
@@ -53,7 +54,7 @@ interface Store {
   runWorkflow: (d: Drive) => Promise<void>;
   runStep: (d: Drive, step: WorkflowStep) => Promise<void>;
   busy: (d: Drive) => boolean;
-  toast: (text: string, kind?: 'ok' | 'err') => void;
+  toast: (text: string, kind?: 'ok' | 'err', action?: Toast['action']) => void;
   dismissToast: (id: number) => void;
   ask: (q: Omit<ConfirmAsk, 'resolve'>) => Promise<boolean>;
   setIgnored: (d: Drive, ignored: boolean) => Promise<void>;
@@ -121,10 +122,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   workflowRef.current = workflow;
   const kickRef = useRef<() => void>(() => {});
 
-  const toast = useCallback((text: string, kind: 'ok' | 'err' = 'ok') => {
+  const toast = useCallback((text: string, kind: 'ok' | 'err' = 'ok', action?: Toast['action']) => {
     const id = Date.now() + Math.random();
-    setToasts((list) => [...list.slice(-3), { id, text, kind }]);
-    window.setTimeout(() => setToasts((list) => list.filter((x) => x.id !== id)), kind === 'err' ? 9000 : 5000);
+    setToasts((list) => [...list.slice(-3), { id, text, kind, action }]);
+    window.setTimeout(() => setToasts((list) => list.filter((x) => x.id !== id)), kind === 'err' ? 9000 : action ? 8000 : 5000);
   }, []);
   const dismissToast = useCallback((id: number) => setToasts((list) => list.filter((x) => x.id !== id)), []);
 

@@ -26,6 +26,18 @@ export function Toasts() {
               <Icon name={t.kind === 'err' ? 'warn' : 'check'} />
             </span>
             <span className="flex-1">{t.text}</span>
+            {t.action && (
+              <button
+                type="button"
+                onClick={() => {
+                  t.action?.run();
+                  dismissToast(t.id);
+                }}
+                className="font-medium text-accent hover:underline"
+              >
+                {t.action.label}
+              </button>
+            )}
             <button type="button" onClick={() => dismissToast(t.id)} className="text-faint hover:text-ink" aria-label="Dismiss">
               <Icon name="x" size={12} />
             </button>

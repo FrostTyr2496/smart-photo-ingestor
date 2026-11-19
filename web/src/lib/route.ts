@@ -7,18 +7,20 @@ export type Route =
   | { view: 'cards'; id: string | null }
   | { view: 'setup'; key: string }
   | { view: 'photos' }
+  | { view: 'actions' }
   | { view: 'review' }
   | { view: 'settings' };
 
 export function parseRoute(hash: string): Route {
   if (hash === '#/review/shoots') return { view: 'review' };
-  const m = /^#\/(drive|cards|setup|photos|settings)(?:\/(.+))?$/.exec(hash);
+  const m = /^#\/(drive|cards|setup|photos|settings|actions)(?:\/(.+))?$/.exec(hash);
   if (!m) return { view: 'home' };
   const id = m[2] ? decodeURIComponent(m[2]) : null;
   if (m[1] === 'drive' && id) return { view: 'drive', id };
   if (m[1] === 'setup' && id) return { view: 'setup', key: id };
   if (m[1] === 'cards') return { view: 'cards', id };
   if (m[1] === 'photos') return { view: 'photos' };
+  if (m[1] === 'actions') return { view: 'actions' };
   if (m[1] === 'settings') return { view: 'settings' };
   return { view: 'home' };
 }
@@ -35,6 +37,8 @@ export function hrefFor(r: Route): string {
       return '#/photos';
     case 'review':
       return '#/review/shoots';
+    case 'actions':
+      return '#/actions';
     case 'settings':
       return '#/settings';
     default:

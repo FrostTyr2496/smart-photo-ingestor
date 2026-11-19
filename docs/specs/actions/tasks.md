@@ -79,7 +79,7 @@ Housekeeping (low):
     catalog that triggers it and one that doesn't, plus ordering and the dismiss/snooze round trip. Then a
     read-only run on the real catalog: counts per rule into `docs/private/`.
 
-- [ ] 2. The Actions pane
+- [x] 2. The Actions pane
   - ID: act-2. A nav item "Actions" with a badge (the count of critical + high), and a route `#/actions`, separate
     from Tasks.
     - Groups: "Photos at risk", "Unfinished", "Housekeeping".
@@ -89,6 +89,7 @@ Housekeeping (low):
     - The Tasks page shows a one-line link "N actions need attention".
     - Built against fixture JSON in the contract format until act-1 lands.
   - Verify: `cd web && npm run typecheck && npm test`; **[user]** browser check.
+  - Result (2026-11-18): built (`#/actions`, nav badge, Tasks link, toast Undo). It reads `web/src/lib/__fixtures__/actions.json` when `/api/actions` returns 404 (`loadActions`, `TODO(act-1)`) until act-1 lands. Browser check still [user].
 
 - [ ] 3. Actions from the shoots and phone work
   - ID: act-3 (after sh-2). Rules 10 and 11 use the live plan and suggestion APIs. The time-zone banner's (sp-7b)

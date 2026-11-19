@@ -17,9 +17,11 @@ import {
   taskMounts,
   taskTitle,
 } from '../lib/labels';
+import { badgeCount } from '../lib/actions';
 import { rise } from '../lib/motion';
 import { hrefFor } from '../lib/route';
 import { useStore } from '../lib/store';
+import { useActions } from '../lib/useActions';
 import type { Drive, StaleJob, TaskRec } from '../lib/types';
 
 interface Dev {
@@ -112,6 +114,8 @@ function DeviceBlock({ dev, idle }: { dev: Dev; idle: boolean }) {
 export function Home() {
   const { drives, tasks, elsewhere, stale, now, loaded, driveFiles } = useStore();
   const [staleOpen, setStaleOpen] = useState(false);
+  const { actions } = useActions();
+  const urgent = badgeCount(actions, now || Date.now());
 
   const devs = new Map<string, Dev>();
   const devOf = (mount: string): Dev => {
@@ -170,6 +174,12 @@ export function Home() {
               : 'Loading…'}
         </p>
       </div>
+
+      {urgent > 0 && (
+        <a href="#/actions" className="-mt-3 text-sm font-medium text-maybe hover:underline">
+          {urgent === 1 ? '1 action needs' : `${urgent} actions need`} attention →
+        </a>
+      )}
 
       {busy.length > 0 && (
         <div className="flex flex-col gap-4">
