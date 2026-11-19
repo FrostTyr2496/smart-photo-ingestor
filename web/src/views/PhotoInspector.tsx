@@ -1,6 +1,8 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Icon } from '../components/bits';
+import { springs } from '../lib/motion';
 import { MapPicker, type MapPoint } from '../components/MapPicker';
 import { api } from '../lib/api';
 import { fmtInt, plural } from '../lib/format';
@@ -177,6 +179,7 @@ export function PhotoInspector({
 
   // The map refits when the selection changes; a pin from a search or suggestion flies there too.
   const [focus, setFocus] = useState(0);
+  const [big, setBig] = useState(false);
   useEffect(() => setFocus((f) => f + 1), [selKey]);
 
   const set = <K extends keyof Pending>(k: K, v: Pending[K]) => setPend((p) => ({ ...p, [k]: v }));
@@ -268,7 +271,28 @@ export function PhotoInspector({
                   : 'No location yet. Click the map, search a place or use a suggestion.'
                 : `${fmtInt(located.length)} of ${fmtInt(n)} have a location.`}
           </p>
-          <MapPicker points={points} pin={pin} focus={focus} onPick={(p) => setLoc({ lat: p.lat, lon: p.lon, alt: null, source: 'map' })} />
+          <div className="relative">
+            <MapPicker points={points} pin={pin} focus={focus} onPick={(p) => setLoc({ lat: p.lat, lon: p.lon, alt: null, source: 'map' })} />
+            <button type="button" className="btn absolute right-2 top-2 z-[500] h-7 px-2 text-xs" title="Expand map" aria-label="Expand map" onClick={() => setBig(true)}>
+              Expand
+            </button>
+          </div>
+          {pin && pend.loc && pend.loc.source !== 'map' && (
+            <button type="button" className="btn-ghost -mt-1 h-7 self-start px-2 text-xs" onClick={() => setBig(true)}>
+              Refine on map
+            </button>
+          )}
+          {big && (
+            <MapWindow
+              points={points}
+              start={pin}
+              onCancel={() => setBig(false)}
+              onDone={(p) => {
+                setLoc({ lat: p.lat, lon: p.lon, alt: null, source: 'map' }, true);
+                setBig(false);
+              }}
+            />
+          )}
           {first && <Suggestions key={first.group_id} first={first} pool={pool} selected={selected} windowS={windowS} onUse={(l, f) => { setLoc(l, true); if (f) setPend((p) => ({ ...p, ...placeEdits(f) })); }} />}
           <PlaceSearch
             groupId={first?.group_id ?? null}
@@ -587,6 +611,58 @@ function Suggestions({ first, pool, selected, windowS, onUse }: { first: PhotoGr
         </div>
       ))}
     </div>
+  );
+}
+
+/** The expanded map (rv-24): a floating window to place the pin precisely. Done keeps it; Cancel or Esc leaves it as it was. */
+function MapWindow({ points, start, onCancel, onDone }: { points: MapPoint[]; start: MapPoint | null; onCancel: () => void; onDone: (p: MapPoint) => void }) {
+  const [draft, setDraft] = useState<MapPoint | null>(start);
+  const [focus, setFocus] = useState(0);
+  const root = useRef<HTMLDivElement>(null);
+  const cancel = useRef(onCancel);
+  cancel.current = onCancel;
+  useEffect(() => {
+    const prev = document.activeElement as HTMLElement | null;
+    // Capture phase on window, so Esc closes only this window and not the inspector or the viewer behind it.
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      e.preventDefault();
+      cancel.current();
+    };
+    window.addEventListener('keydown', onKey, true);
+    root.current?.focus();
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      prev?.focus?.();
+    };
+  }, []);
+  return createPortal(
+    <motion.div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-0 backdrop-blur-sm sm:p-6" initial={{ opacity: 0 }} animate={{ opacity: 1 }} onClick={onCancel}>
+      <motion.div
+        ref={root}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Place the pin on the map"
+        initial={{ opacity: 0, scale: 0.97 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={springs.snappy}
+        onClick={(e) => e.stopPropagation()}
+        className="flex h-full w-full flex-col gap-3 border-line-strong bg-raised p-3 shadow-2xl shadow-black/60 outline-none sm:h-[80vh] sm:w-[80vw] sm:rounded-2xl sm:border"
+      >
+        <PlaceSearch groupId={null} onPick={(loc) => { if (loc.lat !== null) { setDraft({ lat: loc.lat, lon: loc.lon! }); setFocus((f) => f + 1); } }} />
+        <MapPicker big points={points} pin={draft} focus={focus} onPick={setDraft} />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-muted">{draft ? <Coord lat={draft.lat} lon={draft.lon} /> : 'Click the map to place the pin, then drag it to fine-tune.'}</p>
+          <div className="flex gap-2">
+            <button type="button" className="btn-ghost" onClick={onCancel}>Cancel</button>
+            <button type="button" className="btn" disabled={!draft} onClick={() => draft && onDone(draft)}>Done</button>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>,
+    document.body,
   );
 }
 

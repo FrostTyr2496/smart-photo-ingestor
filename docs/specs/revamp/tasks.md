@@ -285,7 +285,7 @@ Rules for every task:
     rechecks every 5 s while the card is open. Raw full images are cached in `<home>/previews/full/`; JPEG/PNG
     are streamed from the drive each time (not cached). `uv run pytest -q`, `npm test` green.
 
-- [ ] 24. Expand the map into a floating window to place the pin precisely
+- [x] 24. Expand the map into a floating window to place the pin precisely
   - ID: rv-24 (user ask, 2026-11-18)
   - The inspector's map (`web/src/components/MapPicker.tsx`) gets an expand button (top-right, tooltip "Expand map").
     After **Use** on a suggestion or a place result, a small "Refine on map" link under the map opens the same thing.
@@ -301,3 +301,4 @@ Rules for every task:
     tile provider.
   - Leaflet stays lazy-loaded; the window reuses the inspector's Leaflet instance or creates its own.
   - Verify: `cd web && npm run typecheck && npm test`; **[user]** browser check.
+  - Result (2026-11-18): done. Expand button on the small map and a "Refine on map" link after Use open a portal window (80 %, full screen under 640 px) with a street-level pin, click/drag, live Coord link, place search, Done / Cancel / Esc (captured, so only the window closes). OSM tiles only, loaded when the window opens; ResizeObserver handles invalidateSize. `initialView` tested; typecheck, 68 tests, build pass.

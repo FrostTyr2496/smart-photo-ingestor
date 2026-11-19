@@ -1,5 +1,6 @@
 import type * as L from 'leaflet';
 import { useEffect, useRef, useState } from 'react';
+import { initialView } from '../lib/mapview';
 
 // The location map (rv-7, user-approved Leaflet + OpenStreetMap tiles, 2026-11-18). Leaflet is loaded only when a map
 // is shown, so the rest of the app never fetches it and no tile is requested until the editor is open. Tiles show
@@ -18,7 +19,7 @@ export interface MapPoint {
 }
 
 /** A dot for each existing location in the selection, a pin for the pending one; click or drag sets the pending one. */
-export function MapPicker({ points, pin, focus, onPick }: { points: MapPoint[]; pin: MapPoint | null; focus: number; onPick: (p: MapPoint) => void }) {
+export function MapPicker({ points, pin, focus, onPick, big = false }: { points: MapPoint[]; pin: MapPoint | null; focus: number; onPick: (p: MapPoint) => void; big?: boolean }) {
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<L.Map | null>(null);
   const lib = useRef<Leaflet | null>(null);
@@ -31,6 +32,7 @@ export function MapPicker({ points, pin, focus, onPick }: { points: MapPoint[]; 
 
   useEffect(() => {
     let alive = true;
+    let ro: ResizeObserver | null = null;
     loadLeaflet()
       .then((Lf) => {
         if (!alive || !box.current) return;
@@ -43,11 +45,17 @@ export function MapPicker({ points, pin, focus, onPick }: { points: MapPoint[]; 
         m.on('click', (e: L.LeafletMouseEvent) => pick.current({ lat: e.latlng.lat, lon: e.latlng.lng }));
         dots.current = Lf.layerGroup().addTo(m);
         map.current = m;
+        // The box may still be animating or resizing (the expanded window), so re-measure whenever it changes.
+        if (typeof ResizeObserver !== 'undefined') {
+          ro = new ResizeObserver(() => m.invalidateSize());
+          ro.observe(box.current);
+        }
         setReady(true);
       })
       .catch(() => alive && setFailed(true));
     return () => {
       alive = false;
+      ro?.disconnect();
       map.current?.remove();
       map.current = null;
     };
@@ -90,6 +98,12 @@ export function MapPicker({ points, pin, focus, onPick }: { points: MapPoint[]; 
     const m = map.current;
     if (!ready || !Lf || !m) return;
     m.invalidateSize();
+    if (big) {
+      const v = initialView(pin, points);
+      if (v.kind === 'center') m.setView([v.lat, v.lon], v.zoom);
+      else if (v.kind === 'fit') m.fitBounds(Lf.latLngBounds(v.points.map((p) => [p.lat, p.lon] as [number, number])), { padding: [24, 24], maxZoom: 14 });
+      return;
+    }
     const all = pin ? [pin] : points;
     if (all.length === 1) m.setView([all[0]!.lat, all[0]!.lon], Math.max(m.getZoom(), 12));
     else if (all.length > 1) m.fitBounds(Lf.latLngBounds(all.map((p) => [p.lat, p.lon] as [number, number])), { padding: [24, 24], maxZoom: 14 });
@@ -97,5 +111,5 @@ export function MapPicker({ points, pin, focus, onPick }: { points: MapPoint[]; 
   }, [ready, focus]);
 
   if (failed) return <p className="rounded-lg border border-line bg-ink/5 p-3 text-xs text-muted">The map could not load (offline?). Use a suggestion or a place search.</p>;
-  return <div ref={box} className="pv-map h-52 w-full overflow-hidden rounded-lg border border-line bg-ink/5" aria-label="Map: click to set the location" />;
+  return <div ref={box} className={`pv-map w-full overflow-hidden rounded-lg border border-line bg-ink/5 ${big ? 'min-h-0 flex-1' : 'h-52'}`} aria-label="Map: click to set the location" />;
 }
