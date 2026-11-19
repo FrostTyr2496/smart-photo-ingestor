@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { useEffect, useRef, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { springs } from '../lib/motion';
 
 /** A centred dialog that springs in. Esc and a click outside close it. */
@@ -19,7 +20,9 @@ export function Modal({ open, title, onClose, children, footer, wide }: { wide?:
       document.removeEventListener('keydown', onKey);
     };
   }, [open]);
-  return (
+  // Portalled to <body>: the page column animates with a transform, which would make `fixed` relative to it, so the
+  // backdrop covered the main column but not the sidebar.
+  return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div
@@ -47,7 +50,8 @@ export function Modal({ open, title, onClose, children, footer, wide }: { wide?:
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body,
   );
 }
 

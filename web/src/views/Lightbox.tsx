@@ -1,5 +1,6 @@
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { Icon } from '../components/bits';
 import { fmtCoord, fitBox, mapsUrl, needsParts, placeLabel, sizeBadge, suggestDrives, wrapIndex, type Need, type PhotoGroup } from '../lib/photos';
 import { ZoomView } from './ZoomView';
@@ -187,7 +188,8 @@ export function Lightbox({
   const title = g.vault_name || g.canonical_stem || `Photo ${g.group_id}`;
   const rows = infoRows(g);
 
-  return (
+  // Portalled to <body> so the page column's transform does not confine the full-screen viewer (same as Modal).
+  return createPortal(
     <motion.div
       ref={dialog}
       role="dialog"
@@ -374,6 +376,7 @@ export function Lightbox({
           <span className={kbd}>esc</span> close
         </span>
       </footer>
-    </motion.div>
+    </motion.div>,
+    document.body,
   );
 }
