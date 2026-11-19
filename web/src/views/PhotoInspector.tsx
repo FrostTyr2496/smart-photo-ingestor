@@ -99,6 +99,7 @@ export function PhotoInspector({
   onSaved,
   onRelated,
   savedEpoch,
+  onShowInAll,
 }: {
   selected: PhotoGroup[];
   pool: PhotoGroup[];
@@ -108,6 +109,7 @@ export function PhotoInspector({
   onSaved: (fields: Record<string, unknown>, ids: number[]) => Promise<void>;
   onRelated: (ids: number[]) => void;
   savedEpoch: number;
+  onShowInAll: () => void;
 }) {
   const { toast } = useStore();
   const [pend, setPend] = useState<Pending>(NO_EDITS);
@@ -223,6 +225,9 @@ export function PhotoInspector({
               )}
             </>
           )}
+          <button type="button" className="btn-ghost h-7 px-2 text-xs" onClick={onShowInAll} title="Clear the filters and scroll the grid to this photo">
+            Show in All Photos
+          </button>
           <button type="button" className="btn-ghost h-7 px-2" onClick={onClear} aria-label="Clear selection">
             <Icon name="x" />
           </button>

@@ -196,13 +196,14 @@ Rules for every task:
   - Verify: `uv run pytest tests/test_web_api.py tests/test_naming.py -q`; `cd web && npm test`.
   - Result (2026-11-18): `naming.vault_name` (the stored stem once the group has a shoot, else `canonical_stem` + `member_filename`, the code ing-12 calls) feeds `vault_name` on `GET /api/groups` rows (catalog fields only, no file reads). The catalog has no sub-second, so it is `00` until import. Header: "Copy name" (vault) and a small "Camera name". web/api tests pass.
 
-- [ ] 19. "Show in All Photos" brings the selection back into view
+- [x] 19. "Show in All Photos" brings the selection back into view
   - ID: rv-19 (user ask, 2026-11-18)
   - The inspector header has "Show in All Photos". It clears the drive and "missing" filters to All photos (keeping
     the selection), loads the selected photo's day, scrolls the grid until that tile is centred, and briefly flashes its
     ring. With several photos selected, it uses the first in time order. It works when the photo's day is far
     off-screen or not loaded yet.
   - Verify: `cd web && npm run typecheck && npm test`; **[user]** check in the browser.
+  - Result (2026-11-18): inspector button "Show in All Photos" clears drive and missing filters, loads the first selected photo's day (further pages if needed), centres the tile (`scrollIntoView({block:'center'})`, smooth unless reduced motion) and pulses its ring twice. Helpers `dayOf`, `firstInTime` tested. Not seen in a browser.
 
 - [ ] 20. Full-screen viewer (lightbox), modelled on the user's website
   - ID: rv-20 (user ask, 2026-11-18). Reference: the user's `Lightbox.js` and `ZoomView.js` (a copy is given to the

@@ -19,6 +19,8 @@ import {
   placeEdits,
   placeLabel,
   copyName,
+  dayOf,
+  firstInTime,
   vaultCopyName,
   hasEdits,
   keywordChips,
@@ -362,5 +364,20 @@ describe('vaultCopyName (rv-18)', () => {
   it('prefers the PhotoVault name, else the camera name', () => {
     expect(vaultCopyName({ rel_path: 'a/DSC_1.NEF', canonical_stem: 'M1', vault_name: 'M0001_X.NEF' })).toBe('M0001_X.NEF');
     expect(vaultCopyName({ rel_path: 'a/DSC_1.NEF', canonical_stem: 'M1', vault_name: null })).toBe('DSC_1.NEF');
+  });
+});
+
+describe('firstInTime and dayOf (rv-19)', () => {
+  it('picks the earliest, undated last', () => {
+    const a = g(1, { capture_time: '2026-01-02T10:00:00' });
+    const b = g(2, { capture_time: '2026-01-02T09:00:00' });
+    const c = g(3, { capture_time: null });
+    expect(firstInTime([a, c, b])?.group_id).toBe(2);
+    expect(firstInTime([c])?.group_id).toBe(3);
+    expect(firstInTime([])).toBeNull();
+  });
+  it('names the day', () => {
+    expect(dayOf({ capture_time: '2026-01-02T10:00:00' })).toBe('2026-01-02');
+    expect(dayOf({ capture_time: null })).toBe(UNDATED);
   });
 });

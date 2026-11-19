@@ -8,6 +8,8 @@ import {
   applyFields,
   clockTime,
   dayLabel,
+  dayOf,
+  firstInTime,
   MISSING_LABEL,
   monthRail,
   MONTHS,
@@ -23,6 +25,8 @@ import { usePref } from '../lib/prefs';
 import { useStore } from '../lib/store';
 import { ClockBanner } from './ClockBanner';
 import { PhotoInspector } from './PhotoInspector';
+
+const reducedMotion = (): boolean => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 
 const PAGE = 300; // photos fetched per request within a day
 const ALL_PAGE = 1000; // the server's largest page, for "Select day"
@@ -181,6 +185,47 @@ export function Photos() {
     });
   };
 
+  // Show in All Photos (rv-19): drop the filters, load the photo's day (and further pages of it), centre the tile and
+  // flash its ring once.
+  const [reveal, setReveal] = useState<{ id: number; day: string } | null>(null);
+  const [flash, setFlash] = useState<number | null>(null);
+  const showInAll = useCallback(() => {
+    const g = firstInTime([...sel.values()]);
+    if (!g) return;
+    setVolume('');
+    setMissing('');
+    setReveal({ id: g.group_id, day: dayOf(g) });
+  }, [sel, setVolume, setMissing]);
+  useEffect(() => {
+    if (!reveal || filterKey !== '|' || days === null) return;
+    const entry = days.find((d) => d.day === reveal.day);
+    if (!entry) {
+      setReveal(null);
+      toast('That photo is not in the timeline.', 'err');
+      return;
+    }
+    const st = loaded[reveal.day];
+    if (!st) {
+      void loadDay(reveal.day);
+      return;
+    }
+    if (st.loading) return;
+    if (!st.groups.some((g) => g.group_id === reveal.id)) {
+      if (st.groups.length < entry.groups && !st.error) void loadDay(reveal.day, true);
+      else setReveal(null);
+      return;
+    }
+    const id = reveal.id;
+    setReveal(null);
+    const t = window.setTimeout(() => {
+      const el = document.querySelector<HTMLElement>(`[data-gid="${id}"]`);
+      el?.scrollIntoView({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' });
+      setFlash(id);
+      window.setTimeout(() => setFlash((f) => (f === id ? null : f)), 1400);
+    }, 60);
+    return () => window.clearTimeout(t);
+  }, [reveal, filterKey, days, loaded, loadDay, toast]);
+
   const clear = useCallback(() => setSel(new Map()), []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -266,6 +311,7 @@ export function Photos() {
                   need={loadDay}
                   selected={sel}
                   related={relatedIds}
+                  flash={flash}
                   allSelected={(loaded[d.day]?.groups.length ?? 0) >= d.groups && (loaded[d.day]?.groups ?? []).every((g) => sel.has(g.group_id))}
                   onTile={onTile}
                   onSelectDay={() => void selectDay(d)}
@@ -286,7 +332,7 @@ export function Photos() {
               transition={{ type: 'spring', stiffness: 420, damping: 36 }}
               className="fixed bottom-2 right-2 top-16 z-20 w-[min(380px,calc(100vw-1rem))] xl:sticky xl:top-[72px] xl:bottom-auto xl:right-auto xl:z-auto xl:w-auto xl:self-start"
             >
-              <PhotoInspector selected={selected} pool={pool} settings={settings} windowS={windowS} onClear={clear} onSaved={onSaved} onRelated={onRelated} savedEpoch={savedEpoch} />
+              <PhotoInspector selected={selected} pool={pool} settings={settings} windowS={windowS} onClear={clear} onSaved={onSaved} onRelated={onRelated} savedEpoch={savedEpoch} onShowInAll={showInAll} />
             </motion.div>
           )}
         </AnimatePresence>
@@ -333,6 +379,7 @@ function DaySection({
   need,
   selected,
   related,
+  flash,
   allSelected,
   onTile,
   onSelectDay,
@@ -343,6 +390,7 @@ function DaySection({
   need: (day: string, more?: boolean) => Promise<void>;
   selected: Map<number, PhotoGroup>;
   related: Set<number>;
+  flash: number | null;
   allSelected: boolean;
   onTile: (g: PhotoGroup, e: MouseEvent) => void;
   onSelectDay: () => void;
@@ -376,7 +424,7 @@ function DaySection({
       {state && groups.length > 0 ? (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(112px,1fr))] gap-1.5 pb-3">
           {groups.map((g) => (
-            <Tile key={g.group_id} g={g} on={selected.has(g.group_id)} related={related.has(g.group_id)} connected={connected(g.volume_id)} onTile={onTile} />
+            <Tile key={g.group_id} g={g} on={selected.has(g.group_id)} related={related.has(g.group_id)} flash={flash === g.group_id} connected={connected(g.volume_id)} onTile={onTile} />
           ))}
         </div>
       ) : (
@@ -407,16 +455,17 @@ function DaySection({
   );
 }
 
-const Tile = memo(function Tile({ g, on, related, connected, onTile }: { g: PhotoGroup; on: boolean; related: boolean; connected: boolean; onTile: (g: PhotoGroup, e: MouseEvent) => void }) {
+const Tile = memo(function Tile({ g, on, related, flash, connected, onTile }: { g: PhotoGroup; on: boolean; related: boolean; flash: boolean; connected: boolean; onTile: (g: PhotoGroup, e: MouseEvent) => void }) {
   const [failed, setFailed] = useState(false);
   const name = g.canonical_stem || `Photo ${g.group_id}`;
   return (
     <button
       type="button"
       aria-pressed={on}
+      data-gid={g.group_id}
       title={`${name}${g.capture_time ? ` · ${g.capture_time.replace('T', ' ')}` : ''}${g.place_name ? ` · ${g.place_name}` : ''}`}
       onClick={(e) => onTile(g, e)}
-      className={`group relative aspect-square overflow-hidden rounded-lg bg-ink/5 ${related && !on ? '' : 'outline-none'} ring-offset-2 ring-offset-bg transition-shadow focus-visible:ring-2 focus-visible:ring-accent/60 ${on ? 'ring-[3px] ring-accent' : related ? 'outline-dashed outline-2 outline-accent/70 outline-offset-[-2px]' : ''}`}
+      className={`group relative aspect-square overflow-hidden rounded-lg bg-ink/5 ${related && !on ? '' : 'outline-none'} ring-offset-2 ring-offset-bg transition-shadow focus-visible:ring-2 focus-visible:ring-accent/60 ${flash ? 'ring-[5px] ring-accent motion-safe:animate-[pulse_0.7s_ease-in-out_2]' : on ? 'ring-[3px] ring-accent' : related ? 'outline-dashed outline-2 outline-accent/70 outline-offset-[-2px]' : ''}`}
     >
       {failed || !g.volume_id ? (
         <span className="flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center text-2xs text-faint">

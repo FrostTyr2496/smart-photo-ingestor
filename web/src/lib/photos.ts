@@ -81,6 +81,23 @@ export function dayLabel(day: string): string {
   return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+/** The timeline day a photo sits under: the camera's capture date, or UNDATED (as the server groups them). */
+export const dayOf = (g: Pick<PhotoGroup, 'capture_time'>): string => (g.capture_time ? g.capture_time.slice(0, 10) : UNDATED);
+
+/** The first of the photos in time order (undated last, then by id), or null for none (rv-19). */
+export function firstInTime<T extends Pick<PhotoGroup, 'capture_time' | 'group_id'>>(list: T[]): T | null {
+  let best: T | null = null;
+  for (const g of list) {
+    if (!best) best = g;
+    else {
+      const a = g.capture_time ?? '\uffff';
+      const b = best.capture_time ?? '\uffff';
+      if (a < b || (a === b && g.group_id < best.group_id)) best = g;
+    }
+  }
+  return best;
+}
+
 /** Years, newest first, each with its months (1-12, newest first) and the first day listed for that month. */
 export function monthRail(days: PhotoDay[]): Array<{ year: string; months: Array<{ month: number; day: string; groups: number }> }> {
   const years: Array<{ year: string; months: Array<{ month: number; day: string; groups: number }> }> = [];
