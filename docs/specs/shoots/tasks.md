@@ -181,7 +181,106 @@ Rules for every task:
   - ID: sh-6. In review mode, choose shoot fields to write to sidecars (shoot name as a keyword or headline, place,
     corrected `DateTimeOriginal`?). The review names the exact tags first; legacy drives are never written (rule 1).
 
-- [ ] 8. Titles from the images by an LLM (backlog; proposal first)
-  - ID: sh-7. The user's idea (D-080): when a shoot only has a fallback name, ask a model to suggest a title from a
-    few sample previews. This needs a vault rule 9 exception, a model and cost choice, and a privacy decision (images
-    leave the Mac), so it is a proposal, not code.
+## Shoots to confirm (D-127, review `docs/reviews/2026-11-19-sh-8-shoots-to-confirm.md`)
+
+Order: sp-9 and pv-1 (independent) → sh-8 → sh-9 → sh-10; ob-1 any time; sh-7 last. Rules for these tasks:
+- Phone photos are **context only** (D-127 answer 6). They are never members of a shoot and never shown in its grid as
+  frames; they appear only as evidence ("Phone: 6 photos at … 40 min before").
+- Phone evidence carries a **confidence that decays with the time distance**, and each attribute decays at its own rate
+  (answer 2). Δt is the time from a phone point to the shoot's core span (0 inside it). Starting values, kept as
+  settings and calibrated in sh-8:
+
+  | Attribute | Full weight within | Half-life | Dropped beyond |
+  |---|---|---|---|
+  | Area (city, state, locality) | ±1 h | 3 h | 12 h |
+  | Spot (`place_name`, venue, landmark, area of interest) | ±30 min | 1 h | 3 h |
+  | Subject (caption, labels, activities, people, events) | ±15 min | 30 min | 2 h |
+  | Holiday | same wall date | — | other dates |
+
+  Beyond 1 h, a location hints at the **area only**, never at a spot. A detail's confidence = the weighted evidence for
+  the value × its share of all weighted evidence. Every detail chip shows it.
+- Membership bands (answer 1): pre-ticked at score ≥ 0.5, unticked from 0.1 to 0.5, hidden below 0.1. Both cut-offs
+  are settings (`shoot_pretick_min`, `shoot_show_min`).
+
+- [ ] 8. **[stronger]** Schema V9 and the phone analysis import
+  - ID: sp-9. _Design:_ review §2, §8 (approved, D-127).
+  - Migration V9 (the next free version; cu-0 moves after it), with `system-design.md` §5:
+    - `shoots`: `place`, `subject`, `subject_source` (`user|phone|folder|model`), `confirmed_at`;
+    - `shoot_plan_decisions.kind` CHECK adds `include`, `exclude` and `detail` (a table rebuild, as V8 did for `jobs`);
+    - `phone_analysis (point_id PK → geo_points, caption, labels_json, persons_json, hints_json)`. `hints_json` holds
+      `activities`, `venues`, `venue_types`, `landmarks`, `bodies_of_water`, `areas_of_interest`, `holidays`, `events`
+      and `albums`.
+  - `photovault meta phone <json>` also fills `phone_analysis` for the rows it keeps (the same filters). It is
+    idempotent on re-import, and its result counts the rows with a caption, labels and people. Stdlib only.
+  - People names live only in the catalog: never in logs, reports in the repo, or fixtures (fixtures use invented
+    names).
+  - Verify: `uv run pytest tests/test_phone.py tests/test_catalog_db.py -q`; then **[user]** re-run
+    `uv run photovault --json meta phone "<home>/phone/photos-20261118.json"` (no new export needed).
+
+- [ ] 9. Review thumbs: opt-in, stored on a device the user picks
+  - ID: pv-1. _Design:_ review §2 (answer 3).
+  - A setting `review_thumbs = {"enabled": false, "store": "mac" | <volume_id>}`, and a Settings section (off by
+    default) showing the size estimate (frames × ~20 KB) and the device picker.
+  - Allowed stores: the Mac (any folder, default `<home>/thumbs-384`), or a **WORKING or MASTER** drive, never CARD or
+    LEGACY (rule 1). Writing them to a drive is a new kind of write. The task's first step is to propose the exact
+    vault-rules exception text to the user (like D-052); no drive write is coded until it is approved.
+  - When enabled, `hash` (and `cache_volume`) extracts the embedded preview of each primary file it reads, scales it to
+    384 px on the long edge with Pillow (approved, rule 11), and writes `<store>/<group_id>.jpg` atomically. It never
+    slows or fails a hash: thumb errors are counted and reported.
+  - `/api/groups/<id>/thumb` looks in the review store after the act-4 cache. When the store's drive is unplugged,
+    the tile shows "Thumbs on <drive>".
+  - Verify: `uv run pytest tests/test_previews.py tests/test_hashing.py -q` (`tmp_path` stores only).
+
+- [ ] 10. **[stronger]** Planner: membership confidence and details
+  - ID: sh-8 (after sp-9). _Design:_ review §6, plus the decay table above.
+  - `shoots.plan` adds `members.core_sessions`, `candidates` (score, band, 1–3 reasons, `home_proposal`) and `details`
+    (`place`, `subject` tier 0, `people`, each with value, source, confidence, evidence count and alternatives) to
+    every shoot, as in review §6. It is additive; the sh-2 format stays readable.
+  - Score terms: time, place, continuity (body, sequence, human folder, phone album), clock trust. Candidates come from
+    within `max(3 × largest internal gap, 6 h)` of the core.
+  - Subject tier 0: phone evidence weighted by the decay table. Labels go through a stoplist of generic ones (a
+    setting, learned from rejected chips the way names are). Folder names are a source too.
+  - `include`, `exclude` and `detail` decisions replay on re-plan. An `exclude` is never offered again for that
+    shoot.
+  - Calibration: weights scored against the dated folders (as sh-1); report to `docs/private/`.
+  - Verify: `uv run pytest tests/test_shoots.py -q`, with these cases: an astro night with phone frames only 8 h
+    before (area kept, subject dropped); a second body offset by 1 h; a sequence across the boundary; a replayed
+    exclude.
+
+- [ ] 11. The queue: Shoots to confirm
+  - ID: sh-9 (after sh-8). _Design:_ review §4.
+  - `#/review/shoots` becomes the queue:
+    - progress ("N of M confirmed · K frames unassigned");
+    - sort: Easiest first (the default), Biggest, Newest, Connected first;
+    - filter chips: Needs subject, Frames in question, Time zone change, Bodies disagree, No previews;
+    - collapsed stacks read `date · place · subject` with a confidence marker;
+    - "Accept all high-confidence" replaces "Accept all unflagged", and accepts core members and details only.
+  - Verify: `cd web && npm run typecheck && npm test`; **[user]** browser check.
+
+- [ ] 12. The stack: details, members, in question
+  - ID: sh-10 (after sh-9). _Design:_ review §5.
+  - A focused pane in three steps:
+    1. Details: chips with source and confidence; the name is composed from place · subject and editable.
+    2. Members: session tiles; a burst, sequence or timelapse is one tile with a count.
+    3. In question: candidates with reasons, pre-ticked per band, plus phone evidence as context rows.
+  - Keyboard: `Enter`, `Tab`, `J`/`K`, `X`, `S`.
+  - Each action stores an `include`, `exclude` or `detail` decision. Apply writes `place`, `subject`,
+    `subject_source` and `confirmed_at`, and Undo restores them.
+  - Verify: `uv run pytest tests/test_shoots_apply.py -q`; `cd web && npm run typecheck && npm test`; **[user]** browser
+    check.
+
+- [ ] 13. Library checklist
+  - ID: ob-1. _Design:_ review §3.
+  - A card on the home (Tasks) page lists, per drive: indexed, hashed, thumbs. Then the phone import (with analysis),
+    meta scan, and the latest plan, with a link to "N shoots to confirm".
+  - Verify: `cd web && npm test`; **[user]** browser check.
+
+- [ ] 14. Subject from a model: local or API, behind a setting
+  - ID: sh-7 (after sh-10). D-080 idea, shaped by D-127 answer 4.
+  - The first step is a short proposal: the models (local and API), the price per library, and the exact rule 9
+    exception text (the guardrails of review §7). It is built after the user approves.
+  - A setting `subject_model = off | local | api` (default off), with the endpoint and model for each.
+  - Tier 1 (text) and tier 2 (thumbs from the review store) run only from review ("Suggest subjects" on a chosen set of
+    shoots), after a preview of the exact payload. No GPS is sent, and the place name only if ticked.
+  - Results are suggestion chips with source `model`, cached by proposal id and a hash of the input.
+  - Verify: unit tests with a fake model; **[user]** a run on 5 shoots.
