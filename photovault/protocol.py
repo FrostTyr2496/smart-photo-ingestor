@@ -54,6 +54,8 @@ class Emitter:
         if event == "result":
             lines = []
             for key, value in f.items():
+                if key == "planned_items":  # im-7: every planned file, for the UI; `sample` covers the terminal
+                    continue
                 if isinstance(value, list):
                     lines.append(f"{key}:")
                     for row in value:

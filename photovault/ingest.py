@@ -308,6 +308,7 @@ def plan_card_ingest(
         body_inferred=body_inferred,
         folders=[{"folder": f, "files": n} for f, n in sorted(folders.items())],
         sample=[f"{it['src_rel']} -> {it['dst_rel']}" for it in items[:5]],
+        planned_items=[[it["src_rel"], it["dst_rel"], it["entry"].size] for it in items],  # im-7: every planned file
     )
     return job_id
 

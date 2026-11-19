@@ -437,3 +437,23 @@ def test_limit_skips_frames_already_on_the_target(env, capsys) -> None:
     (env["card"] / "DCIM" / "100NZ6_2" / "DSC_0003.JPG").write_bytes(os.urandom(777))
     plan = result(run(capsys, "ingest", *src, "--limit", "5", "--dry-run")[1])
     assert plan["already_on_target"] == {"frames": 2, "files": 4} and plan["groups"] == 1
+
+
+def test_dry_run_lists_every_planned_file_with_its_size(env, capsys) -> None:
+    """im-7: `planned_items` carries [src_rel, dst_rel, size] for each planned file, not just the sample."""
+    assign(capsys, env)
+    code, lines = run(capsys, "ingest", "--source", str(env["card"]), "--target", str(env["work"]), "--dry-run")
+    plan = result(lines)
+    assert code == 0 and len(plan["planned_items"]) == plan["files"] == 6
+    for src_rel, dst_rel, size in plan["planned_items"]:
+        assert (env["card"] / src_rel).stat().st_size == size
+        assert dst_rel.endswith(src_rel.rsplit(".", 1)[1])
+    assert [f"{s} -> {d}" for s, d, _ in plan["planned_items"][:5]] == plan["sample"]
+
+
+def test_human_output_leaves_out_the_planned_items(env, capsys) -> None:
+    """im-7: the terminal shows `sample`, not one line per planned file."""
+    assign(capsys, env)
+    assert cli.main(["ingest", "--source", str(env["card"]), "--target", str(env["work"]), "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "planned_items" not in out and "sample:" in out

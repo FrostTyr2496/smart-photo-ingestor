@@ -108,12 +108,15 @@ already verified on the target are skipped (`skipped_dup`, D-036), so a batch is
   - Result (2026-11-18): `uv run pytest tests/test_card_clear.py -q` → 13 passed; `uv run pytest -q` full suite green;
     web typecheck clean, `npm test` 123 passed, build committed. Schema V8 (cu-0 moves to V9). See D-097.
 
-- [ ] 8. Dry-run folder tree and Show in Finder
+- [x] 8. Dry-run folder tree and Show in Finder
   - ID: im-7 (D-102)
   - The ingest dry-run result (or a task-detail fetch) gives every planned `src_rel -> dst_rel`; the Import dialog
     shows them as a collapsible folder tree on the target (rv-26 component), with counts and sizes per folder.
     After Apply, each target folder has Show in Finder (existing `/reveal` endpoint with `rel_path`).
   - Verify: `uv run pytest tests/test_web_api.py -q`; `cd web && npm run typecheck && npm test && npm run build`.
+  - Result (2026-11-19): `uv run pytest tests/test_cli.py tests/test_web_api.py -q` -> 106 passed (incl. plain-text output leaves the list out); web typecheck clean, 171 tests passed, build done.
+    The `result` carries `planned_items` ([src_rel, dst_rel, size] per file, D-110); the dialog stays open after Apply for Show in Finder.
+    Not seen in a browser.
 
 - [x] 9. **[stronger]** Copy-target recommendations
   - ID: rec-1 (D-103; after bk-3)

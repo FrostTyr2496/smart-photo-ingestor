@@ -68,7 +68,7 @@ task's commit:
 ```
 
 ## Next
-0. **[user] browser check of Recently run on Tasks (rv-30), right-click (rv-28), Show in Photos landing on the photo (rv-27 fix 2) and the file-list
+0. **[user] browser check of the Import dialog's folder tree and Show in Finder after Apply (im-7), of Recently run on Tasks (rv-30), right-click (rv-28), Show in Photos landing on the photo (rv-27 fix 2) and the file-list
    hover preview (rv-29)**, after restarting `serve`. Also the **[user] visual check of the new UI (rv-1..rv-7, rv-12..15)**: restart `serve` (it picks up drive rename and the
    faster drive list). In Photos, connect a drive, check that thumbnails load, then save a location and keywords on a few photos. Also the older
    **[user] visual check (ui-5..15, card-3):** restart `uv run photovault serve` (it picks up ui-11..15), try the
@@ -77,8 +77,7 @@ task's commit:
    Then:
 2. **Import (spec `docs/specs/import`, D-088..D-091, D-096):** im-1..im-4 and cc-1 (safe card clear, schema V8) done; card-4 (card check skips full reads of files with no copy) done.
    bk-3 done (`backup --card ... --follow <job>`, `backup --from-folder`; the Import dialog's Second drive is live, D-104) and
-   rec-1 done (`GET /api/cards/<id>/targets`; the dialog pre-selects the pair, actions name it, D-105). Next agent task: im-7
-   (dry-run tree, D-102). ing-14 done (plan from the card check's rows; `--limit` = next N undone frames, D-106).
+   rec-1 done (`GET /api/cards/<id>/targets`; the dialog pre-selects the pair, actions name it, D-105). im-7 done (dry-run folder tree + Show in Finder, D-110). ing-14 done (plan from the card check's rows; `--limit` = next N undone frames, D-106).
    bk-7 done (Make green: `backup --card <id> --make-green [--dry-run]`, button on Cards, D-107; not seen in a browser).
    [user] im-5 and im-6: see "Waiting on user".
 3. **[user] idx-6:** resume the PP 1 hash with `--skip-prefix` on the damaged folder, then run `report duplicates`
@@ -121,11 +120,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-110 (agent): im-7 ingest result carries `planned_items`; the Import dialog shows a folder tree and stays open after Apply for Show in Finder.
 - D-109 (user+agent): rv-30 Recently run on Tasks, from `<home>/activity/history.jsonl` written by every engine run at exit.
 - D-108 (user): bk-7 Make green copies yellow card files onto a connected second drive; follow jobs also copy skipped-as-present files.
 - D-107 (agent): right-click menus (Shift = browser menu); Show in Photos jumps then holds the tile centred.
 - D-106 (agent+user): ing-14 plan reuses the card check's rows; `--limit` takes the next N undone frames.
-- D-105 (agent): rec-1 recommend() returns candidates + pair; card read on WORKING, copy on the best other drive.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

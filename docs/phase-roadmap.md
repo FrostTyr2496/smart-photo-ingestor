@@ -199,6 +199,7 @@ companion.
 | P5e.5 | im-5 make Backup Plus a working drive | im-2 | **[user]** |
 | P5e.6 | im-6 test imports, small to full | im-1, im-3, im-4 | **[user]**, X9 Pro plugged in |
 | P5e.8 | rec-1 copy-target recommendations: `targets.py`, the Import dialog pair, action steps (**done 2026-11-18**) | bk-3 | — |
+| P5e.9 | im-7 dry-run folder tree in the Import dialog, Show in Finder per folder (**done 2026-11-19**) | im-4 | **[user]** visual check |
 | P5e.7 | cc-1 safe card clear: `cards clear`, V8 job kind, Clear card dialog (**done 2026-11-18**) | im-1 | **[user]**: first real clear after a verified import |
 
 Note: the second-drive copy (green in one pass) landed with bk-3; im-4's dialog has a live Second drive.

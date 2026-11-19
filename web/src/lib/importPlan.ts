@@ -1,4 +1,5 @@
 // Pure helpers for the Import dialog (im-4, D-091): batch size, the plan a dry run returns, and the tier it reaches.
+import { readItems, type PlannedItem } from './planTree';
 import type { TaskEvent } from './types';
 
 export type BatchChoice = '10' | '100' | 'all' | 'custom';
@@ -49,6 +50,8 @@ export interface ImportPlan {
   target_free_bytes: number | null;
   folders: Array<{ folder: string; files: number }>;
   sample: string[];
+  /** Every planned file (im-7). */
+  items: PlannedItem[];
   kinds: Record<string, number>;
 }
 
@@ -85,6 +88,7 @@ export function readPlan(events: TaskEvent[]): PlanRead {
         target_free_bytes: typeof e.target_free_bytes === 'number' ? e.target_free_bytes : null,
         folders: Array.isArray(e.folders) ? (e.folders as ImportPlan['folders']) : [],
         sample: Array.isArray(e.sample) ? (e.sample as string[]) : [],
+        items: readItems(e.planned_items),
         kinds: e.kinds && typeof e.kinds === 'object' ? (e.kinds as Record<string, number>) : {},
       };
     }

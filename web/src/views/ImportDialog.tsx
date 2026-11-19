@@ -21,14 +21,16 @@ import {
   type SecondPlan,
   type TargetAnswer,
 } from '../lib/importPlan';
+import { fmtBytes, fmtInt } from '../lib/format';
+import { planFolders } from '../lib/planTree';
 import { useStore } from '../lib/store';
 import type { TaskDetail } from '../lib/types';
 
-type Phase = 'idle' | 'planning' | 'planned' | 'failed';
+type Phase = 'idle' | 'planning' | 'planned' | 'failed' | 'applied';
 
 /** Import a card onto a working drive (ing-*, im-4). The card is only read. A dry run shows the plan; Apply runs the same inputs. */
 export function ImportDialog({ card, onClose }: { card: { mount: string; label: string; volume_id?: string | null } | null; onClose: () => void }) {
-  const { drives, startTask, ask } = useStore();
+  const { drives, startTask, ask, toast } = useStore();
   const working = drives.filter((t) => roleKey(t.role) === 'working' && !t.ignored);
   const firstConnected = working.find((t) => t.mounted);
   const [target, setTarget] = useState('');
@@ -83,6 +85,7 @@ export function ImportDialog({ card, onClose }: { card: { mount: string; label: 
   const secondOk = Boolean(second) && Boolean(card?.volume_id) && second !== target;
   const inputs = card && target && limit !== undefined ? { source: card.mount, target, name, limit, second: secondOk ? second : '' } : null;
   const key = inputs ? inputsKey(inputs) : '';
+  const targetDrive = drives.find((t) => t.mount === target);
   const applyReady = phase === 'planned' && Boolean(plan) && plannedKey === key && Boolean(plan && plan.files > 0);
 
   /** Wait for a dry-run task to leave `running`; null when the dialog moved on. */
@@ -164,8 +167,9 @@ export function ImportDialog({ card, onClose }: { card: { mount: string; label: 
       action: 'Import',
     });
     if (!ok) return;
-    onClose();
     const id = await startTask('ingest', { ...importArgs(inputs), dry_run: false });
+    if (id) setPhase('applied'); // the dialog stays open so each target folder can be shown in Finder (im-7)
+    else onClose();
     if (!id || !inputs.second || !card.volume_id) return;
     // The trailing copy follows the import job, whose id the import's plan reports first.
     for (let i = 0; i < 600; i++) {
@@ -195,9 +199,9 @@ export function ImportDialog({ card, onClose }: { card: { mount: string; label: 
       footer={
         <>
           <button type="button" className="btn-ghost" onClick={onClose}>
-            Cancel
+            {phase === 'applied' ? 'Close' : 'Cancel'}
           </button>
-          <button type="button" className="btn" disabled={!inputs || phase === 'planning'} onClick={dryRun}>
+          <button type="button" className="btn" disabled={!inputs || phase === 'planning' || phase === 'applied'} onClick={dryRun}>
             {phase === 'planning' ? 'Planning…' : 'Dry run'}
           </button>
           <button
@@ -273,15 +277,54 @@ export function ImportDialog({ card, onClose }: { card: { mount: string; label: 
         </div>
       )}
       {phase === 'failed' && <p className="text-sm text-err">{error}</p>}
-      {plan && phase === 'planned' && (
-        <PlanView plan={plan} warnings={warnings} stale={plannedKey !== key} target={mountName(target, drives)} second={secondPlan} />
+      {plan && (phase === 'planned' || phase === 'applied') && (
+        <PlanView
+          plan={plan}
+          warnings={warnings}
+          stale={phase === 'planned' && plannedKey !== key}
+          target={mountName(target, drives)}
+          second={secondPlan}
+          applied={phase === 'applied'}
+          volumeId={targetDrive?.volume_id ?? null}
+          onError={(m) => toast(m, 'err')}
+        />
       )}
       {phase === 'idle' && <p className="text-xs text-faint">A dry run shows exactly what would be copied. Nothing is written until you Apply.</p>}
     </Modal>
   );
 }
 
-function PlanView({ plan, warnings, stale, target, second }: { plan: ImportPlan; warnings: string[]; stale: boolean; target: string; second: SecondPlan | null }) {
+function PlanView({
+  plan,
+  warnings,
+  stale,
+  target,
+  second,
+  applied,
+  volumeId,
+  onError,
+}: {
+  plan: ImportPlan;
+  warnings: string[];
+  stale: boolean;
+  target: string;
+  second: SecondPlan | null;
+  applied: boolean;
+  volumeId: string | null;
+  onError: (m: string) => void;
+}) {
+  const [closed, setClosed] = useState<Set<string>>(new Set());
+  const folders = planFolders(plan.items, closed);
+  const flip = (k: string) =>
+    setClosed((c) => {
+      const n = new Set(c);
+      if (n.has(k)) n.delete(k);
+      else n.add(k);
+      return n;
+    });
+  const show = (path: string) => {
+    if (volumeId) api('POST', `/api/volumes/${encodeURIComponent(volumeId)}/reveal`, { rel_path: path }).catch((err: Error) => onError(err.message));
+  };
   const short = overCapacity(plan);
   return (
     <div className={`flex flex-col gap-2 rounded-xl border border-line bg-raised/40 p-3 text-sm ${stale ? 'opacity-60' : ''}`}>
@@ -304,13 +347,26 @@ function PlanView({ plan, warnings, stale, target, second }: { plan: ImportPlan;
         After this import the files will be <TierPill tier={tierAfterImport(second !== null)} />{' '}
         {second ? '(on two drives once both copies finish)' : '(one drive; a second drive makes them safe to remove)'}
       </div>
-      {plan.folders.length > 0 && (
-        <p className="text-xs text-muted">
-          Folders: {plan.folders.slice(0, 4).map((f) => `${f.folder} (${f.files})`).join(', ')}
-          {plan.folders.length > 4 ? ` and ${plan.folders.length - 4} more` : ''}
-        </p>
+      {folders.length > 0 && (
+        <div className="flex max-h-56 flex-col overflow-auto rounded-lg border border-line text-xs" role="tree" aria-label={`Folders on ${target}`}>
+          {folders.map((f) => (
+            <div key={f.key} className="flex items-center gap-2 px-2 py-1 hover:bg-raised" style={{ paddingLeft: 8 + f.depth * 16 }}>
+              <button type="button" className="min-w-0 flex-1 truncate text-left" onClick={() => flip(f.key)} aria-expanded={!closed.has(f.key)}>
+                <span className="text-faint">{closed.has(f.key) ? '▸' : '▾'}</span> <span className="font-medium">{f.name}</span>
+              </button>
+              <span className="shrink-0 text-muted">
+                {fmtInt(f.files)} {f.files === 1 ? 'file' : 'files'} · {fmtBytes(f.bytes)}
+              </span>
+              {applied && volumeId && (
+                <button type="button" className="btn-ghost h-6 px-2 text-2xs" onClick={() => show(f.path)}>
+                  Show in Finder
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
       )}
-      {plan.sample.length > 0 && (
+      {folders.length === 0 && plan.sample.length > 0 && (
         <ul className="break-all font-mono text-2xs text-faint">
           {plan.sample.map((s) => (
             <li key={s}>{s}</li>
