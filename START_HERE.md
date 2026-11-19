@@ -56,7 +56,13 @@ Reference docs:
   facts and photos stay in `docs/private/` and `testdata/` (gitignored).
 
 ## In progress
-none
+- Task: bk-3 then rec-1 (started 2026-11-18, Sonnet), branch `bk3`, worktree `/Users/mushfiqk/Coding/smart-photo-ingestor/.claude/worktrees/bk3`
+- Files touched: none written yet (only START_HERE.md); photovault/backup.py was designed but its Write failed
+- Last verified: not run
+- Notes: nothing built. Plan: add `expect_sha256` + `SourceMismatch(CopyError)` to copy_engine.copy_verified; backup.py with
+  plan_backup/run_backup (card, follow, folder modes), CLI `backup` + `resume` for replicate, add "backup" to JOB_COMMANDS,
+  build_argv/ALLOWED_CMDS, activity.job_counts for replicate, Import dialog second drive; then tests/test_backup.py; then rec-1.
+  Do not merge into main; keep the worktree.
 
 When you start a task, replace `none` with this block before your first edit, and set it back to `none` in the
 task's commit:
