@@ -81,8 +81,9 @@ task's commit:
 4. **Curation (spec `docs/specs/curation`, D-069):** wave 1 is approved and ready: ing-13, idx-9, idx-10, idx-14,
    seq-1b (then seq-2), rv-11; then lr-0, set-1; cu-0 / dd-0 / ro-0 are proposals first. **Phone + related
    (D-070..D-079):** rv-16, sp-2, sp-3, sp-7, sp-7b, sp-8, rv-10, rv-17..rv-24 done. **Shoots (spec
-   `docs/specs/shoots`, D-080, V7 landed):** sh-0b time model and sh-3 review mode done (D-083); next sh-1 planner +
-   calibration, sh-2, sh-4 apply/undo, sh-5; sh-6/sh-7 proposals. sp-6 and dv-0 wait.
+   `docs/specs/shoots`, D-080, V7 landed):** sh-0b, sh-1 (plan: 182 shoots, 35 trips), sh-3 done; next sh-2 (plan API +
+   server decisions), review sorted by connected drives, sh-4 apply/undo, sh-5. **Actions** (`docs/specs/actions`): act-1,
+   act-2 done (23 actions on the real catalog); next act-3, act-4 (cache previews while a drive is connected).
 5. **Card backup (spec `docs/specs/backup`, D-050..D-052):** bk-1 drive health, bk-3 backup job (after ing-13),
    vn-1 volume name on hover, then bk-2, bk-4, vn-2, vn-3. bk-5 [user]: plug in and assign the 12 TB. Metrics:
    met-2 (web view); met-4 after bk-1.
@@ -110,11 +111,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-086 (agent): sh-1 planner (gap 8 h, stoplist, volumes per shoot), act-1 engine (12 rules), act-2 pane (doable-now first).
+- D-085 (agent): idx-9 ownerless jobs paused, idx-14 camera stems + ExifTool skip, lr-0 `.acr`; rv-25 filter bar.
+- D-084 (user): Actions, a ranked to-do list separate from Tasks.
 - D-083 (agent): sh-0b time model (`timemodel.py`, body clocks, wall dates, subsec) and sh-3 review mode landed.
 - D-082 (user): the map centres on the selection or its top suggestion (a faint ring until Use).
-- D-081 (user): moving a saved location also moves related photos still at the same spot (25 m).
-- D-080 (user): shoot tagging approved (two-time model, trips, tz per shoot, names, V7, catalog-only apply in a review mode).
-- D-079 (agent): rv-24 expandable map window (portal, own Leaflet map, Esc closes only it).
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.
