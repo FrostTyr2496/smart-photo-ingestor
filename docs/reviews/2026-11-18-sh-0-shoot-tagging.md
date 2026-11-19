@@ -1,6 +1,6 @@
 # sh-0: automatic shoot tagging, reviewed as a dry run
 
-Status: **proposal, waiting for the user's decisions (section 7)**. No code until then. This replaces sp-4's shape
+Status: **approved 2026-11-18 (D-080)**; tasks in `docs/specs/shoots/tasks.md`. Answers: 0 yes, 1A, 2 yes, 3 yes (LLM title later, sh-7), 4 approved (V7 landed), 5 catalog only with a separate review mode, 6 subsec yes. This replaces sp-4's shape
 (`docs/specs/phone-gps/tasks.md`) and takes in cu-2 (manual shoot controls). Real numbers come from a read-only
 analysis of the user's catalog (`docs/private/2026-11-18-shoot-analysis.md`). This file is public, so it holds no
 names or places.
