@@ -186,7 +186,7 @@ export function Actions() {
   const { actions, loaded, error } = useActions();
   const [hiddenOpen, setHiddenOpen] = useState(false);
   const mountedIds = useMemo(() => new Set(drives.filter((d) => d.mounted && d.volume_id).map((d) => d.volume_id as string)), [drives]);
-  const g = useMemo(() => groupActions(actions, now || Date.now()), [actions, now]);
+  const g = useMemo(() => groupActions(actions, now || Date.now(), mountedIds), [actions, now, mountedIds]);
   const empty = !g.risk.length && !g.unfinished.length && !g.housekeeping.length;
 
   return (

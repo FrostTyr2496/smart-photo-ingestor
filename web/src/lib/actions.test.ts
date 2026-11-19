@@ -23,10 +23,10 @@ describe('groupActions', () => {
     expect(g.housekeeping.every((a) => a.severity === 'low')).toBe(true);
     expect(g.hidden.map((a) => a.id)).toEqual(['metadata-stale:vol-shelf']);
   });
-  it('orders by severity, then bytes, then the given order', () => {
+  it('orders by severity, then doable now (a needed drive is connected), then bytes, then the given order', () => {
     expect(g.risk[0]!.id).toBe('card-unbacked:vol-card-a');
-    expect(g.risk[1]!.id).toBe('single-copy:vol-old'); // 41 GB beats 0 bytes
-    expect(g.risk.slice(2).map((a) => a.id)).toEqual(['card-unindexed:vol-card-b', 'drive-errors:vol-old']);
+    expect(g.risk[1]!.id).toBe('card-unindexed:vol-card-b'); // Card B is connected in the fixture: doable now
+    expect(g.risk.slice(2).map((a) => a.id)).toEqual(['single-copy:vol-old', 'drive-errors:vol-old']); // 41 GB beats 0 bytes
   });
   it('a snooze in the past no longer hides', () => {
     const list = all.map((a) => (a.snoozed_until ? { ...a, snoozed_until: '2026-11-01T00:00:00+00:00' } : a));
@@ -81,5 +81,15 @@ describe('applyOp', () => {
   });
   it('ignores unknown ids', () => {
     expect(applyOp(all, { type: 'dismiss', id: 'nope' })).toEqual(all);
+  });
+});
+
+describe('doable now first (user ask)', () => {
+  it('puts an action whose drive is connected ahead of a bigger one whose drive is not, within a severity', () => {
+    const mk = (id: string, vol: string, bytes: number) =>
+      ({ id, kind: 'card_unbacked', severity: 'critical', title: id, why: [], needs: [{ volume_id: vol, label: vol, role: 'CARD', mounted: false }], steps: [], do: { label: 'x', kind: 'none' }, cli: null, evidence: { files: 1, bytes }, snoozed_until: null }) as unknown as Parameters<typeof sortActions>[0][number];
+    const list = [mk('big-unplugged', 'v1', 1e12), mk('small-plugged', 'v2', 1)];
+    expect(sortActions(list, new Set(['v2'])).map((a) => a.id)).toEqual(['small-plugged', 'big-unplugged']);
+    expect(sortActions(list).map((a) => a.id)).toEqual(['big-unplugged', 'small-plugged']);
   });
 });

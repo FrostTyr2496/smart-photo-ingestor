@@ -54,11 +54,15 @@ const RANK: Record<Severity, number> = { critical: 0, high: 1, normal: 2, low: 3
 export const isSnoozed = (a: ActionItem, now: number): boolean => a.snoozed_until !== null && Date.parse(a.snoozed_until) > now;
 export const isHidden = (a: ActionItem, now: number): boolean => Boolean(a.dismissed) || isSnoozed(a, now);
 
-/** Severity, then bytes at risk (largest first), then the server's order. */
-export function sortActions(list: ActionItem[]): ActionItem[] {
+/** Doable now: every needed drive is connected (an action needing no drive counts as doable). */
+const doable = (a: ActionItem, mountedIds?: ReadonlySet<string>): boolean =>
+  a.needs.length === 0 || a.needs.some((n) => (mountedIds ? mountedIds.has(n.volume_id) : n.mounted));
+
+/** Severity, then what can be done right now (a needed drive is connected), then bytes at risk, then the server's order. */
+export function sortActions(list: ActionItem[], mountedIds?: ReadonlySet<string>): ActionItem[] {
   return list
-    .map((a, i) => ({ a, i }))
-    .sort((x, y) => RANK[x.a.severity] - RANK[y.a.severity] || y.a.evidence.bytes - x.a.evidence.bytes || x.i - y.i)
+    .map((a, i) => ({ a, i, now: doable(a, mountedIds) ? 0 : 1 }))
+    .sort((x, y) => RANK[x.a.severity] - RANK[y.a.severity] || x.now - y.now || y.a.evidence.bytes - x.a.evidence.bytes || x.i - y.i)
     .map((x) => x.a);
 }
 
@@ -69,9 +73,9 @@ export interface Groups {
   hidden: ActionItem[];
 }
 
-export function groupActions(list: ActionItem[], now: number): Groups {
+export function groupActions(list: ActionItem[], now: number, mountedIds?: ReadonlySet<string>): Groups {
   const g: Groups = { risk: [], unfinished: [], housekeeping: [], hidden: [] };
-  for (const a of sortActions(list)) {
+  for (const a of sortActions(list, mountedIds)) {
     if (isHidden(a, now)) g.hidden.push(a);
     else if (a.severity === 'critical' || a.severity === 'high') g.risk.push(a);
     else if (a.severity === 'normal') g.unfinished.push(a);
