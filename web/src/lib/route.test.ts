@@ -19,3 +19,12 @@ describe('photos route (act-3)', () => {
     expect(parseRoute('#/review/shoots')).toEqual({ view: 'review' });
   });
 });
+
+describe('photos route: Show in Photos (rv-27)', () => {
+  it('carries a photo and its day, undated included, and round-trips', () => {
+    expect(parseRoute('#/photos?photo=42&day=2023-09-09')).toEqual({ view: 'photos', photo: 42, day: '2023-09-09' });
+    expect(parseRoute('#/photos?photo=7&day=undated')).toEqual({ view: 'photos', photo: 7, day: 'undated' });
+    expect(parseRoute('#/photos?photo=x&day=undated')).toEqual({ view: 'photos' });
+    expect(hrefFor({ view: 'photos', photo: 42, day: '2023-09-09' })).toBe('#/photos?photo=42&day=2023-09-09');
+  });
+});

@@ -1,7 +1,7 @@
 import { motion, useReducedMotion } from 'framer-motion';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CountUp, Disclosure, FsPill, Icon, RolePill, SelectTile } from '../components/bits';
-import { cameraOptions, CopiesCell, copyOptions, FileTable, FilterBar, Pager, type Column } from '../components/FileList';
+import { cameraOptions, CopiesCell, copyOptions, FileTable, FilterBar, isPhotoKind, Pager, ShowInPhotos, type Column } from '../components/FileList';
 import { ProgressBar } from '../components/ProgressBar';
 import { extVM, taskVM } from '../components/TaskCard';
 import { api } from '../lib/api';
@@ -529,16 +529,19 @@ export function DriveView({ id }: { id: string }) {
       ),
     },
   ];
-  if (drive.mounted) {
-    columns.push({
-      head: '',
-      cell: (f) => (
-        <button type="button" className="btn-ghost h-6 px-2 text-2xs" onClick={() => revealFile(f.rel_path)}>
-          <Icon name="folder" size={11} /> Show in Finder
-        </button>
-      ),
-    });
-  }
+  columns.push({
+    head: '',
+    cell: (f) => (
+      <div className="flex justify-end gap-1">
+        {isPhotoKind(f.kind) && <ShowInPhotos volumeId={id} relPath={f.rel_path} />}
+        {drive.mounted && (
+          <button type="button" className="btn-ghost h-6 whitespace-nowrap px-2 text-2xs" onClick={() => revealFile(f.rel_path)}>
+            <Icon name="folder" size={11} /> Show in Finder
+          </button>
+        )}
+      </div>
+    ),
+  });
 
   const summarizeFiles = (rows: DriveFile[]) => {
     const counts = new Map<string, number>();

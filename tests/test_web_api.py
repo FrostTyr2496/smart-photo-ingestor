@@ -1177,3 +1177,29 @@ def test_vault_name_uses_the_stored_subsec(srv: Client) -> None:
            "shutter_count": 1, "original_stem": "DSC_0001", "original_num": 1, "subsec": "81"}
     assert naming.vault_name(load_config(), row) == "M0001_20261110-210000-81_UNKNOWN_0000001.NEF"
     assert naming.vault_name(load_config(), {**row, "subsec": None}).endswith("-00_UNKNOWN_0000001.NEF")
+
+
+def test_file_photo_finds_the_group_and_day(srv: Client) -> None:
+    """rv-27: Show in Photos resolves a drive file to its photo, hashed (asset) or only indexed (job item)."""
+    conn = db.connect(srv.app.catalog_path)
+    try:
+        gid_a = conn.execute("SELECT group_id FROM capture_groups WHERE original_stem = 'DSC_0001'").fetchone()[0]
+        with repo.transaction(conn):
+            gid = repo.insert_group(conn, body_id=None, shutter_count=9, capture_time="2026-07-01T10:00:00",
+                                    capture_offset=None, time_source="exif", canonical_stem="DSC_0009",
+                                    original_stem="DSC_0009", original_num=None, shoot_id=None)
+            repo.upsert_instance(conn, volume_id="vol-work", rel_path="Old/DSC_0009.NEF", size=1, mtime_ns=1,
+                                 kind="raw", state="indexed")
+            job = repo.create_job(conn, kind="index_volume", source_volume_id="vol-work", target_volume_id=None,
+                                  params={})
+            repo.add_job_items(conn, job, [{"seq": 1, "src_rel": "Old/DSC_0009.NEF", "dst_rel": None,
+                                            "group_id": gid, "role": "primary"}])
+    finally:
+        conn.close()
+    base = "/api/volumes/vol-work/photo?rel_path="
+    assert srv.call("GET", base + "Photos/DSC_0001.JPG") == (200, {"group_id": gid_a, "day": "2026-11-10"})
+    assert srv.call("GET", base + "photos/dsc_0001.jpg")[1]["group_id"] == gid_a  # exFAT: case-insensitive key
+    assert srv.call("GET", base + "Old/DSC_0009.NEF") == (200, {"group_id": gid, "day": "2026-07-01"})
+    assert srv.call("GET", base + "Nope.JPG")[0] == 404
+    assert srv.call("GET", "/api/volumes/vol-work/photo")[0] == 400
+    assert srv.call("GET", "/api/volumes/nope/photo?rel_path=x")[0] == 404

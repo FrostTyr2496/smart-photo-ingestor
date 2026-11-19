@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion';
 import { useCallback, useEffect, useState } from 'react';
 import { CountUp, Disclosure, Icon, SelectTile } from '../components/bits';
-import { cameraOptions, copyOptions, CopiesCell, FileTable, FilterBar, Pager, TierBar, tierCounts, TierPill, type Column } from '../components/FileList';
+import { cameraOptions, copyOptions, CopiesCell, FileTable, FilterBar, isPhotoKind, Pager, ShowInPhotos, TierBar, tierCounts, TierPill, type Column } from '../components/FileList';
 import { api } from '../lib/api';
 import { fmtBytes, fmtDate, fmtInt, plural, relTime } from '../lib/format';
 import { argvWords, commandKey } from '../lib/labels';
@@ -285,6 +285,10 @@ function CardDetail({ id, onImport, onClear }: { id: string; onImport: (c: Card)
       cell: (f, open, toggle) => (
         <CopiesCell hashed={f.tier !== 'unchecked'} drives={f.copies} dupHere={f.dup_here} here="this card" open={open} onToggle={toggle} />
       ),
+    },
+    {
+      head: '',
+      cell: (f) => (isPhotoKind(f.kind) && c.volume_id ? <ShowInPhotos volumeId={c.volume_id} relPath={f.rel_path} /> : null),
     },
   ];
 

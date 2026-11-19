@@ -6,6 +6,7 @@ import { fmtInt } from '../lib/format';
 import { roleKey, roleLabel } from '../lib/labels';
 import { springs } from '../lib/motion';
 import { usePref } from '../lib/prefs';
+import { hrefFor } from '../lib/route';
 import { useStore } from '../lib/store';
 import { TIER, TIER_ORDER, TIER_TONE, nameList, type Tier, type TierCounts } from '../lib/tiers';
 import { Icon, RolePill } from './bits';
@@ -230,6 +231,32 @@ function CopiesRow({ assetId, volumeId, relPath, cols }: { assetId: number; volu
         </motion.div>
       </td>
     </tr>
+  );
+}
+
+// ---------------------------------------------------------------- show in photos
+
+/** File kinds that belong to a photo in the timeline (index.META_KINDS, plus "photo"). */
+const PHOTO_KINDS = new Set(['raw', 'jpeg', 'heic', 'video', 'derivative', 'photo']);
+export const isPhotoKind = (kind: string | null | undefined): boolean => Boolean(kind && PHOTO_KINDS.has(kind));
+
+/** Opens Photos on this file's photo, selected (rv-27). The server finds its photo and day. */
+export function ShowInPhotos({ volumeId, relPath }: { volumeId: string; relPath: string }) {
+  const { toast } = useStore();
+  const [busy, setBusy] = useState(false);
+  const go = () => {
+    setBusy(true);
+    api<{ group_id: number; day: string }>('GET', `/api/volumes/${encodeURIComponent(volumeId)}/photo?rel_path=${encodeURIComponent(relPath)}`)
+      .then((r) => {
+        window.location.hash = hrefFor({ view: 'photos', photo: r.group_id, day: r.day });
+      })
+      .catch((err: Error) => toast(err.message, 'err'))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <button type="button" className="btn-ghost h-6 whitespace-nowrap px-2 text-2xs" disabled={busy} onClick={go} title="Open this photo in Photos">
+      <Icon name="image" size={11} /> Show in Photos
+    </button>
   );
 }
 

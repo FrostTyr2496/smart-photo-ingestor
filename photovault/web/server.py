@@ -895,7 +895,7 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
             raise NotFound(str(exc)) from exc
         return 200, {"suggestions": found}
 
-    m = re.fullmatch(r"/api/volumes/([^/]+)(?:/(files|reveal|label))?", path)
+    m = re.fullmatch(r"/api/volumes/([^/]+)(?:/(files|reveal|label|photo))?", path)
     if m:
         return _volume_route(app, conn, method, m.group(1), m.group(2), query, body)
 
@@ -1107,6 +1107,8 @@ def _volume_route(app: WebApp, conn, method: str, volume_id: str, sub: str | Non
         return 405, {"error": "method not allowed"}
     if repo.get_volume(conn, volume_id) is None:
         raise NotFound("unknown drive")
+    if sub == "photo":
+        return 200, _file_photo(conn, volume_id, query)
     if sub == "files":
         state = _opt_param(query, "state")
         if state is not None and state not in FILE_STATES:
@@ -1203,6 +1205,37 @@ def _asset_copies(app: WebApp, conn, asset_id: int) -> dict:
     copies = [{**dict(r), "lr_referenced": bool(r["lr_referenced"]), "mounted": mounted.get(r["volume_id"], False)}
               for r in repo.asset_locations(conn, asset_id)]
     return {"asset_id": asset_id, "size": asset["size"], "kind": asset["kind"], "copies": copies}
+
+
+def _file_photo(conn, volume_id: str, query: dict) -> dict:
+    """The photo (capture group) a file on a drive or card belongs to, and its day in the Photos timeline (rv-27).
+
+    A hashed file links through its asset; a file only indexed so far through its index job's item. The day is the
+    wall date the timeline groups by (``repo._group_filter_sql``): an offset shoot's wall date, else the capture date.
+    """
+    rel_path = _opt_param(query, "rel_path")
+    if rel_path is None:
+        raise BadRequest("rel_path is required")
+    key = repo.path_key(rel_path)
+    row = conn.execute(
+        """SELECT a.group_id FROM instances i JOIN assets a ON a.asset_id = i.asset_id
+           WHERE i.volume_id = ? AND i.rel_path_key = ? AND a.group_id IS NOT NULL""", (volume_id, key)).fetchone()
+    if row is None:
+        for r in conn.execute(
+                """SELECT ji.src_rel, ji.group_id FROM job_items ji
+                   JOIN jobs j ON j.job_id = ji.job_id AND j.kind = 'index_volume'
+                   WHERE j.source_volume_id = ? AND ji.group_id IS NOT NULL AND ji.src_rel = ?
+                   ORDER BY ji.job_id DESC""", (volume_id, rel_path)):
+            row = r
+            break
+    if row is None:
+        raise NotFound("this file is not part of a photo in the timeline")
+    gid = int(row["group_id"])
+    g = conn.execute("SELECT capture_time FROM capture_groups WHERE group_id = ?", (gid,)).fetchone()
+    if g is None:
+        raise NotFound("this file is not part of a photo in the timeline")
+    day = repo.offset_shoot_wall_dates(conn).get(gid) or (g["capture_time"][:10] if g["capture_time"] else repo.UNDATED)
+    return {"group_id": gid, "day": day}
 
 
 def _camera_param(query: dict) -> str | None:

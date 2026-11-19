@@ -320,3 +320,12 @@ Rules for every task:
     server maximum), since collapsed groups keep the page short. The card list's tree is in name order, not urgency;
     the tier pills on each group carry the urgency, and List keeps the server order.
   - Result (2026-11-18): `cd web && npm run typecheck && npm test` → clean, 133 passed; build committed. Browser check pending.
+
+- [x] 27. Show in Photos from drive and card file lists
+  - ID: rv-27 (user ask, 2026-11-18)
+  - Photo rows (kinds raw, jpeg, heic, video, derivative) get a **Show in Photos** button. `GET
+    /api/volumes/<id>/photo?rel_path=` finds the file's capture group (through its asset when hashed, else its index
+    job item) and its timeline day (offset-shoot wall date, else capture date, else `undated`); 404 when the file is
+    in no photo. The button opens `#/photos?photo=<group>&day=<day>`, which clears the Photos filters, loads that day,
+    centres and flashes the tile (the rv-19 reveal) and selects it, so the inspector opens.
+  - Result (2026-11-18): `uv run pytest -q` and `cd web && npm run typecheck && npm test` → green (134 web); build committed. Browser check pending.

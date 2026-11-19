@@ -60,7 +60,7 @@ const qs = (o: Record<string, string | number>): string =>
  * A day's photos load when it scrolls near; select with click, ⌘-click, ⇧-click or "Select day", and edit the
  * selection in the inspector. Thumbnails are the files' embedded previews, read while their drive is connected.
  */
-export function Photos({ missing: wantMissing, day: wantDay }: { missing?: Missing; day?: string } = {}) {
+export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto }: { missing?: Missing; day?: string; photo?: number } = {}) {
   const { drives, toast, epoch } = useStore();
   const [volume, setVolume] = usePref<string>('photos.drive', '');
   const [missing, setMissing] = usePref<Missing>('photos.missing', '');
@@ -221,7 +221,7 @@ export function Photos({ missing: wantMissing, day: wantDay }: { missing?: Missi
   // the drive and shoot filters, then scrolls to the day once the filtered days have loaded.
   const [wantScroll, setWantScroll] = useState<string | null>(null);
   useEffect(() => {
-    if (!wantMissing && !wantDay) return;
+    if (wantPhoto || (!wantMissing && !wantDay)) return;
     if (wantMissing) {
       setMissing(wantMissing);
       setVolume('');
@@ -247,6 +247,14 @@ export function Photos({ missing: wantMissing, day: wantDay }: { missing?: Missi
     setMissing('');
     setShoot('');
   }, [setVolume, setMissing, setShoot]);
+  // Show in Photos from a drive or card file list (rv-27): the same reveal, then the photo is selected.
+  const selectOnReveal = useRef<number | null>(null);
+  useEffect(() => {
+    if (!wantPhoto || !wantDay) return;
+    clearFilters();
+    selectOnReveal.current = wantPhoto;
+    setReveal({ id: wantPhoto, day: wantDay });
+  }, [wantPhoto, wantDay]); // eslint-disable-line react-hooks/exhaustive-deps
   const showInAll = useCallback(() => {
     const g = firstInTime([...sel.values()]);
     if (!g) return;
@@ -274,6 +282,14 @@ export function Photos({ missing: wantMissing, day: wantDay }: { missing?: Missi
     }
     const id = reveal.id;
     setReveal(null);
+    if (selectOnReveal.current === id) {
+      selectOnReveal.current = null;
+      const g = st.groups.find((x) => x.group_id === id);
+      if (g) {
+        setSel(new Map([[id, g]]));
+        anchor.current = id;
+      }
+    }
     const t = window.setTimeout(() => {
       const el = document.querySelector<HTMLElement>(`[data-gid="${id}"]`);
       el?.scrollIntoView({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' });
