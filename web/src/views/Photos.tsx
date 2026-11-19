@@ -9,7 +9,10 @@ import {
   applyFields,
   clockTime,
   dayLabel,
+  dayLine,
   dayOf,
+  filterChips,
+  filterNote,
   firstInTime,
   MISSING_LABEL,
   monthRail,
@@ -192,13 +195,17 @@ export function Photos() {
   // flash its ring once.
   const [reveal, setReveal] = useState<{ id: number; day: string } | null>(null);
   const [flash, setFlash] = useState<number | null>(null);
+  // The one function that clears the drive and "missing" filters: the chips' x and Show in All Photos use it (rv-21).
+  const clearFilters = useCallback(() => {
+    setVolume('');
+    setMissing('');
+  }, [setVolume, setMissing]);
   const showInAll = useCallback(() => {
     const g = firstInTime([...sel.values()]);
     if (!g) return;
-    setVolume('');
-    setMissing('');
+    clearFilters();
     setReveal({ id: g.group_id, day: dayOf(g) });
-  }, [sel, setVolume, setMissing]);
+  }, [sel, clearFilters]);
   useEffect(() => {
     if (!reveal || filterKey !== '|' || days === null) return;
     const entry = days.find((d) => d.day === reveal.day);
@@ -289,6 +296,11 @@ export function Photos() {
   const selected = useMemo(() => [...sel.values()], [sel]);
   const rail = useMemo(() => monthRail(days ?? []), [days]);
   const filtered = Boolean(volume || missing);
+  const chips = useMemo(() => {
+    const d = volume ? byVolume.get(volume) : undefined;
+    return filterChips(volume ? (d ? driveName(d) : 'Drive') : null, missing);
+  }, [volume, missing, byVolume]);
+  const note = filterNote(chips);
 
   return (
     <div className="flex flex-col gap-4">
@@ -327,6 +339,25 @@ export function Photos() {
         </div>
       </div>
 
+      {chips.length > 0 && (
+        <div className="-mt-2 flex flex-wrap items-center gap-1.5" aria-label="Active filters">
+          <span className="text-xs text-muted">Filtered:</span>
+          {chips.map((c) => (
+            <span key={c.key} className="inline-flex items-center gap-1 rounded-full border border-accent/30 bg-accent/10 py-0.5 pl-2.5 pr-1 text-xs">
+              {c.label}
+              <button type="button" className="rounded-full p-0.5 text-muted hover:bg-ink/10 hover:text-ink" aria-label={`Clear filter ${c.label}`} onClick={() => (c.key === 'drive' ? setVolume('') : setMissing(''))}>
+                <Icon name="x" size={10} />
+              </button>
+            </span>
+          ))}
+          {chips.length > 1 && (
+            <button type="button" className="text-xs text-muted underline hover:text-ink" onClick={clearFilters}>
+              Clear all
+            </button>
+          )}
+        </div>
+      )}
+
       <div className={`grid items-start gap-4 ${sel.size ? 'xl:grid-cols-[minmax(0,1fr)_360px]' : ''}`}>
         <div className="grid min-w-0 items-start gap-3 md:grid-cols-[56px_minmax(0,1fr)]">
           <MonthRail rail={rail} undated={days?.some((d) => d.day === UNDATED) ?? false} />
@@ -349,6 +380,8 @@ export function Photos() {
                   onTile={onTile}
                   onOpen={openViewer}
                   onSelectDay={() => void selectDay(d)}
+                  filterNote={note}
+                  onClearFilters={clearFilters}
                   connected={(id) => (id ? byVolume.get(id)?.mounted ?? false : false)}
                 />
               ))
@@ -422,6 +455,8 @@ function DaySection({
   onTile,
   onOpen,
   onSelectDay,
+  filterNote: note,
+  onClearFilters,
   connected,
 }: {
   d: PhotoDay;
@@ -434,6 +469,8 @@ function DaySection({
   onTile: (g: PhotoGroup, e: MouseEvent) => void;
   onOpen: (g: PhotoGroup) => void;
   onSelectDay: () => void;
+  filterNote: string;
+  onClearFilters: () => void;
   connected: (volumeId: string | null) => boolean;
 }) {
   const box = useRef<HTMLElement>(null);
@@ -453,9 +490,17 @@ function DaySection({
       <div className="sticky top-[57px] z-10 -mx-1 flex items-center justify-between gap-3 bg-bg/85 px-1 py-2 backdrop-blur">
         <div className="flex min-w-0 items-baseline gap-2">
           <h2 className="truncate font-medium">{dayLabel(d.day)}</h2>
-          <span className="truncate text-xs text-muted">
-            {[d.bodies.join(', '), plural(d.groups, 'photo'), nSel ? `${fmtInt(nSel)} selected` : ''].filter(Boolean).join(' · ')}
+          <span className="truncate text-xs text-muted" title={dayLine(d, groups, nSel)}>
+            {dayLine(d, groups, nSel)}
           </span>
+          {note && (
+            <span className="hidden shrink-0 items-center gap-1 text-xs text-accent sm:inline-flex">
+              {note}
+              <button type="button" className="rounded-full p-0.5 hover:bg-accent/10" aria-label="Clear filters" onClick={onClearFilters}>
+                <Icon name="x" size={10} />
+              </button>
+            </span>
+          )}
         </div>
         <button type="button" className="btn-ghost h-7 shrink-0 px-2 text-xs" onClick={onSelectDay}>
           {allSelected ? 'Deselect day' : 'Select day'}

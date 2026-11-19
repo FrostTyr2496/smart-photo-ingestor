@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from photovault import activity, cards, clock, naming, preview, usage, volumes
+from photovault import activity, cards, clock, metadata, naming, preview, usage, volumes
 from photovault.catalog import db, repo
 from photovault.config import ConfigError, load_config
 from photovault.drives import DEFAULT_MAC_FOLDER, VOLUMES_ROOT, scan_mounts
@@ -525,11 +525,17 @@ def _group_row(row) -> dict:
 
 
 def _thumb_source(conn, group_id: int) -> Path | None:
-    """The primary file of a group on a drive that is mounted right now, or None. Files not hashed yet have no
-    asset link, so their index job's record is used instead (``repo.indexed_primary_files``)."""
+    """The primary file of a group on a drive that is mounted right now, or None."""
+    found = _thumb_source_from(conn, group_id)
+    return found[0] if found else None
+
+
+def _thumb_source_from(conn, group_id: int) -> tuple[Path, str] | None:
+    """``(file, volume_id)`` of the primary file of a group on a drive that is mounted right now, or None. Files not
+    hashed yet have no asset link, so their index job's record is used instead (``repo.indexed_primary_files``)."""
     rows = [dict(r) for r in conn.execute(
         """
-        SELECT i.rel_path, v.marker_id, v.da_volume_uuid, v.last_mount_path
+        SELECT i.rel_path, v.volume_id, v.marker_id, v.da_volume_uuid, v.last_mount_path
         FROM assets a
         JOIN instances i ON i.asset_id = a.asset_id AND i.state IN ('indexed', 'verified')
         JOIN volumes v ON v.volume_id = i.volume_id
@@ -540,8 +546,8 @@ def _thumb_source(conn, group_id: int) -> Path | None:
     ).fetchall()]
     if not rows:
         for f in repo.indexed_primary_files(conn, [group_id]).get(group_id, []):
-            vol = conn.execute("SELECT marker_id, da_volume_uuid, last_mount_path FROM volumes WHERE volume_id = ?",
-                               (f["volume_id"],)).fetchone()
+            vol = conn.execute("SELECT volume_id, marker_id, da_volume_uuid, last_mount_path FROM volumes "
+                               "WHERE volume_id = ?", (f["volume_id"],)).fetchone()
             if vol is not None:
                 rows.append({"rel_path": f["rel_path"], **dict(vol)})
     for row in rows:
@@ -555,8 +561,58 @@ def _thumb_source(conn, group_id: int) -> Path | None:
         base = mount.resolve()
         src = (base / row["rel_path"]).resolve()
         if src.is_relative_to(base) and src.is_file():
-            return src
+            return src, row["volume_id"]
     return None
+
+
+def _group_detail(app: WebApp, conn, group_id: int) -> dict:
+    """What the inspector header shows (rv-21): every drive holding the photo, which one the preview is read from,
+    and the exposure from ExifTool (read-only, cached under ``<home>/exif``; null when no drive is mounted)."""
+    if conn.execute("SELECT 1 FROM capture_groups WHERE group_id = ?", (group_id,)).fetchone() is None:
+        raise NotFound("unknown photo")
+    rows = [dict(r) for r in conn.execute(
+        """
+        SELECT i.volume_id, v.label, v.role, i.rel_path, i.state
+        FROM assets a
+        JOIN instances i ON i.asset_id = a.asset_id AND i.state IN ('indexed', 'verified')
+        JOIN volumes v ON v.volume_id = i.volume_id
+        WHERE a.group_id = ? AND a.group_role = 'primary'
+        ORDER BY (i.state = 'verified') DESC, v.label, i.rel_path
+        """, (group_id,)).fetchall()]
+    if not rows:
+        for f in repo.indexed_primary_files(conn, [group_id]).get(group_id, []):
+            vol = conn.execute("SELECT label, role FROM volumes WHERE volume_id = ?", (f["volume_id"],)).fetchone()
+            if vol is not None:
+                rows.append({"volume_id": f["volume_id"], "label": vol["label"], "role": vol["role"],
+                             "rel_path": f["rel_path"], "state": "indexed"})
+    mounted = {d["volume_id"]: d["mounted"] for d in _drive_list(conn, app.volumes_root) if d["volume_id"]}
+    instances = [{**r, "mounted": bool(mounted.get(r["volume_id"], False))} for r in rows]
+    found = _thumb_source_from(conn, group_id)
+    return {"group_id": group_id, "instances": instances,
+            "preview_from": found[1] if found else None,
+            "exif": _exif(app, group_id, found[0] if found else None)}
+
+
+def _exif(app: WebApp, group_id: int, src: Path | None) -> dict | None:
+    cache = app.home / "exif" / f"{group_id}.json"
+    try:
+        if cache.is_file():
+            return json.loads(cache.read_text())
+    except (OSError, ValueError):
+        pass
+    if src is None:
+        return None
+    meta = metadata.read_metadata([src], workers=1).meta.get(src) or {}
+    out = {"exposure_s": meta.get("ExposureTime"), "fnumber": meta.get("FNumber"), "iso": meta.get("ISO"),
+           "focal_mm": meta.get("FocalLength"), "lens": meta.get("LensModel")}
+    try:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        tmp = cache.with_name(cache.name + ".tmp")
+        tmp.write_text(json.dumps(out))
+        os.replace(tmp, cache)
+    except OSError as exc:
+        logger.warning("could not cache exif for group %s: %s", group_id, exc)
+    return out
 
 
 def _is_same_volume(mount: Path, row) -> bool:
@@ -669,6 +725,12 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
             return 200, {"places": places_near(conn, int(m.group(1)), window_s=window)}
         except ValueError as exc:
             raise NotFound(str(exc)) from exc
+
+    m = re.fullmatch(r"/api/groups/(\d+)/detail", path)
+    if m:
+        if method != "GET":
+            return 405, {"error": "method not allowed"}
+        return 200, _group_detail(app, conn, int(m.group(1)))
 
     m = re.fullmatch(r"/api/groups/(\d+)/(suggestions|thumb|preview)", path)
     if m:

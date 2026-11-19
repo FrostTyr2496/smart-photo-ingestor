@@ -1,4 +1,5 @@
 // The Photos view's data and the editor's rules (rv-7). Pure functions, so they are tested in photos.test.ts.
+import { fmtInt, plural } from './format';
 
 /** One capture group from GET /api/groups: a frame (RAW + JPEG + sidecars), with its saved metadata. */
 export interface PhotoGroup {
@@ -616,4 +617,96 @@ export function nominatimPlace(name: string, address: Record<string, string> | u
     state: a.state || a.region || a.county || null,
     country: a.country || null,
   };
+}
+
+// ---------------------------------------------------------------- headers (rv-21)
+
+/** What GET /api/groups/<id>/detail returns for the inspector header. */
+export interface GroupDetail {
+  group_id: number;
+  instances: Array<{ volume_id: string; label: string | null; role: string | null; rel_path: string; state: string; mounted: boolean }>;
+  preview_from: string | null;
+  exif: { exposure_s: number | null; fnumber: number | null; iso: number | null; focal_mm: number | null; lens: string | null } | null;
+}
+
+const trimNum = (v: number, digits: number): string => String(Number(v.toFixed(digits)));
+
+/** `1/250 s · f/2.8 · ISO 3200 · 24 mm · <lens>`; missing parts are left out, '' when nothing is known. */
+export function fmtExposure(e: GroupDetail['exif']): string {
+  if (!e) return '';
+  const parts: string[] = [];
+  if (e.exposure_s && e.exposure_s > 0) parts.push(e.exposure_s < 0.4 ? `1/${Math.round(1 / e.exposure_s)} s` : `${trimNum(e.exposure_s, 1)} s`);
+  if (e.fnumber) parts.push(`f/${trimNum(e.fnumber, 1)}`);
+  if (e.iso) parts.push(`ISO ${Math.round(e.iso)}`);
+  if (e.focal_mm) parts.push(`${trimNum(e.focal_mm, 1)} mm`);
+  if (e.lens) parts.push(e.lens);
+  return parts.join(' · ');
+}
+
+export interface DayStats {
+  /** "21:18–05:33" (earliest to latest capture time), or '' when no photo has a time. */
+  span: string;
+  located: number;
+  bodies: string[];
+}
+
+/** Stats for the photos of a day that are loaded so far. */
+export function dayStats(rows: Array<Pick<PhotoGroup, 'capture_time' | 'lat' | 'lon' | 'body_nickname'>>): DayStats {
+  const times = rows.map((g) => g.capture_time).filter((t): t is string => Boolean(t)).sort();
+  const a = clockTime(times[0] ?? null);
+  const b = clockTime(times[times.length - 1] ?? null);
+  const bodies = [...new Set(rows.map((g) => g.body_nickname).filter((x): x is string => Boolean(x)))].sort();
+  return { span: a && b ? (a === b ? a : `${a}–${b}`) : '', located: rows.filter((g) => g.lat !== null && g.lon !== null).length, bodies };
+}
+
+/** The sticky day header's detail line: bodies · count · span · located · selected. */
+export function dayLine(d: PhotoDay, rows: PhotoGroup[], nSel: number): string {
+  const s = dayStats(rows);
+  const full = rows.length >= d.groups;
+  return [
+    (s.bodies.length ? s.bodies : d.bodies).join(', '),
+    plural(d.groups, 'photo'),
+    s.span,
+    rows.length ? `${fmtInt(s.located)}${full ? '' : '+'} located` : '',
+    nSel ? `${fmtInt(nSel)} selected` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+export interface FilterChip {
+  key: 'drive' | 'missing';
+  label: string;
+}
+
+/** The chips for the filters that are on: the drive's name and the "Missing …" choice. */
+export function filterChips(driveLabel: string | null, missing: Missing): FilterChip[] {
+  const out: FilterChip[] = [];
+  if (driveLabel) out.push({ key: 'drive', label: driveLabel });
+  if (missing) out.push({ key: 'missing', label: MISSING_LABEL[missing] });
+  return out;
+}
+
+/** "Filtered: PP 1 · Missing location", or '' with no filter. */
+export const filterNote = (chips: FilterChip[]): string => (chips.length ? `Filtered: ${chips.map((c) => c.label).join(' · ')}` : '');
+
+/** The selection's body names and time span for the multi-select header. */
+export function selectionLine(sel: Array<Pick<PhotoGroup, 'capture_time' | 'body_nickname'>>): string {
+  const times = sel.map((g) => g.capture_time).filter((t): t is string => Boolean(t)).sort();
+  const first = times[0];
+  const last = times[times.length - 1];
+  const bodies = [...new Set(sel.map((g) => g.body_nickname).filter((x): x is string => Boolean(x)))].sort().join(', ');
+  let span = '';
+  if (first && last) {
+    const day = (t: string) => t.slice(0, 10);
+    span = day(first) === day(last) ? `${clockTime(first)}–${clockTime(last)}` : `${day(first)} ${clockTime(first)} – ${day(last)} ${clockTime(last)}`;
+  }
+  return [bodies, span].filter(Boolean).join(' · ');
+}
+
+/** Drive chips for a selection: one per volume with how many selected photos are on it. */
+export function volumeCounts(sel: Array<Pick<PhotoGroup, 'volume_id'>>): Array<{ volume_id: string; count: number }> {
+  const m = new Map<string, number>();
+  for (const g of sel) if (g.volume_id) m.set(g.volume_id, (m.get(g.volume_id) ?? 0) + 1);
+  return [...m].map(([volume_id, count]) => ({ volume_id, count }));
 }

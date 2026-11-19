@@ -39,6 +39,13 @@ import {
   splitShift,
   UNDATED,
   type PhotoGroup,
+  dayLine,
+  dayStats,
+  filterChips,
+  filterNote,
+  fmtExposure,
+  selectionLine,
+  volumeCounts,
 } from './photos';
 
 const g = (id: number, over: Partial<PhotoGroup> = {}): PhotoGroup => ({
@@ -399,5 +406,39 @@ describe('viewer helpers (rv-20)', () => {
   it('clamps', () => {
     expect(clamp(5, 0, 1)).toBe(1);
     expect(clamp(-5, 0, 1)).toBe(0);
+  });
+});
+
+describe('headers (rv-21)', () => {
+  const at = (id: number, t: string | null, over: Partial<PhotoGroup> = {}) => g(id, { capture_time: t, ...over });
+  it('formats the exposure line and skips what is missing', () => {
+    expect(fmtExposure({ exposure_s: 0.004, fnumber: 2.8, iso: 3200, focal_mm: 24, lens: 'Z 24-70mm f/2.8 S' })).toBe('1/250 s · f/2.8 · ISO 3200 · 24 mm · Z 24-70mm f/2.8 S');
+    expect(fmtExposure({ exposure_s: 2, fnumber: 8, iso: null, focal_mm: 50.5, lens: null })).toBe('2 s · f/8 · 50.5 mm');
+    expect(fmtExposure({ exposure_s: 1.3, fnumber: null, iso: 100, focal_mm: null, lens: null })).toBe('1.3 s · ISO 100');
+    expect(fmtExposure(null)).toBe('');
+  });
+  it('computes day stats: span, located count, bodies', () => {
+    const rows = [
+      at(1, '2023-09-10T21:18:00', { lat: 1, lon: 2, body_nickname: 'Z6' }),
+      at(2, '2023-09-10T23:40:00', { body_nickname: 'Z6II' }),
+      at(3, '2023-09-10T22:00:00', { lat: 1, lon: 2, body_nickname: 'Z6' }),
+    ];
+    expect(dayStats(rows)).toEqual({ span: '21:18–23:40', located: 2, bodies: ['Z6', 'Z6II'] });
+    expect(dayStats([])).toEqual({ span: '', located: 0, bodies: [] });
+  });
+  it('builds the day line, marking a partial load', () => {
+    const rows = [at(1, '2023-09-10T21:18:00', { lat: 1, lon: 2, body_nickname: 'Z6' })];
+    expect(dayLine({ day: '2023-09-10', groups: 1, bodies: ['Z6'] }, rows, 1)).toBe('Z6 · 1 photo · 21:18 · 1 located · 1 selected');
+    expect(dayLine({ day: '2023-09-10', groups: 5, bodies: ['Z6'] }, rows, 0)).toBe('Z6 · 5 photos · 21:18 · 1+ located');
+  });
+  it('labels the active filters', () => {
+    expect(filterChips(null, '')).toEqual([]);
+    expect(filterNote(filterChips('PP 1', 'gps'))).toBe('Filtered: PP 1 · Missing location');
+    expect(filterChips(null, 'any')).toEqual([{ key: 'missing', label: 'Missing anything' }]);
+  });
+  it('summarises a selection and counts photos per drive', () => {
+    const sel = [at(1, '2023-09-10T21:18:00', { body_nickname: 'Z6', volume_id: 'a' }), at(2, '2023-09-10T23:40:00', { body_nickname: 'Z6II', volume_id: 'b' }), at(3, '2023-09-10T22:00:00', { volume_id: 'a' })];
+    expect(selectionLine(sel)).toBe('Z6, Z6II · 21:18–23:40');
+    expect(volumeCounts(sel)).toEqual([{ volume_id: 'a', count: 2 }, { volume_id: 'b', count: 1 }]);
   });
 });

@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from photovault import cli, preview, volumes
+from photovault import cli, metadata, preview, volumes
 from photovault.catalog import db, repo
 from photovault.config import load_config
 from photovault.geo import utc_text
@@ -1003,3 +1003,48 @@ def test_preview_prefers_the_large_jpeg_and_caches(srv: Client, monkeypatch: pyt
     assert (srv.home / "previews" / f"{gid}.jpg").is_file()
     assert srv.call("GET", f"/api/groups/{gid}/preview")[0] == 200 and len(seen) == 1
     assert srv.call("GET", f"/api/groups/{srv.ids['c']}/preview")[0] == 404  # drive not mounted
+
+
+# --------------------------------------------------------------------------- group detail (rv-21)
+
+def _fake_read(calls: list):
+    def fake(paths, **kw):
+        calls.append(list(paths))
+        res = metadata.MetadataResult()
+        res.meta = {Path(p): {"ExposureTime": 0.004, "FNumber": 2.8, "ISO": 3200, "FocalLength": 24.0,
+                              "LensModel": "NIKKOR Z 24-70mm f/2.8 S"} for p in paths}
+        return res
+    return fake
+
+
+def test_group_detail_instances_preview_from_and_exif_cache(srv: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    photo = srv.root / "WORK" / "Photos" / "DSC_0001.JPG"
+    photo.parent.mkdir(parents=True)
+    photo.write_bytes(b"x")
+    conn = db.connect(srv.app.catalog_path)
+    with repo.transaction(conn):
+        asset = conn.execute("SELECT asset_id FROM assets WHERE group_id = ?", (srv.ids["a"],)).fetchone()[0]
+        repo.upsert_instance(conn, volume_id="vol-leg", rel_path="Old/DSC_0001.JPG", size=10, mtime_ns=1,
+                             kind="photo", state="verified", asset_id=asset)
+    conn.close()
+    calls: list = []
+    monkeypatch.setattr(metadata, "read_metadata", _fake_read(calls))
+    status, body = srv.call("GET", f"/api/groups/{srv.ids['a']}/detail")
+    assert status == 200
+    by_vol = {i["volume_id"]: i for i in body["instances"]}
+    assert by_vol["vol-work"]["mounted"] is True and by_vol["vol-work"]["label"] == "WORK"
+    assert by_vol["vol-leg"]["mounted"] is False and by_vol["vol-leg"]["state"] == "verified"
+    assert body["preview_from"] == "vol-work"
+    assert body["exif"] == {"exposure_s": 0.004, "fnumber": 2.8, "iso": 3200, "focal_mm": 24.0,
+                            "lens": "NIKKOR Z 24-70mm f/2.8 S"}
+    assert (srv.home / "exif" / f"{srv.ids['a']}.json").is_file()
+    assert srv.call("GET", f"/api/groups/{srv.ids['a']}/detail")[1]["exif"] == body["exif"]
+    assert len(calls) == 1  # second request came from the cache
+
+
+def test_group_detail_without_a_mounted_drive(srv: Client, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(metadata, "read_metadata", lambda *a, **k: pytest.fail("must not read"))
+    status, body = srv.call("GET", f"/api/groups/{srv.ids['c']}/detail")
+    assert status == 200 and body["preview_from"] is None and body["exif"] is None
+    assert [(i["volume_id"], i["mounted"]) for i in body["instances"]] == [("vol-leg", False)]
+    assert srv.call("GET", "/api/groups/99999/detail")[0] == 404

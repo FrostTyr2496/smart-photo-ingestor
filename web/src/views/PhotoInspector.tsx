@@ -4,6 +4,7 @@ import { Icon } from '../components/bits';
 import { MapPicker, type MapPoint } from '../components/MapPicker';
 import { api } from '../lib/api';
 import { fmtInt, plural } from '../lib/format';
+import { driveName } from '../lib/labels';
 import {
   addKeywords,
   autoStep,
@@ -13,6 +14,10 @@ import {
   copyText,
   vaultCopyName,
   fmtCoord,
+  fmtExposure,
+  selectionLine,
+  volumeCounts,
+  type GroupDetail,
   mapsUrl,
   fmtDelta,
   gapLabel,
@@ -113,7 +118,7 @@ export function PhotoInspector({
   onShowInAll: () => void;
   onOpenViewer: (g: PhotoGroup) => void;
 }) {
-  const { toast } = useStore();
+  const { toast, drives } = useStore();
   const [pend, setPend] = useState<Pending>(NO_EDITS);
   const [saving, setSaving] = useState(false);
   const first = selected[0] ?? null;
@@ -201,42 +206,53 @@ export function PhotoInspector({
     }
   };
 
+  const detail = useDetail(n === 1 && first ? first.group_id : null);
+  const exposure = n === 1 ? fmtExposure(detail?.exif ?? null) : '';
+  const chips = useMemo<Chip[]>(() => {
+    if (n === 1 && detail) {
+      return detail.instances.map((i) => ({ key: `${i.volume_id}|${i.rel_path}`, volume_id: i.volume_id, label: i.label || i.role || 'Drive', mounted: i.mounted, hint: `${i.state}: ${i.rel_path}`, count: 0 }));
+    }
+    if (n === 1) return [];
+    return volumeCounts(selected).map((c) => {
+      const d = drives.find((x) => x.volume_id === c.volume_id);
+      return { key: c.volume_id, volume_id: c.volume_id, label: d ? driveName(d) : 'Drive', mounted: d?.mounted ?? false, hint: plural(c.count, 'selected photo'), count: c.count };
+    });
+  }, [n, detail, selKey, drives]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const located = selected.filter((g) => g.lat !== null && g.lon !== null);
   const points = useMemo<MapPoint[]>(() => located.map((g) => ({ lat: g.lat!, lon: g.lon! })), [selKey, located.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const pin = pend.loc && pend.loc.lat !== null && pend.loc.lon !== null ? { lat: pend.loc.lat, lon: pend.loc.lon } : null;
 
   return (
     <aside className="card flex h-full flex-col overflow-hidden bg-surface/95 shadow-2xl xl:h-auto xl:max-h-[calc(100vh-88px)] xl:bg-surface/80 xl:shadow-none">
-      <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3">
-        <div className="min-w-0">
-          <p className="truncate font-medium">{n === 1 ? first?.canonical_stem || `Photo ${first?.group_id}` : `${fmtInt(n)} photos selected`}</p>
-          <p className="truncate text-xs text-muted">
-            {n === 1 && first ? [first.body_nickname, first.capture_time?.replace('T', ' ')].filter(Boolean).join(' · ') : 'Changes apply to every selected photo.'}
+      <div className="flex flex-col gap-1 border-b border-line px-3 py-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <p className="min-w-0 flex-1 truncate font-medium" title={n === 1 ? first?.canonical_stem ?? '' : undefined}>
+            {n === 1 ? first?.canonical_stem || `Photo ${first?.group_id}` : `${fmtInt(n)} selected`}
           </p>
+          <div className="flex shrink-0 items-center">
+            {n === 1 && first && vaultCopyName(first) && (
+              <>
+                <IconBtn icon="copy" label={`Copy name: ${vaultCopyName(first)}`} onClick={() => void copyOne(vaultCopyName(first))} />
+                {copyName(first) && copyName(first) !== vaultCopyName(first) && (
+                  <IconBtn icon="camera" label={`Copy camera name: ${copyName(first)}`} onClick={() => void copyOne(copyName(first))} />
+                )}
+              </>
+            )}
+            <IconBtn icon="locate" label="Show in All Photos: clear the filters and scroll the grid to this photo" onClick={onShowInAll} />
+            {n === 1 && first && first.volume_id && <IconBtn icon="expand" label="Full screen" onClick={() => onOpenViewer(first)} />}
+            <IconBtn icon="x" label="Clear selection" onClick={onClear} />
+          </div>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          {n === 1 && first && vaultCopyName(first) && (
-            <>
-              <button type="button" className="btn-ghost h-7 px-2 text-xs" title={vaultCopyName(first)} onClick={() => void copyOne(vaultCopyName(first))}>
-                Copy name
-              </button>
-              {copyName(first) && copyName(first) !== vaultCopyName(first) && (
-                <button type="button" className="btn-ghost h-7 px-1.5 text-2xs text-muted" title={`Camera name: ${copyName(first)}`} onClick={() => void copyOne(copyName(first))}>
-                  Camera name
-                </button>
-              )}
-            </>
-          )}
-          <button type="button" className="btn-ghost h-7 px-2 text-xs" onClick={onShowInAll} title="Clear the filters and scroll the grid to this photo">
-            Show in All Photos
-          </button>
-          <button type="button" className="btn-ghost h-7 px-2" onClick={onClear} aria-label="Clear selection">
-            <Icon name="x" />
-          </button>
-        </div>
+        <p className="text-xs text-muted" title={exposure || undefined}>
+          {n === 1 && first
+            ? [first.body_nickname, first.capture_time?.replace('T', ' '), exposure].filter(Boolean).join(' · ')
+            : [selectionLine(selected), 'Changes apply to every selected photo.'].filter(Boolean).join(' · ')}
+        </p>
+        <DriveChips chips={chips} showing={n === 1 ? detail?.preview_from ?? null : null} loaded={n !== 1 || detail !== null} />
       </div>
 
-      <div className="flex flex-col gap-5 overflow-y-auto px-4 py-4">
+      <div className="flex flex-col gap-5 overflow-y-auto px-4 pb-4 pt-3">
         {n === 1 && first && <Preview group={first} onOpen={() => onOpenViewer(first)} />}
 
         <Section title="Location">
@@ -363,6 +379,71 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
       {children}
     </section>
   );
+}
+
+interface Chip {
+  key: string;
+  volume_id: string;
+  label: string;
+  mounted: boolean;
+  hint: string;
+  count: number;
+}
+
+function IconBtn({ icon, label, onClick }: { icon: string; label: string; onClick: () => void }) {
+  return (
+    <button type="button" className="btn-ghost h-7 w-7 justify-center px-0 text-muted hover:text-ink" title={label} aria-label={label} onClick={onClick}>
+      <Icon name={icon} />
+    </button>
+  );
+}
+
+/** The drives holding the photo: a filled dot when plugged in, a hollow one when not; the one the preview is read from is marked. */
+function DriveChips({ chips, showing, loaded }: { chips: Chip[]; showing: string | null; loaded: boolean }) {
+  if (!loaded && !chips.length) return <div className="h-5 w-24 animate-pulse rounded-full bg-ink/5" aria-hidden="true" />;
+  if (!chips.length) return <p className="text-2xs text-faint">No drive holds this photo yet.</p>;
+  const from = chips.find((c) => c.volume_id === showing);
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {chips.map((c) => {
+        const on = c.volume_id === showing;
+        return (
+          <span
+            key={c.key}
+            title={`${c.mounted ? 'Connected' : 'Not connected'} · ${c.hint}${on ? ' · the preview is loaded from here' : ''}`}
+            className={`inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-2xs ${on ? 'border-accent/50 bg-accent/10 text-ink' : 'border-line text-muted'}`}
+          >
+            <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${c.mounted ? 'bg-go' : 'border border-faint'}`} />
+            <span className="truncate">{c.label}</span>
+            {c.count > 0 && <span className="tabular text-faint">{fmtInt(c.count)}</span>}
+            {on && <Icon name="image" size={10} className="text-accent" />}
+          </span>
+        );
+      })}
+      {showing !== null || chips.some((c) => c.mounted) ? (
+        from && <span className="text-2xs text-faint">showing from {from.label}</span>
+      ) : (
+        <span className="text-2xs text-faint">no drive connected</span>
+      )}
+    </div>
+  );
+}
+
+/** GET /api/groups/<id>/detail for the one open photo (rv-21); null while loading or for a selection. */
+function useDetail(groupId: number | null): GroupDetail | null {
+  const [d, setD] = useState<GroupDetail | null>(null);
+  useEffect(() => {
+    setD(null);
+    if (groupId === null) return undefined;
+    let alive = true;
+    api<GroupDetail>('GET', `/api/groups/${groupId}/detail`)
+      .then((x) => alive && setD(x))
+      .catch(() => alive && setD({ group_id: groupId, instances: [], preview_from: null, exif: null }));
+    return () => {
+      alive = false;
+    };
+  }, [groupId]);
+  return d;
 }
 
 function Preview({ group, onOpen }: { group: PhotoGroup; onOpen: () => void }) {

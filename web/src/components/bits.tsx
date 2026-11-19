@@ -270,6 +270,25 @@ const PATHS: Record<string, ReactNode> = {
     </>
   ),
   edit: <path d="M10.5 3l2.5 2.5L6 12.5H3.5V10z" />,
+  copy: (
+    <>
+      <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
+      <path d="M10.5 5.5V4A1.5 1.5 0 009 2.5H4A1.5 1.5 0 002.5 4v5A1.5 1.5 0 004 10.5h1.5" />
+    </>
+  ),
+  camera: (
+    <>
+      <path d="M2 5.5h2.5L5.5 4h5l1 1.5H14V12H2z" />
+      <circle cx="8" cy="8.5" r="2.2" />
+    </>
+  ),
+  locate: (
+    <>
+      <circle cx="8" cy="8" r="3.5" />
+      <path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3" />
+    </>
+  ),
+  expand: <path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5L9 7M2.5 13.5L7 9" />,
 };
 
 export function Icon({ name, size = 14, className = '' }: { name: keyof typeof PATHS | string; size?: number; className?: string }) {

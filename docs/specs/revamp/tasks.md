@@ -221,7 +221,7 @@ Rules for every task:
     browser check.
   - Result (2026-11-18): `Lightbox.tsx` + `ZoomView.tsx`, portalled from Photos; opens on double-click or Space on a tile and by clicking the inspector preview. Keys ←/→ (wrap, selection follows), Esc (leaves zoom first), I, F; swipe; click zooms to 100% and drag pans. `GET /api/groups/<id>/preview` (JpgFromRaw then PreviewImage) caches under `<home>/previews/`; thumbnail blurred until it loads. Reduced motion respected. API test `-k preview`, helper tests pass. Not seen in a browser.
 
-- [ ] 21. Condensed headers with stats, active filters, and where the photo lives
+- [x] 21. Condensed headers with stats, active filters, and where the photo lives
   - ID: rv-21 (user ask, 2026-11-18, D-076)
   - **Inspector header**, at most three compact lines:
     1. The stem, then icon buttons with tooltips: Copy name, Camera name, Show in All Photos, Full screen, Close. These
@@ -243,6 +243,7 @@ Rules for every task:
     The header loads it lazily for one photo. Day stats come from the rows already fetched, plus the day's count.
   - Verify: `uv run pytest tests/test_web_api.py -q -k detail`; `cd web && npm run typecheck && npm test`;
     **[user]** browser check.
+  - Result (2026-11-18): `GET /api/groups/<id>/detail` (instances with mounted, `preview_from` via `_thumb_source_from`, exif through `metadata.read_metadata`, cached in `<home>/exif/`); inspector header is stem + icon buttons, body · time · exposure, and drive chips; day header line adds time span and located count (`+` while the day is partly loaded); filter chips under the title and a note in the day header, sharing `clearFilters` with Show in All. Pure helpers tested in `photos.test.ts`; 2 API tests. Not seen in a browser.
 
 - [ ] 22. Hideable left sidebar
   - ID: rv-22 (user ask, 2026-11-18)
