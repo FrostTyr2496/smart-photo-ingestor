@@ -281,6 +281,21 @@ def build_argv(cmd: str, args: dict) -> list[str]:
                 raise BadRequest("limit must be a positive integer")
             argv += ["--limit", str(limit)]
         return argv + (["--dry-run"] if _bool_arg(args, "dry_run") else [])
+    if cmd == "backup":
+        _allow_only(args, {"card", "source", "target", "follow", "from_folder", "dry_run"})
+        argv = ["backup", "--to", _path_arg(args, "target")]
+        if args.get("from_folder"):
+            if args.get("card") or args.get("source") or args.get("follow") is not None:
+                raise BadRequest("'from_folder' cannot be combined with card, source or follow")
+            argv += ["--from-folder", _path_arg(args, "from_folder")]
+        else:
+            argv += ["--card", _text_arg(args, "card"), "--from", _path_arg(args, "source")]
+            follow = args.get("follow")
+            if follow is not None:
+                if isinstance(follow, bool) or not isinstance(follow, int) or follow < 1:
+                    raise BadRequest("follow must be a positive integer")
+                argv += ["--follow", str(follow)]
+        return argv + (["--dry-run"] if _bool_arg(args, "dry_run") else [])
     if cmd == "resume":
         _allow_only(args, {"job_id"})
         job_id = args.get("job_id")
@@ -353,7 +368,7 @@ def build_argv(cmd: str, args: dict) -> list[str]:
     raise BadRequest(f"unknown command {cmd!r}")
 
 
-ALLOWED_CMDS = ("assign", "ingest", "card_clear", "resume", "card_status", "card_check", "index", "hash", "meta_scan",
+ALLOWED_CMDS = ("assign", "ingest", "backup", "card_clear", "resume", "card_status", "card_check", "index", "hash", "meta_scan",
                 "meta_refs", "meta_sidecars", "shoots_plan", "shoots_apply", "shoots_undo",
                 "previews_cache")
 

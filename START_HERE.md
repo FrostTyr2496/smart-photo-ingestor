@@ -56,13 +56,7 @@ Reference docs:
   facts and photos stay in `docs/private/` and `testdata/` (gitignored).
 
 ## In progress
-- Task: bk-3 then rec-1 (started 2026-11-18, Sonnet), branch `bk3`, worktree `/Users/mushfiqk/Coding/smart-photo-ingestor/.claude/worktrees/bk3`
-- Files touched: none written yet (only START_HERE.md); photovault/backup.py was designed but its Write failed
-- Last verified: not run
-- Notes: nothing built. Plan: add `expect_sha256` + `SourceMismatch(CopyError)` to copy_engine.copy_verified; backup.py with
-  plan_backup/run_backup (card, follow, folder modes), CLI `backup` + `resume` for replicate, add "backup" to JOB_COMMANDS,
-  build_argv/ALLOWED_CMDS, activity.job_counts for replicate, Import dialog second drive; then tests/test_backup.py; then rec-1.
-  Do not merge into main; keep the worktree.
+none
 
 When you start a task, replace `none` with this block before your first edit, and set it back to `none` in the
 task's commit:
@@ -81,9 +75,8 @@ task's commit:
 1. **[user] re-index Big Boy Old** (`uv run photovault index "/Volumes/Big Boy Old"`), then open its drive page.
    Then:
 2. **Import (spec `docs/specs/import`, D-088..D-091, D-096):** im-1..im-4 and cc-1 (safe card clear, schema V8) done; card-4 (card check skips full reads of files with no copy) done.
-   Next agent tasks: **bk-3** with a folder source (D-101), then im-7 (dry-run tree, D-102), rec-1 (target
-   recommendations, D-103). Then **bk-3** (trailing copy onto a second WORKING/MASTER drive). Until it lands nothing can turn green,
-   because a second import onto another WORKING drive skips the files as duplicates (D-036), so Clear finds nothing.
+   bk-3 done (`backup --card ... --follow <job>`, `backup --from-folder`; the Import dialog's Second drive is live, D-104). Next
+   agent tasks: im-7 (dry-run tree, D-102), rec-1 (target recommendations, D-103).
    [user] im-5 and im-6: see "Waiting on user".
 3. **[user] idx-6:** resume the PP 1 hash with `--skip-prefix` on the damaged folder, then run `report duplicates`
    ("If a drive shows I/O errors" in `docs/user/INDEX_WORKFLOW.md`). idx-5 is done except `lrcat mark`.
@@ -125,11 +118,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-104 (agent): bk-3 judgement calls: skip files already on the target, 120 s planned grace, second-drive dry run.
 - D-103 (user): copy-target recommendations by connected drives, file system, speed, space and copies.
 - D-102 (user): import dry run shows every planned file as a folder tree; Show in Finder after Apply.
 - D-101 (user): bk-3 also backs up a folder from any drive (read-only) onto WORKING/MASTER; no NTFS targets.
 - D-100 (agent): rv-27 Show in Photos on file rows, `GET /api/volumes/<id>/photo`, route `#/photos?photo=&day=`.
-- D-099 (agent): card-4 a card check full-reads only files that may already be elsewhere; result has `no_candidate`.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

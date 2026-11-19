@@ -6,13 +6,17 @@ import { driveName, mountName, roleKey } from '../lib/labels';
 import {
   batchLimit,
   batchLine,
+  backupArgs,
   importArgs,
+  importJobId,
   inputsKey,
   overCapacity,
   readPlan,
+  readSecond,
   tierAfterImport,
   type BatchChoice,
   type ImportPlan,
+  type SecondPlan,
 } from '../lib/importPlan';
 import { useStore } from '../lib/store';
 import type { TaskDetail } from '../lib/types';
@@ -20,11 +24,13 @@ import type { TaskDetail } from '../lib/types';
 type Phase = 'idle' | 'planning' | 'planned' | 'failed';
 
 /** Import a card onto a working drive (ing-*, im-4). The card is only read. A dry run shows the plan; Apply runs the same inputs. */
-export function ImportDialog({ card, onClose }: { card: { mount: string; label: string } | null; onClose: () => void }) {
+export function ImportDialog({ card, onClose }: { card: { mount: string; label: string; volume_id?: string | null } | null; onClose: () => void }) {
   const { drives, startTask, ask } = useStore();
   const working = drives.filter((t) => roleKey(t.role) === 'working' && !t.ignored);
   const firstConnected = working.find((t) => t.mounted);
   const [target, setTarget] = useState('');
+  const [second, setSecond] = useState('');
+  const [secondPlan, setSecondPlan] = useState<SecondPlan | null>(null);
   const [name, setName] = useState('');
   const [choice, setChoice] = useState<BatchChoice>('100');
   const [custom, setCustom] = useState('');
@@ -38,6 +44,8 @@ export function ImportDialog({ card, onClose }: { card: { mount: string; label: 
   useEffect(() => {
     if (card) {
       setTarget(firstConnected?.mount ?? '');
+      setSecond('');
+      setSecondPlan(null);
       setName('');
       setChoice('100');
       setCustom('');
@@ -51,9 +59,22 @@ export function ImportDialog({ card, onClose }: { card: { mount: string; label: 
   }, [card]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const limit = batchLimit(choice, custom);
-  const inputs = card && target && limit !== undefined ? { source: card.mount, target, name, limit } : null;
+  // The trailing copy needs the card's volume id and a connected working or master drive other than the first.
+  const seconds = drives.filter((t) => (roleKey(t.role) === 'working' || roleKey(t.role) === 'master') && !t.ignored && t.mounted && t.mount !== target);
+  const secondOk = Boolean(second) && Boolean(card?.volume_id) && second !== target;
+  const inputs = card && target && limit !== undefined ? { source: card.mount, target, name, limit, second: secondOk ? second : '' } : null;
   const key = inputs ? inputsKey(inputs) : '';
   const applyReady = phase === 'planned' && Boolean(plan) && plannedKey === key && Boolean(plan && plan.files > 0);
+
+  /** Wait for a dry-run task to leave `running`; null when the dialog moved on. */
+  const waitDone = async (id: number, mine: number): Promise<TaskDetail | null> => {
+    for (;;) {
+      await new Promise((r) => window.setTimeout(r, 700));
+      if (run.current !== mine) return null;
+      const d = await api<TaskDetail>('GET', `/api/tasks/${id}?since=-1`);
+      if (d.state !== 'running') return d;
+    }
+  };
 
   const dryRun = async () => {
     if (!inputs) return;
@@ -68,28 +89,44 @@ export function ImportDialog({ card, onClose }: { card: { mount: string; label: 
       setError('The dry run could not start.');
       return;
     }
-    for (;;) {
-      await new Promise((r) => window.setTimeout(r, 700));
-      if (run.current !== mine) return;
-      try {
-        const d = await api<TaskDetail>('GET', `/api/tasks/${id}?since=-1`);
-        if (d.state === 'running') continue;
-        const read = readPlan(d.events);
+    try {
+      const d = await waitDone(id, mine);
+      if (!d) return;
+      const read = readPlan(d.events);
+      if (!read.plan || d.state !== 'done') {
         setWarnings(read.warnings);
-        if (read.plan && d.state === 'done') {
-          setPlan(read.plan);
-          setPlannedKey(inputsKey(inputs));
-          setPhase('planned');
-        } else {
-          setError(read.error || 'The dry run did not finish.');
-          setPhase('failed');
-        }
-        return;
-      } catch (err) {
-        setError((err as Error).message);
+        setError(read.error || 'The dry run did not finish.');
         setPhase('failed');
         return;
       }
+      let sp: SecondPlan | null = null;
+      if (inputs.second && card?.volume_id) {
+        // The second drive is checked now (file system, marker, room, a busy writer); the import itself is not there yet.
+        const bid = await startTask('backup', { ...backupArgs(card.volume_id, target, inputs.second), dry_run: true });
+        const bd = bid ? await waitDone(bid, mine) : null;
+        if (!bd) {
+          if (run.current === mine) {
+            setError('The second drive could not be checked.');
+            setPhase('failed');
+          }
+          return;
+        }
+        const r2 = readSecond(bd.events);
+        if (!r2.second || bd.state !== 'done') {
+          setError(r2.error || 'The second drive could not be checked.');
+          setPhase('failed');
+          return;
+        }
+        sp = r2.second;
+      }
+      setWarnings(read.warnings);
+      setPlan(read.plan);
+      setSecondPlan(sp);
+      setPlannedKey(inputsKey(inputs));
+      setPhase('planned');
+    } catch (err) {
+      setError((err as Error).message);
+      setPhase('failed');
     }
   };
 
@@ -101,12 +138,29 @@ export function ImportDialog({ card, onClose }: { card: { mount: string; label: 
         `Copy ${batchLine(plan)} (${plan.planned}) from "${card.label}" onto "${mountName(target, drives)}".`,
         name.trim() ? `Shoot name: ${name.trim()}.` : 'Shoot name: chosen from the photo dates.',
         'Each file is copied and checked by checksum. The card is left as it is.',
+        ...(inputs.second ? [`Each file is then copied from "${mountName(target, drives)}" onto "${mountName(inputs.second, drives)}" as it arrives.`] : []),
       ],
       action: 'Import',
     });
     if (!ok) return;
     onClose();
-    await startTask('ingest', { ...importArgs(inputs), dry_run: false });
+    const id = await startTask('ingest', { ...importArgs(inputs), dry_run: false });
+    if (!id || !inputs.second || !card.volume_id) return;
+    // The trailing copy follows the import job, whose id the import's plan reports first.
+    for (let i = 0; i < 600; i++) {
+      await new Promise((r) => window.setTimeout(r, 700));
+      try {
+        const d = await api<TaskDetail>('GET', `/api/tasks/${id}?since=-1`);
+        const job = importJobId(d.events);
+        if (job !== undefined) {
+          await startTask('backup', backupArgs(card.volume_id, target, inputs.second, job));
+          return;
+        }
+        if (d.state !== 'running') return;
+      } catch {
+        return;
+      }
+    }
   };
 
   const hasTarget = working.some((t) => t.mounted);
@@ -149,9 +203,14 @@ export function ImportDialog({ card, onClose }: { card: { mount: string; label: 
           ))}
         </select>
       </Field>
-      <Field label="Second drive">
-        <select className={sel} disabled title="coming with bk-3" value="">
-          <option value="">None (coming with bk-3)</option>
+      <Field label="Second drive (copies each file as it arrives, so the card can turn green)">
+        <select value={second} onChange={(e) => setSecond(e.target.value)} className={sel} disabled={seconds.length === 0 || !card?.volume_id}>
+          <option value="">{seconds.length === 0 ? 'None connected' : 'None (files stay on one drive)'}</option>
+          {seconds.map((t) => (
+            <option key={t.key} value={t.mount}>
+              {driveName(t)}
+            </option>
+          ))}
         </select>
       </Field>
       <div className="grid grid-cols-2 gap-3">
@@ -178,14 +237,14 @@ export function ImportDialog({ card, onClose }: { card: { mount: string; label: 
       {phase === 'planning' && <div className="card h-24 animate-pulse" />}
       {phase === 'failed' && <p className="text-sm text-err">{error}</p>}
       {plan && phase === 'planned' && (
-        <PlanView plan={plan} warnings={warnings} stale={plannedKey !== key} target={mountName(target, drives)} />
+        <PlanView plan={plan} warnings={warnings} stale={plannedKey !== key} target={mountName(target, drives)} second={secondPlan} />
       )}
       {phase === 'idle' && <p className="text-xs text-faint">A dry run shows exactly what would be copied. Nothing is written until you Apply.</p>}
     </Modal>
   );
 }
 
-function PlanView({ plan, warnings, stale, target }: { plan: ImportPlan; warnings: string[]; stale: boolean; target: string }) {
+function PlanView({ plan, warnings, stale, target, second }: { plan: ImportPlan; warnings: string[]; stale: boolean; target: string; second: SecondPlan | null }) {
   const short = overCapacity(plan);
   return (
     <div className={`flex flex-col gap-2 rounded-xl border border-line bg-raised/40 p-3 text-sm ${stale ? 'opacity-60' : ''}`}>
@@ -197,8 +256,15 @@ function PlanView({ plan, warnings, stale, target }: { plan: ImportPlan; warning
         · {plan.target_free} free on {target}
       </p>
       {short && <p className="text-xs text-err">The drive does not have enough free space.</p>}
+      {second && (
+        <p className={`text-xs ${second.target_free_bytes !== null && plan.planned_bytes > second.target_free_bytes ? 'text-err' : 'text-muted'}`}>
+          Second copy onto {second.target} ({second.target_fs}): {plan.planned} to copy · {second.target_free} free
+          {second.target_free_bytes !== null && plan.planned_bytes > second.target_free_bytes ? ' · not enough free space' : ''}
+        </p>
+      )}
       <div className="flex items-center gap-2 text-xs text-muted">
-        After this import the files will be <TierPill tier={tierAfterImport(false)} /> (one drive; a second drive makes them safe to remove).
+        After this import the files will be <TierPill tier={tierAfterImport(second !== null)} />{' '}
+        {second ? '(on two drives once both copies finish)' : '(one drive; a second drive makes them safe to remove)'}
       </div>
       {plan.folders.length > 0 && (
         <p className="text-xs text-muted">

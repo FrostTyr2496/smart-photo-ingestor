@@ -377,8 +377,8 @@ function summarizeCardFiles(rows: CardFile[]) {
 }
 
 export function Cards({ id }: { id: string | null }) {
-  const [importing, setImporting] = useState<{ mount: string; label: string } | null>(null);
-  const onImport = (c: Card) => c.mount && setImporting({ mount: c.mount, label: c.label });
+  const [importing, setImporting] = useState<{ mount: string; label: string; volume_id: string | null } | null>(null);
+  const onImport = (c: Card) => c.mount && setImporting({ mount: c.mount, label: c.label, volume_id: c.volume_id });
   const [clearing, setClearing] = useState<{ mount: string; label: string } | null>(null);
   const onClear = (c: Card) => c.mount && setClearing({ mount: c.mount, label: c.label });
   return (

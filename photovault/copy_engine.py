@@ -32,6 +32,10 @@ class CopyError(Exception):
     """A copy could not be verified. No file is left at `dst`."""
 
 
+class SourceMismatch(CopyError):
+    """The bytes read from the source do not match the checksum the catalog holds. Nothing is left at `dst`."""
+
+
 def _sync(fd: int) -> str:
     try:
         fcntl.fcntl(fd, fcntl.F_FULLFSYNC)
@@ -83,8 +87,11 @@ def sweep_partials(dsts: list[Path]) -> int:
     return removed
 
 
-def copy_verified(src: Path, dst: Path, *, mtime_ns: int | None = None) -> CopyResult:
-    """Copy `src` to `dst` with a verified read-back. Raises `FileExistsError` if `dst` exists."""
+def copy_verified(src: Path, dst: Path, *, mtime_ns: int | None = None, expect_sha256: str | None = None) -> CopyResult:
+    """Copy `src` to `dst` with a verified read-back. Raises `FileExistsError` if `dst` exists.
+
+    With `expect_sha256`, the bytes read from `src` must hash to it or `SourceMismatch` is raised and the partial
+    file is removed (bk-3: a copy must equal the catalog's hash, not only its own re-read)."""
     src, dst = Path(src), Path(dst)
     if dst.exists():
         raise FileExistsError(f"destination exists: {dst}")
@@ -146,6 +153,9 @@ def copy_verified(src: Path, dst: Path, *, mtime_ns: int | None = None) -> CopyR
                 os.close(out)
 
         expected = digest.hexdigest()
+        if expect_sha256 is not None and expected != expect_sha256:
+            raise SourceMismatch(f"source bytes differ from the catalog checksum for {src}: read {expected}, "
+                                 f"catalog {expect_sha256}")
         actual = _hash_uncached(tmp)
         if actual != expected:
             metrics.incident("read_verify", tmp, "verify_mismatch",

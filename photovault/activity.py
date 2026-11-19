@@ -242,7 +242,7 @@ def job_counts(conn: sqlite3.Connection, job: dict) -> dict:
         ).fetchone()
         done, left = r["done"] or 0, r["left_"] or 0
         return {"current": done, "total": done + left, "unit": "files hashed", "last_write_at": r["last"]}
-    if kind == "card_ingest":
+    if kind in ("card_ingest", "replicate"):
         r = conn.execute(
             """
             SELECT COUNT(*) AS n, SUM(state IN ('committed', 'skipped_dup', 'failed')) AS done,

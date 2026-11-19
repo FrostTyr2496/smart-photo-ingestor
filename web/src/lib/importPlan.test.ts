@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { batchLimit, batchLine, importArgs, inputsKey, overCapacity, readPlan, tierAfterImport } from './importPlan';
+import { backupArgs, batchLimit, batchLine, importArgs, importJobId, inputsKey, overCapacity, readPlan, readSecond, tierAfterImport } from './importPlan';
 
 const result = { event: 'result', files: 20, groups: 10, limit: 10, groups_total: 240, files_total: 480, planned_bytes: 100, planned: '100 B',
   target_free: '1 KB', target_free_bytes: 1000, folders: [{ folder: 'a', files: 20 }], sample: ['x -> y'], kinds: { raw: 10 } };
@@ -59,5 +59,25 @@ describe('capacity and tier', () => {
   it('one drive is yellow, two is green', () => {
     expect(tierAfterImport(false)).toBe('needs_backup');
     expect(tierAfterImport(true)).toBe('backed_up');
+  });
+});
+
+describe('trailing copy (bk-3)', () => {
+  it('builds the backup arguments, with and without a followed job', () => {
+    expect(backupArgs('vid', '/w', '/b', 7)).toEqual({ card: 'vid', source: '/w', target: '/b', follow: 7 });
+    expect(backupArgs('vid', '/w', '/b')).toEqual({ card: 'vid', source: '/w', target: '/b' });
+  });
+  it('finds the import job id in the plan result', () => {
+    expect(importJobId([{ event: 'progress' }])).toBeUndefined();
+    expect(importJobId([{ event: 'progress' }, { event: 'result', job_id: 12, files: 3 }])).toBe(12);
+  });
+  it('reads the second drive plan or its refusal', () => {
+    const ok = readSecond([{ event: 'result', target: 'Backup Plus', target_fs: 'exfat', target_free: '1 TB', target_free_bytes: 10 ** 12 }]);
+    expect(ok.second).toEqual({ target: 'Backup Plus', target_fs: 'exfat', target_free: '1 TB', target_free_bytes: 10 ** 12 });
+    expect(readSecond([{ event: 'error', message: 'formatted ntfs' }])).toEqual({ second: null, error: 'formatted ntfs' });
+  });
+  it('a second drive changes the plan key', () => {
+    const base = { source: '/s', target: '/t', name: '', limit: null };
+    expect(inputsKey({ ...base, second: '/b' })).not.toBe(inputsKey(base));
   });
 });

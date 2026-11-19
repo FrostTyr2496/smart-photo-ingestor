@@ -64,7 +64,7 @@ for a tick per warning). A dry run is never gated; it reports what the gate woul
     findings and actions. Dry runs emit the gate's verdict as a `warning` event and never fail on it.
   - Verify: `uv run pytest tests/test_health.py tests/test_ingest.py -q`
 
-- [ ] 3. **[stronger]** Backup job (WORKING → MASTER, trailing an import)
+- [x] 3. **[stronger]** Backup job (WORKING → MASTER, trailing an import)
   - ID: bk-3 (D-050)
   - `photovault/backup.py`: `plan_backup(conn, cfg, *, card_volume_id, source, target, follow_job=None,
     emit) -> job_id` and `run_backup(conn, cfg, job_id, emit, should_stop)`, per the shared definitions.
@@ -80,6 +80,10 @@ for a tick per warning). A dry run is never gated; it reports what the gate woul
     `Photography/Backups/`. Files not yet hashed on the source are hashed during the copy (read once). Targets:
     WORKING/MASTER on exFAT or APFS only (NTFS refused). Web: `backup` command with both forms.
   - Verify: `uv run pytest tests/test_backup.py -q`
+  - Result (2026-11-18): `uv run pytest tests/test_backup.py -q` -> 12 passed; `uv run pytest -q` -> 736 passed, 9 skipped;
+    web 138 passed, build done. Also touched: `copy_engine.copy_verified(expect_sha256=)` + `SourceMismatch` (the copy must
+    equal the catalog hash and leaves no partial), `activity.job_counts` for `replicate`, `backup` in `JOB_COMMANDS`, and the
+    Import dialog's Second drive (the dry run checks it; Apply starts `backup --follow`). `--accept-warnings` waits for bk-2. D-104.
 
 - [ ] 4. **[stronger]** Card workflow in the web UI
   - ID: bk-4 (after bk-2, bk-3; card-3)

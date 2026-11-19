@@ -12,7 +12,7 @@ import uuid
 import webbrowser
 from pathlib import Path
 
-from photovault import card_clear, cards, meta, metrics, phone, previews, report, shoots, volumes
+from photovault import backup, card_clear, cards, meta, metrics, phone, previews, report, shoots, volumes
 from photovault import activity
 from photovault.activity import ActivityEmitter
 from photovault.drives import CLI_DRIVE_KEYS, VOLUMES_ROOT, scan_mounts
@@ -152,8 +152,63 @@ def cmd_ingest(args, cfg, emit) -> int:
     return _run(conn, cfg, job_id, emit)
 
 
+def _run_backup(conn, cfg, job_id, emit) -> int:
+    stop = _Stop()
+    stop.install(emit)
+    summary = backup.run_backup(conn, cfg, job_id, emit, stop)
+    if summary.paused:
+        return EXIT_PAUSED
+    return EXIT_ERROR if summary.failed else EXIT_OK
+
+
+def cmd_backup(args, cfg, emit) -> int:
+    """Copy a card's imported files (`--card`, trailing an import with `--follow`) or a folder of any drive
+    (`--from-folder`) onto a WORKING or MASTER drive (bk-3)."""
+    conn = _open(cfg)
+    if bool(args.card) == bool(args.from_folder):
+        emit.emit("error", code="usage", message="give --card <volume_id> --from <mount>, or --from-folder <path>")
+        return EXIT_USAGE
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            if args.from_folder:
+                if args.follow or args.source:
+                    raise backup.BackupRefused("--from-folder takes only --to (no --from, no --follow)")
+                mount, folder = backup.find_folder_mount(conn, Path(args.from_folder))
+                job_id = backup.plan_backup(conn, cfg, source=mount, target=Path(args.to), source_folder=folder,
+                                            emit=emit)
+            else:
+                if not args.source:
+                    raise backup.BackupRefused("--card needs --from <the WORKING drive's mount>")
+                job_id = backup.plan_backup(conn, cfg, source=Path(args.source), target=Path(args.to),
+                                            card_volume_id=args.card, follow_job=args.follow, emit=emit)
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
+    except backup.BackupRefused as exc:
+        emit.emit("error", code="backup_refused", message=str(exc))
+        return EXIT_USAGE
+    if args.dry_run:
+        conn.execute("ROLLBACK")
+        emit.emit("warning", code="dry_run", message="dry run: nothing was written and the plan was discarded")
+        return EXIT_OK
+    conn.execute("COMMIT")
+    try:
+        return _run_backup(conn, cfg, job_id, emit)
+    except backup.BackupRefused as exc:
+        emit.emit("error", code="backup_refused", message=str(exc))
+        return EXIT_USAGE
+
+
 def cmd_resume(args, cfg, emit) -> int:
     conn = _open(cfg)
+    job = repo.get_job(conn, args.job_id)
+    if job is not None and job["kind"] == "replicate":
+        try:
+            return _run_backup(conn, cfg, args.job_id, emit)
+        except backup.BackupRefused as exc:
+            emit.emit("error", code="backup_refused", message=str(exc))
+            return EXIT_USAGE
     return _run(conn, cfg, args.job_id, emit)
 
 
@@ -531,6 +586,16 @@ def build_parser() -> argparse.ArgumentParser:
                      help="import only the first N frames by capture time (a small batch; D-090)")
     ing.set_defaults(func=cmd_ingest)
 
+    bk = sub.add_parser("backup", help="copy a card's imported files, or a folder of any drive, onto a WORKING/MASTER drive")
+    bk.add_argument("--card", help="volume id of the card whose imported files are copied")
+    bk.add_argument("--from", dest="source", help="mount of the WORKING drive that holds the card's imported files")
+    bk.add_argument("--from-folder", dest="from_folder", help="a folder on any registered drive: <mount>/<folder>")
+    bk.add_argument("--to", required=True, help="WORKING or MASTER drive mount (exFAT or APFS)")
+    bk.add_argument("--follow", type=int, default=None, metavar="JOB",
+                    help="trail this import job, copying each file once it is committed")
+    bk.add_argument("--dry-run", action="store_true", help="plan and show, write nothing")
+    bk.set_defaults(func=cmd_backup)
+
     r = sub.add_parser("resume", help="resume a paused or failed job")
     r.add_argument("job_id", type=int)
     r.set_defaults(func=cmd_resume)
@@ -654,7 +719,7 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-JOB_COMMANDS = frozenset({"ingest", "resume", "index", "hash", "cards"})
+JOB_COMMANDS = frozenset({"ingest", "backup", "resume", "index", "hash", "cards"})
 
 
 def main(argv: list[str] | None = None) -> int:

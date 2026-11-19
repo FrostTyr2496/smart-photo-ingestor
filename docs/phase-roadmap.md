@@ -117,7 +117,7 @@ Note: seq-1 to seq-3 are pure and fixture-driven, so they make good parallel Hai
 |---|---|---|---|
 | P5b.1 | bk-1 drive health check **[stronger]** | — | — |
 | P5b.2 | bk-2 the 1 GB gate **[stronger]** | bk-1 | — |
-| P5b.3 | bk-3 backup job, trailing an import **[stronger]** | ing-13 | — |
+| P5b.3 | bk-3 backup job, trailing an import, and a folder source (**done 2026-11-18**) **[stronger]** | ing-13 | — |
 | P5b.4 | bk-4 card workflow in the web UI **[stronger]** | bk-2, bk-3 | **[user]** visual check |
 | P5b.5 | bk-5 plug in and assign the 12 TB as MASTER | bk-1 | **[user]** |
 | P5b.6 | bk-6 first card backup | ing-11, bk-4, bk-5 | **[user]** |
@@ -199,5 +199,5 @@ companion.
 | P5e.6 | im-6 test imports, small to full | im-1, im-3, im-4 | **[user]**, X9 Pro plugged in |
 | P5e.7 | cc-1 safe card clear: `cards clear`, V8 job kind, Clear card dialog (**done 2026-11-18**) | im-1 | **[user]**: first real clear after a verified import |
 
-Note: the second-drive copy (green in one pass) is bk-3; im-4's dialog shows it disabled until bk-3 lands.
+Note: the second-drive copy (green in one pass) landed with bk-3; im-4's dialog has a live Second drive.
 

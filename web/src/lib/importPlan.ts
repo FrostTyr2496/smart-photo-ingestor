@@ -20,6 +20,8 @@ export interface ImportInputs {
   target: string;
   name: string;
   limit: number | null;
+  /** Mount of the second drive for the trailing copy, if one is chosen. */
+  second?: string;
 }
 
 /** The ingest arguments; `dry_run` is added by the caller. */
@@ -31,7 +33,7 @@ export function importArgs(i: ImportInputs): Record<string, unknown> {
 }
 
 /** Two dry runs match when every input matches; Apply is allowed only for the inputs that were planned. */
-export const inputsKey = (i: ImportInputs): string => JSON.stringify([i.source, i.target, i.name.trim(), i.limit]);
+export const inputsKey = (i: ImportInputs): string => JSON.stringify([i.source, i.target, i.name.trim(), i.limit, i.second ?? '']);
 
 export interface ImportPlan {
   files: number;
@@ -94,4 +96,42 @@ export function batchLine(p: ImportPlan): string {
   const f = (n: number) => `${n.toLocaleString('en-US')} ${n === 1 ? 'file' : 'files'}`;
   if (p.limit !== null && p.files_total > p.files) return `${p.files.toLocaleString('en-US')} of ${f(p.files_total)} (${p.groups} of ${p.groups_total} frames)`;
   return f(p.files);
+}
+
+/** The arguments of the trailing copy (bk-3): the card's files on the first drive go onto the second, following the import job. */
+export function backupArgs(card: string, firstMount: string, secondMount: string, followJob?: number): Record<string, unknown> {
+  const args: Record<string, unknown> = { card, source: firstMount, target: secondMount };
+  if (followJob !== undefined) args.follow = followJob;
+  return args;
+}
+
+/** The job id the import's plan reported (its first `result` event), or undefined while it is still planning. */
+export function importJobId(events: TaskEvent[]): number | undefined {
+  for (const e of events) if (e.event === 'result' && typeof e.job_id === 'number') return e.job_id;
+  return undefined;
+}
+
+/** What the second drive's dry run said: where it writes, how much room it has, or why it was refused. */
+export interface SecondPlan {
+  target: string;
+  target_fs: string;
+  target_free: string;
+  target_free_bytes: number | null;
+}
+
+export function readSecond(events: TaskEvent[]): { second: SecondPlan | null; error: string } {
+  let second: SecondPlan | null = null;
+  let error = '';
+  for (const e of events) {
+    if (e.event === 'error' && e.message) error = e.message;
+    else if (e.event === 'result' && e.target !== undefined) {
+      second = {
+        target: String(e.target),
+        target_fs: String(e.target_fs ?? ''),
+        target_free: String(e.target_free ?? 'unknown'),
+        target_free_bytes: typeof e.target_free_bytes === 'number' ? e.target_free_bytes : null,
+      };
+    }
+  }
+  return { second, error };
 }
