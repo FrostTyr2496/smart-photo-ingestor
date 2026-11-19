@@ -201,7 +201,21 @@ function StatTiles({ vm }: { vm: TaskVM }) {
  * the rest is behind Details. The full card (Tasks page, rv-34) shows stat tiles, the latest file and the ones before.
  * `badge` labels the card in its header (a follow-up copy's "Then").
  */
-export function RunningCard({ vm, compact = false, badge }: { vm: TaskVM; compact?: boolean; badge?: string }) {
+export function RunningCard({
+  vm,
+  compact = false,
+  badge,
+  href,
+  highlight = false,
+}: {
+  vm: TaskVM;
+  compact?: boolean;
+  badge?: string;
+  /** Clicking the card (not its buttons or disclosures) goes here: the run on the Tasks page (rv-37). */
+  href?: string;
+  /** Briefly ringed when a link lands on it. */
+  highlight?: boolean;
+}) {
   const { pauseTask, pausing } = useStore();
   const [open, setOpen] = useState(false);
   const [techOpen, setTechOpen] = useState(false);
@@ -240,14 +254,33 @@ export function RunningCard({ vm, compact = false, badge }: { vm: TaskVM; compac
   return (
     <motion.article
       layout="position"
-      className={`group relative flex min-w-0 flex-col rounded-xl border border-line bg-raised/50 ${compact ? 'p-3' : 'p-4'} hover:border-line-strong`}
+      id={`run-${vm.key}`}
+      onClick={
+        href
+          ? (e) => {
+              // Buttons, links and disclosures inside the card keep their own click.
+              if ((e.target as HTMLElement).closest('button, a, summary, details, code, [role="button"]')) return;
+              window.location.hash = href;
+            }
+          : undefined
+      }
+      title={href ? 'Open in Tasks' : undefined}
+      className={`group relative flex min-w-0 flex-col rounded-xl border bg-raised/50 ${compact ? 'p-3' : 'p-4'} transition-[border-color,box-shadow] duration-500 ${
+        highlight ? 'border-accent/70 shadow-[0_0_0_3px_rgb(var(--c-accent)/0.18)]' : 'border-line hover:border-line-strong'
+      } ${href ? 'cursor-pointer hover:bg-raised/70' : ''}`}
     >
       <div className="flex items-start gap-2">
         <h3 className={`min-w-0 flex-1 font-medium leading-snug ${compact ? 'text-sm' : 'text-base'}`}>
           {badge && <span className="chip mb-1 mr-2 inline-flex border-line align-middle text-2xs uppercase tracking-wide text-muted">{badge}</span>}
-          <span className="line-clamp-2" title={vm.title}>
-            {vm.title}
-          </span>
+          {href ? (
+            <a href={href} className="line-clamp-2 hover:underline" title={`${vm.title}: open in Tasks`}>
+              {vm.title}
+            </a>
+          ) : (
+            <span className="line-clamp-2" title={vm.title}>
+              {vm.title}
+            </span>
+          )}
         </h3>
         {vm.pauseId !== null ? (
           <button

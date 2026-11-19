@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 
 /** Hash routes, so a reload keeps the open view. */
 export type Route =
-  | { view: 'home' }
+  | { view: 'home'; task?: string }
   | { view: 'drive'; id: string }
   | { view: 'cards'; id: string | null }
   | { view: 'setup'; key: string }
@@ -35,6 +35,11 @@ export function parseRoute(rawHash: string): Route {
   const q = rawHash.indexOf('?');
   const hash = q < 0 ? rawHash : rawHash.slice(0, q);
   if (hash === '#/review/shoots') return { view: 'review' };
+  // `#/?task=t12` (rv-37): Tasks, scrolled to that run (`t<id>` a UI task, `p<pid>` a terminal run).
+  if (hash === '#/' || hash === '#' || hash === '') {
+    const task = new URLSearchParams(q < 0 ? '' : rawHash.slice(q + 1)).get('task');
+    return task && /^[tp]\d+$/.test(task) ? { view: 'home', task } : { view: 'home' };
+  }
   if (hash === '#/photos') return photosRoute(q < 0 ? '' : rawHash.slice(q + 1));
   const m = /^#\/(drive|cards|setup|photos|settings|actions)(?:\/(.+))?$/.exec(hash);
   if (!m) return { view: 'home' };
@@ -71,7 +76,7 @@ export function hrefFor(r: Route): string {
     case 'settings':
       return '#/settings';
     default:
-      return '#/';
+      return r.task ? `#/?task=${encodeURIComponent(r.task)}` : '#/';
   }
 }
 

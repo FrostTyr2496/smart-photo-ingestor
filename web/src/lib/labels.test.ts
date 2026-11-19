@@ -15,6 +15,7 @@ import {
   driveIO,
   parseRoute,
   runMounts,
+  liveTaskKey,
   statTiles,
   fileState,
   stepView,
@@ -353,5 +354,17 @@ describe('make-green drives (rv-36)', () => {
   });
   it('splits a copy message without a file path into tiles', () => {
     expect(statTiles('2.8 GB copied, 48.7 MB/s, 0 failed').map((t) => t.value)).toEqual(['2.8 GB', '48.7 MB/s', '0']);
+  });
+});
+
+describe('liveTaskKey (rv-37)', () => {
+  const ssd = drive({ mount: '/mnt/SSD', label: 'SSD', role: 'WORKING', key: 's', volume_id: 's' });
+  const other = drive({ mount: '/mnt/X', label: 'X', key: 'x', volume_id: 'x' });
+  it('finds the UI task on the drive first, then a terminal run', () => {
+    const imp = task({ id: 7, argv: ['--json', 'ingest', '--source', '/mnt/CARD', '--target', '/mnt/SSD'], final: false });
+    const ext = { pid: 55, words: ['hash', '/mnt/SSD'], started_at: '2026-11-19T00:00:00Z' };
+    expect(liveTaskKey(ssd, [imp], [ext], [ssd])).toBe('t7');
+    expect(liveTaskKey(ssd, [{ ...imp, final: true }], [ext], [ssd])).toBe('p55');
+    expect(liveTaskKey(other, [imp], [ext], [ssd, other])).toBeNull();
   });
 });

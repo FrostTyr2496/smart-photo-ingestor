@@ -490,3 +490,13 @@ Rules for every task:
   - Verify: `uv run pytest tests/test_web_api.py -q`; `cd web && npm run typecheck && npm test && npm run build`.
   - Result (2026-11-19): 2 route/job-id server tests pass (1 new); 225 web tests pass (3 new); build committed.
     Needs a `serve` restart for the server's `route`. Not seen in a browser.
+
+- [x] 37. A running task opens its run on the Tasks page
+  - ID: rv-37 (user ask, 2026-11-19; D-120)
+  - New route `#/?task=<key>` (`t<id>` a UI task, `p<pid>` a terminal run): Tasks scrolls that run's card into view
+    and rings it for 2.5 s. Linked from: the task cards on a card's page and in the sidebar (click anywhere but their
+    Pause / Details / Technical details; the title is a real link for keyboard and new-tab use), and on a drive's
+    page the running step's progress and the "Running · … / Busy" chip (which now also finds an import or backup on
+    the drive, `liveTaskKey`; between workflow steps it opens Tasks).
+  - Verify: `cd web && npm run typecheck && npm test && npm run build`.
+  - Result (2026-11-19): typecheck clean; 227 web tests pass (2 new); build committed. Not seen in a browser.

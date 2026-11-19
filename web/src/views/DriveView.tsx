@@ -10,6 +10,7 @@ import {
   baseName,
   driveName,
   liveStep,
+  liveTaskKey,
   pace,
   roleKey,
   runDetail,
@@ -22,6 +23,7 @@ import {
   type WorkflowStep,
 } from '../lib/labels';
 import { rise, springs } from '../lib/motion';
+import { hrefFor } from '../lib/route';
 import { useStore } from '../lib/store';
 import type { Drive, DriveSummary, DriveUsage } from '../lib/types';
 
@@ -117,6 +119,7 @@ function Timeline({ d, steps, summary }: { d: Drive; steps: WorkflowStep[]; summ
   const isBusy = busy(d) || Boolean(live);
   // The same numbers as the task cards, so a resumed hash shows the drive's progress here too.
   const files = { ...driveFiles, [d.mount]: summary.files };
+  const liveHref = live?.task ? hrefFor({ view: 'home', task: `t${live.task.id}` }) : live?.ext ? hrefFor({ view: 'home', task: `p${live.ext.pid}` }) : null;
   const liveProgress = live?.task ? taskVM(live.task, drives, now, files).pace : live?.ext ? extVM(live.ext, drives, now, files).pace : null;
 
   const views = steps.map((s, i) => {
@@ -152,11 +155,14 @@ function Timeline({ d, steps, summary }: { d: Drive; steps: WorkflowStep[]; summ
             <p className="text-xs text-faint">{STEP_HINT[v.step.id]}</p>
             {v.tone === 'running' && liveProgress && (
               <div className="mt-2.5 pr-4">
-                <ProgressBar value={liveProgress.fraction} live label={`${STEP_NAME[v.step.id]} progress`} />
-                <p className="mt-1.5 font-mono text-2xs text-muted">
-                  {liveProgress.total ? `${fmtInt(liveProgress.current)} of ${fmtInt(liveProgress.total)}` : fmtInt(liveProgress.current)}
-                  {liveProgress.fraction !== null && <span className="text-faint"> · {Math.floor(liveProgress.fraction * 100)}%</span>}
-                </p>
+                <a href={liveHref ?? undefined} title="Open in Tasks" className="group/live block rounded-md">
+                  <ProgressBar value={liveProgress.fraction} live label={`${STEP_NAME[v.step.id]} progress`} />
+                  <p className="mt-1.5 font-mono text-2xs text-muted">
+                    {liveProgress.total ? `${fmtInt(liveProgress.current)} of ${fmtInt(liveProgress.total)}` : fmtInt(liveProgress.current)}
+                    {liveProgress.fraction !== null && <span className="text-faint"> · {Math.floor(liveProgress.fraction * 100)}%</span>}
+                    {liveHref && <span className="ml-2 font-sans text-accent opacity-0 group-hover/live:opacity-100">Open in Tasks →</span>}
+                  </p>
+                </a>
               </div>
             )}
             {v.tone !== 'running' && d.mounted && (
@@ -499,6 +505,8 @@ export function DriveView({ id }: { id: string }) {
   const frac = s.files ? hashed / s.files : 0;
   const wfHere = workflow && workflow.volumeId === drive.volume_id;
   const isBusy = busy(drive) || Boolean(live);
+  // The busy chip opens the run on the Tasks page (rv-37); between workflow steps, just Tasks.
+  const busyHref = hrefFor({ view: 'home', task: drive ? liveTaskKey(drive, tasks, elsewhere, drives) ?? undefined : undefined });
   const copies = s.copies;
   const maxOther = copies ? Math.max(1, ...copies.by_volume.map((v) => v.files)) : 1;
   const reveal = () =>
@@ -577,10 +585,15 @@ export function DriveView({ id }: { id: string }) {
           </div>
           <div className="flex flex-wrap gap-2">
             {steps.length > 0 && drive.mounted && isBusy && (
-              <span className="inline-flex h-8 items-center gap-2 rounded-lg border border-accent/30 bg-accent/10 px-3 text-sm text-accent">
+              <a
+                href={busyHref}
+                title="Open in Tasks"
+                className="inline-flex h-8 items-center gap-2 rounded-lg border border-accent/30 bg-accent/10 px-3 text-sm text-accent hover:border-accent/60 hover:bg-accent/15"
+              >
                 <span className="live-dot h-1.5 w-1.5 rounded-full bg-accent" />
                 {wfHere ? 'Workflow running' : live ? `Running · ${STEP_NAME[live.step]}` : 'Busy'}
-              </span>
+                <span aria-hidden>→</span>
+              </a>
             )}
             {steps.length > 0 && drive.mounted && !isBusy && (
               <button type="button" className="btn-primary" onClick={() => runWorkflow(drive)}>

@@ -444,6 +444,15 @@ export function liveStep(d: Drive, tasks: TaskRec[], elsewhere: ExtRun[]): { ste
   return null;
 }
 
+/** The run working on drive `d` (a UI task first, then a terminal run), as a Tasks link key: `t<id>` / `p<pid>` (rv-37). */
+export function liveTaskKey(d: Drive, tasks: TaskRec[], elsewhere: ExtRun[], drives: Drive[]): string | null {
+  if (!d.mount) return null;
+  const t = tasks.find((x) => !x.final && runMounts(x, drives).some((m) => sameMount(m, d.mount)));
+  if (t) return `t${t.id}`;
+  const e = elsewhere.find((x) => taskMounts(x.words || []).some((m) => sameMount(m, d.mount)));
+  return e ? `p${e.pid}` : null;
+}
+
 /** What one running command does to one drive it names (rv-35): read it or write it, in words. */
 export interface DriveIO {
   mode: 'read' | 'write';

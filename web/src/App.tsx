@@ -95,7 +95,7 @@ function Shell() {
           <div className="min-w-0 flex-1">
             <AnimatePresence mode="wait" initial={false}>
               <motion.div
-                key={route.view === 'cards' ? 'cards' : routeKey(route)}
+                key={route.view === 'cards' ? 'cards' : route.view === 'home' ? 'home' : routeKey(route)}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -6, transition: { duration: 0.12 } }}
@@ -116,7 +116,7 @@ function Shell() {
                 ) : route.view === 'settings' ? (
                   <Settings />
                 ) : (
-                  <Home />
+                  <Home task={route.task} />
                 )}
               </motion.div>
             </AnimatePresence>

@@ -28,3 +28,14 @@ describe('photos route: Show in Photos (rv-27)', () => {
     expect(hrefFor({ view: 'photos', photo: 42, day: '2023-09-09' })).toBe('#/photos?photo=42&day=2023-09-09');
   });
 });
+
+describe('task links (rv-37)', () => {
+  it('round-trips a run key and ignores junk', () => {
+    expect(parseRoute('#/?task=t12')).toEqual({ view: 'home', task: 't12' });
+    expect(parseRoute('#/?task=p4411')).toEqual({ view: 'home', task: 'p4411' });
+    expect(parseRoute('#/?task=evil')).toEqual({ view: 'home' });
+    expect(parseRoute('#/')).toEqual({ view: 'home' });
+    expect(hrefFor({ view: 'home', task: 't12' })).toBe('#/?task=t12');
+    expect(hrefFor({ view: 'home' })).toBe('#/');
+  });
+});

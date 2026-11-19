@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Disclosure, RolePill } from '../components/bits';
 import { extVM, FinishedRow, RunningCard, taskVM, type TaskVM } from '../components/TaskCard';
 import { plural, relTime } from '../lib/format';
@@ -131,7 +131,7 @@ function DriveChip({ mount, drives }: { mount: string; drives: Drive[] }) {
 }
 
 /** One run (rv-31): its drives once in the header, then the run's card with any follow-up copy beside it (rv-34). */
-function RunGroupBlock({ group, drives }: { group: RunGroup<Entry>; drives: Drive[] }) {
+function RunGroupBlock({ group, drives, lit }: { group: RunGroup<Entry>; drives: Drive[]; lit: string | null }) {
   return (
     <article className="card p-4">
       {group.mounts.length > 0 && (
@@ -146,21 +146,38 @@ function RunGroupBlock({ group, drives }: { group: RunGroup<Entry>; drives: Driv
       )}
       {group.subs.length > 0 ? (
         <div className="grid items-start gap-3 lg:grid-cols-2">
-          <RunningCard vm={group.main.vm} />
+          <RunningCard vm={group.main.vm} highlight={lit === group.main.key} />
           {group.subs.map((s) => (
-            <RunningCard key={s.key} vm={s.vm} badge="Then" />
+            <RunningCard key={s.key} vm={s.vm} badge="Then" highlight={lit === s.key} />
           ))}
         </div>
       ) : (
-        <RunningCard vm={group.main.vm} />
+        <RunningCard vm={group.main.vm} highlight={lit === group.main.key} />
       )}
     </article>
   );
 }
 
 /** The home page (ui-14): what is running, one block per run (a follow-up copy nested under its import), then the idle drives. */
-export function Home() {
+export function Home({ task }: { task?: string }) {
   const { drives, tasks, elsewhere, stale, recent, now, loaded, driveFiles } = useStore();
+  // A link to one run (`#/?task=t12`, rv-37): scroll to its card and ring it for a few seconds.
+  const [lit, setLit] = useState<string | null>(null);
+  useEffect(() => {
+    if (!task) return;
+    let tries = 0;
+    let timer = 0;
+    const find = () => {
+      const el = document.getElementById(`run-${task}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setLit(task);
+        timer = window.setTimeout(() => setLit(null), 2500);
+      } else if (tries++ < 20) timer = window.setTimeout(find, 100); // the page may still be entering or loading
+    };
+    timer = window.setTimeout(find, 150);
+    return () => window.clearTimeout(timer);
+  }, [task]);
   const [staleOpen, setStaleOpen] = useState(false);
   const [doneOpen, setDoneOpen] = useState(false);
   const [allRecent, setAllRecent] = useState(false);
@@ -240,7 +257,7 @@ export function Home() {
             <AnimatePresence initial={false}>
               {groups.map((g, i) => (
                 <motion.div key={g.main.key} {...rise(i)}>
-                  <RunGroupBlock group={g} drives={drives} />
+                  <RunGroupBlock group={g} drives={drives} lit={lit} />
                 </motion.div>
               ))}
             </AnimatePresence>

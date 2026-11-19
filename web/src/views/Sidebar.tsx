@@ -423,12 +423,12 @@ function TaskList() {
         <AnimatePresence initial={false}>
           {running.map((t) => (
             <motion.div key={`t${t.id}`} {...rise()} onClick={openTasks} className="cursor-pointer" title="Open Tasks">
-              <RunningCard vm={taskVM(t, drives, now, driveFiles)} compact />
+              <RunningCard vm={taskVM(t, drives, now, driveFiles)} compact href={hrefFor({ view: 'home', task: `t${t.id}` })} />
             </motion.div>
           ))}
           {elsewhere.map((e) => (
             <motion.div key={`p${e.pid}`} {...rise()} onClick={openTasks} className="cursor-pointer" title="Open Tasks">
-              <RunningCard vm={extVM(e, drives, now, driveFiles)} compact />
+              <RunningCard vm={extVM(e, drives, now, driveFiles)} compact href={hrefFor({ view: 'home', task: `p${e.pid}` })} />
             </motion.div>
           ))}
         </AnimatePresence>

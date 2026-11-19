@@ -459,7 +459,7 @@ function CardDetail({ id, onImport, onClear, onGreen }: { id: string; onImport: 
         {runs.length > 0 && (
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             {runs.map((r) => (
-              <RunningCard key={r.vm.key} vm={r.vm} compact />
+              <RunningCard key={r.vm.key} vm={r.vm} compact href={hrefFor({ view: 'home', task: r.vm.key })} />
             ))}
           </div>
         )}
