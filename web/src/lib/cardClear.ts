@@ -1,4 +1,4 @@
-// Pure helpers for the "Clear card" dialog (cc-1, D-092): read the dry-run plan and check the typed count.
+// Pure helpers for the "Clear card" dialog (cc-1, D-096): read the dry-run plan and check the typed count.
 import type { TaskEvent } from './types';
 
 export interface KeptReason {

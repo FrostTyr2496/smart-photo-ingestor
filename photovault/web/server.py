@@ -35,7 +35,8 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from PIL import Image
 
-from photovault import actions, activity, cards, clock, metadata, naming, preview, shoots, timemodel, usage, volumes
+from photovault import (actions, activity, cards, clock, metadata, naming, preview, previews, shoots, timemodel, usage,
+                        volumes)
 from photovault.card_clear import cleared_at
 from photovault.catalog import db, repo
 from photovault.config import ConfigError, load_config
@@ -328,6 +329,9 @@ def build_argv(cmd: str, args: dict) -> list[str]:
                 raise BadRequest("'gap_h' must be a number of hours above 0")
             argv += ["--gap-h", str(gap)]
         return argv
+    if cmd == "previews_cache":
+        _allow_only(args, {"mount"})
+        return ["previews", "cache", _path_arg(args, "mount")]
     if cmd == "shoots_apply":
         _allow_only(args, {"plan_id", "expect"})
         plan_id = _text_arg(args, "plan_id")
@@ -350,7 +354,8 @@ def build_argv(cmd: str, args: dict) -> list[str]:
 
 
 ALLOWED_CMDS = ("assign", "ingest", "card_clear", "resume", "card_status", "card_check", "index", "hash", "meta_scan",
-                "meta_refs", "meta_sidecars", "shoots_plan", "shoots_apply", "shoots_undo")
+                "meta_refs", "meta_sidecars", "shoots_plan", "shoots_apply", "shoots_undo",
+                "previews_cache")
 
 
 # --------------------------------------------------------------------------- app and helpers
@@ -684,22 +689,20 @@ def _is_same_volume(mount: Path, row) -> bool:
 
 
 def _thumb(app: WebApp, conn, group_id: int, *, large: bool = False) -> Raw:
-    """The embedded JPEG: the small thumbnail, or with ``large`` the biggest one for the viewer (rv-20)."""
+    """The embedded JPEG: the small thumbnail, or with ``large`` the biggest one for the viewer (rv-20). A cached copy
+    is served first, so it shows while the drive is unplugged (act-4)."""
+    cached = previews.read_cached(app.home, group_id, large=large)
+    if cached is not None:
+        return Raw(200, "image/jpeg", cached)
     src = _thumb_source(conn, group_id)
     if src is None:
         raise NotFound("drive not mounted or no file for this group")
-    cache = app.home / ("previews" if large else "thumbs") / f"{group_id}.jpg"
-    if cache.is_file():
-        return Raw(200, "image/jpeg", cache.read_bytes())
     data = (preview.extract_preview(src, tags=preview.LARGE_PREVIEW_TAGS) if large
             else preview.extract_preview(src))
     if data is None:
         raise NotFound("no embedded preview")
     try:
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        tmp = cache.with_name(cache.name + ".tmp")
-        tmp.write_bytes(data)
-        os.replace(tmp, cache)
+        previews.store(app.home, group_id, data, large=large)
     except OSError as exc:
         logger.warning("could not cache thumbnail for group %s: %s", group_id, exc)
     return Raw(200, "image/jpeg", data)

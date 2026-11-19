@@ -6,7 +6,7 @@ import { confirmMatches, readClearPlan, type ClearPlan } from '../lib/cardClear'
 import { useStore } from '../lib/store';
 import type { TaskDetail } from '../lib/types';
 
-/** Clear a card (cc-1, D-092): a dry run shows what is deleted and what is kept; a typed count starts the real run. */
+/** Clear a card (cc-1, D-096): a dry run shows what is deleted and what is kept; a typed count starts the real run. */
 export function ClearDialog({ card, onClose }: { card: { mount: string; label: string } | null; onClose: () => void }) {
   const { startTask } = useStore();
   const [plan, setPlan] = useState<ClearPlan | null>(null);

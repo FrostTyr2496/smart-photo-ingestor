@@ -1,4 +1,4 @@
-"""Safe card clear (cc-1, D-092). tmp_path drives only; never /Volumes."""
+"""Safe card clear (cc-1, D-096). tmp_path drives only; never /Volumes."""
 
 from __future__ import annotations
 

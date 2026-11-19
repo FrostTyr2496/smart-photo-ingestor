@@ -17,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from photovault import previews
 from photovault.catalog import repo
 from photovault.protocol import human_bytes
 
@@ -485,20 +486,110 @@ def locations_suggested(conn, now, mounted, home, vols) -> list[dict]:
         days=len(rows))]
 
 
-def shoots_review(conn, now, mounted, home, vols) -> list[dict]:
-    """Photos not in a shoot, when a shoot plan is waiting for review (a plan file under `<home>/plans`). Without
-    a plan nothing is raised: the planner (sh-2) writes the plan, and act-3 will use its live API."""
+def _newest_plan(home: Path | None) -> dict | None:
+    """The newest `<home>/plans/shoots-*.json` as a dict (one file read), or None."""
     plans = Path(home) / "plans" if home is not None else None
-    if plans is None or not plans.is_dir() or not any(plans.glob("shoots-*.json")):
-        return []
+    found = sorted(plans.glob("shoots-*.json")) if plans is not None and plans.is_dir() else []
+    if not found:
+        return None
+    try:
+        data = json.loads(found[-1].read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _undecided_shoots(conn: sqlite3.Connection, plan: dict) -> int:
+    """Shoots in the plan that are not locked and have no review decision stored for their proposal."""
+    decided = {r[0] for r in conn.execute("SELECT proposal_id FROM shoot_plan_decisions")}
+    shoots = plan.get("shoots")
+    if not isinstance(shoots, list):
+        return 0
+    return sum(1 for s in shoots if isinstance(s, dict) and not s.get("locked") and not s.get("state")
+               and s.get("proposal_id") not in decided)
+
+
+def shoots_review(conn, now, mounted, home, vols) -> list[dict]:
+    """Photos not in a shoot (`capture_groups.shoot_id IS NULL`). With a plan file under `<home>/plans`, open the
+    review (and say how many of its shoots are still undecided); without one, offer to make the plan (sh-2)."""
     n = conn.execute("SELECT COUNT(*) FROM capture_groups WHERE shoot_id IS NULL").fetchone()[0]
     if not n:
         return []
+    plan = _newest_plan(home)
+    why = [f"{_n(n)} photos belong to no shoot"]
+    if plan is None:
+        return [_action(
+            "shoots-review", "shoots_review", "low", f"Make a shoot plan: {_n(n)} photos are not in a shoot yet",
+            why + ["No shoot plan has been made yet"], [], ["Make the plan", "Review it, then apply"],
+            _run("Make a shoot plan", "shoots_plan", {}), "uv run photovault --json shoots plan", files=n)]
+    todo = _undecided_shoots(conn, plan)
+    why.append("A shoot plan is ready to review" + (f": {_n(todo)} shoot{'' if todo == 1 else 's'} not decided yet"
+                                                    if todo else ""))
     return [_action(
-        "shoots-review", "shoots_review", "low", f"Review shoots: {_n(n)} photos are not in a shoot yet",
-        [f"{_n(n)} photos belong to no shoot", "A shoot plan is ready to review"], [],
+        "shoots-review", "shoots_review", "low", f"Review shoots: {_n(n)} photos are not in a shoot yet", why, [],
         ["Open the shoot review", "Accept, split or merge the proposals"], _ui("Review shoots", "#/review/shoots"),
-        None, files=n)]
+        None, files=n, undecided=todo)]
+
+
+def _span(first: str, last: str) -> str:
+    """'2-7 Apr' (same month), '30 Mar-2 Apr', or one date; from ISO dates."""
+    try:
+        a, b = datetime.fromisoformat(first), datetime.fromisoformat(last)
+    except ValueError:
+        return first if first == last else f"{first} to {last}"
+    if a == b:
+        return f"{a.day} {a:%b}"
+    if (a.year, a.month) == (b.year, b.month):
+        return f"{a.day}\u2013{b.day} {a:%b}"
+    return f"{a.day} {a:%b}\u2013{b.day} {b:%b}"
+
+
+def clock_suggested(conn, now, mounted, home, vols) -> list[dict]:
+    """The time-zone banner's suggestions (sp-7b, `clock.suggest_offsets`) as actions, one per body and phone run.
+    Applying one is a button in Photos' banner. Cost is that of `GET /api/clock-suggestions` (a pass over every
+    dated frame of bodies with phone fixes); it is skipped when there are no phone points."""
+    from photovault import clock
+    out: list[dict] = []
+    for s in clock.suggest_offsets(conn):
+        n = int(s["frames"])
+        mins = int(s["delta_s"]) // 60
+        amount = f"{abs(mins) // 60} hour{'' if abs(mins) == 60 else 's'}" if mins % 60 == 0 else f"{abs(mins)} minutes"
+        out.append(_action(
+            f"clock:{s['body_id']}:{s['start_utc']}", "clock_suggested", "low",
+            f"Align {s['body']} for {_span(s['first_date'], s['last_date'])}: {_n(n)} photo{'' if n == 1 else 's'}",
+            [f"{s['body']}'s clock looks {amount} "
+             f"{'behind' if mins > 0 else 'ahead'} of the phone on these days",
+             f"{s['sessions_matched']} of {s['sessions_total']} sessions match the phone's track at that shift"],
+            [], ["Open Photos", "Check the time banner and apply the suggestion"],
+            _ui("Review in Photos", "#/photos"), None, files=n, body_id=s["body_id"], delta_s=s["delta_s"]))
+    return out
+
+
+def previews_missing(conn, now, mounted, home, vols) -> list[dict]:
+    """act-4: a connected drive whose photos have no preview cached on this Mac yet. Only while it is connected:
+    the cache is read from the drive, and only when the user presses the button."""
+    if home is None:
+        return []
+    have = previews.cached_ids(home)
+    out = []
+    for vid, mount in mounted.items():
+        vol = vols.get(vid)
+        if vol is None or not mount:
+            continue
+        ids = {g for g, _ in previews.volume_primaries(conn, vid)}
+        n = len(ids - have)
+        if not n:
+            continue
+        label = vol["label"]
+        out.append(_action(
+            f"previews-missing:{vid}", "previews_missing", "low",
+            f"Keep previews from {label} while it is connected: {_n(n)} photo{'' if n == 1 else 's'} have none on this Mac",
+            [f"{_n(n)} of {_n(len(ids))} photos on {label} show a thumbnail only while {label} is connected",
+             "Cached thumbnails are small (tens of KB each) and stay in PhotoVault's home folder"],
+            [_need(vol, mounted)], [f"Keep {label} connected", "Run Cache previews (it only reads the drive)"],
+            _run("Cache previews", "previews_cache", {"mount": mount}),
+            f'uv run photovault previews cache "{mount}"', files=n))
+    return out
 
 
 _RECLAIM = re.compile(r"^- Reclaimable: .*\((\d+) bytes\)", re.M)
@@ -554,7 +645,9 @@ def compute(conn: sqlite3.Connection, *, now: datetime | None = None,
         lambda: metadata_stale(conn, now, mount_map, home, vols),
         lambda: locations_suggested(conn, now, mount_map, home, vols),
         lambda: shoots_review(conn, now, mount_map, home, vols),
+        lambda: clock_suggested(conn, now, mount_map, home, vols),
         lambda: duplicates_reclaimable(conn, now, mount_map, home, vols),
+        lambda: previews_missing(conn, now, mount_map, home, vols),
     ]
     out: list[dict] = []
     for rule in rules:

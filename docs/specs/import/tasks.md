@@ -9,9 +9,9 @@ formatted in camera. With one drive the files turn **yellow**: one verified copy
 full card.
 
 Rules for every task:
-- vault-rules apply. Cards stay read-only except for the card clear (cc-1, D-092): it deletes only files that are
+- vault-rules apply. Cards stay read-only except for the card clear (cc-1, D-096): it deletes only files that are
   green when checked just before deletion, after a dry run and a typed confirmation.
-- No new dependency. The only schema change is cc-1's job kind (D-092). The second copy is the backup job of spec `backup` (bk-3), which already
+- No new dependency. The only schema change is cc-1's job kind (D-096). The second copy is the backup job of spec `backup` (bk-3), which already
   allows a second WORKING drive as its target.
 - Tests use `tmp_path` and fakes for `volumes.probe` and `metadata.read_metadata`; never `/Volumes`.
 - Real runs (the role change of Backup Plus, every real import, every real card clear) are **[user]** steps.
@@ -92,7 +92,7 @@ target are skipped (`skipped_dup`, D-036), so a batch is never copied twice.
   - Full card: dry run, then apply. Paste back timings, counts, `sync_method` and the card's tiers.
 
 - [x] 7. **[stronger]** Safe card clear
-  - ID: cc-1 (D-092; vault-rules 1 and 4 exceptions)
+  - ID: cc-1 (D-096; vault-rules 1 and 4 exceptions)
   - Migration: job kind `card_clear` (items: `src_rel` = the card file, `state` `committed` once deleted,
     `failed` with the reason). `photovault/card_clear.py`: `plan_clear(conn, cfg, mount) -> dict` (read-only:
     groups whose every card file is green, the kept files by reason) and `run_clear(conn, cfg, mount, *,
@@ -104,7 +104,7 @@ target are skipped (`skipped_dup`, D-036), so a batch is never copied twice.
     with a typed-count confirm; the card shows "Cleared by PhotoVault on <date>".
   - Verify: `uv run pytest tests/test_card_clear.py -q`
   - Result (2026-11-18): `uv run pytest tests/test_card_clear.py -q` → 13 passed; `uv run pytest -q` full suite green;
-    web typecheck clean, `npm test` 123 passed, build committed. Schema V8 (cu-0 moves to V9). See D-094.
+    web typecheck clean, `npm test` 123 passed, build committed. Schema V8 (cu-0 moves to V9). See D-097.
 
 ## Order
 

@@ -320,7 +320,7 @@ reviewed shoot (decision 2), never silently.
 
 ## 5h. Catalog schema v8 (migration 8)
 
-Approved with D-092 (safe card clear, cc-1). The SQL is the `V8` string in `photovault/catalog/migrations.py`. It only
+Approved with D-096 (safe card clear, cc-1). The SQL is the `V8` string in `photovault/catalog/migrations.py`. It only
 widens the `jobs.kind` CHECK to include `card_clear` (shown in the v1 listing above); SQLite cannot alter a CHECK, so
 the table is rebuilt (create `jobs_new`, copy every row, drop, rename) and `db.migrate` runs migrations with foreign
 keys off and checks them before COMMIT. No row changes. A `card_clear` job has `source_volume_id` = the card and no

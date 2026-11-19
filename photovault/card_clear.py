@@ -1,4 +1,4 @@
-"""Safe card clear (cc-1, D-092): delete only what is provably safe on a camera card. The one exception to
+"""Safe card clear (cc-1, D-096): delete only what is provably safe on a camera card. The one exception to
 vault-rules 4 (and to the read-only card of rule 1).
 
 A file under a CARD's ``DCIM/`` is deletable only when ALL of this holds, checked just before each deletion:

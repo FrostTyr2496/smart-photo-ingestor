@@ -6,13 +6,29 @@ export type Route =
   | { view: 'drive'; id: string }
   | { view: 'cards'; id: string | null }
   | { view: 'setup'; key: string }
-  | { view: 'photos' }
+  | { view: 'photos'; missing?: 'gps' | 'creator' | 'keywords' | 'any'; day?: string }
   | { view: 'actions' }
   | { view: 'review' }
   | { view: 'settings' };
 
-export function parseRoute(hash: string): Route {
+const MISSING_KEYS = ['any', 'gps', 'creator', 'keywords'] as const;
+
+/** `#/photos?missing=gps&day=2023-09-09` (act-3): Photos filtered to a "Missing …" choice and scrolled to a day. */
+function photosRoute(query: string): Route {
+  const p = new URLSearchParams(query);
+  const r: Route = { view: 'photos' };
+  const missing = MISSING_KEYS.find((k) => k === p.get('missing'));
+  if (missing) r.missing = missing;
+  const day = p.get('day');
+  if (day && /^\d{4}-\d{2}-\d{2}$/.test(day)) r.day = day;
+  return r;
+}
+
+export function parseRoute(rawHash: string): Route {
+  const q = rawHash.indexOf('?');
+  const hash = q < 0 ? rawHash : rawHash.slice(0, q);
   if (hash === '#/review/shoots') return { view: 'review' };
+  if (hash === '#/photos') return photosRoute(q < 0 ? '' : rawHash.slice(q + 1));
   const m = /^#\/(drive|cards|setup|photos|settings|actions)(?:\/(.+))?$/.exec(hash);
   if (!m) return { view: 'home' };
   const id = m[2] ? decodeURIComponent(m[2]) : null;
@@ -33,8 +49,13 @@ export function hrefFor(r: Route): string {
       return `#/setup/${encodeURIComponent(r.key)}`;
     case 'cards':
       return r.id ? `#/cards/${encodeURIComponent(r.id)}` : '#/cards';
-    case 'photos':
-      return '#/photos';
+    case 'photos': {
+      const p = new URLSearchParams();
+      if (r.missing) p.set('missing', r.missing);
+      if (r.day) p.set('day', r.day);
+      const q = p.toString();
+      return q ? `#/photos?${q}` : '#/photos';
+    }
     case 'review':
       return '#/review/shoots';
     case 'actions':
