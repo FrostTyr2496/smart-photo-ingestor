@@ -12,7 +12,7 @@ import uuid
 import webbrowser
 from pathlib import Path
 
-from photovault import cards, meta, metrics, phone, report, shoots, volumes
+from photovault import cards, meta, metrics, phone, previews, report, shoots, volumes
 from photovault import activity
 from photovault.activity import ActivityEmitter
 from photovault.drives import CLI_DRIVE_KEYS, VOLUMES_ROOT, scan_mounts
@@ -397,6 +397,18 @@ def cmd_shoots_plan(args, cfg, emit) -> int:
     return EXIT_OK
 
 
+def cmd_previews_cache(args, cfg, emit) -> int:
+    """act-4: keep each photo's embedded preview on the Mac while its drive is connected (read-only on the drive)."""
+    conn = _open(cfg)
+    mount = Path(args.mount)
+    row = registered_volume(conn, mount)
+    stop = _Stop()
+    stop.install(emit)
+    counts = previews.cache_volume(conn, cfg.home, mount, row["volume_id"], emit, should_stop=stop)
+    emit.emit("result", volume=row["label"], **counts)
+    return EXIT_PAUSED if counts["paused"] else EXIT_OK
+
+
 def cmd_shoots_apply(args, cfg, emit) -> int:
     """sh-4: create the accepted shoots and trips of a reviewed plan in the catalog. No file is touched."""
     if not re.fullmatch(r"shoots-\d{8}-\d{6}", args.plan):
@@ -567,6 +579,12 @@ def build_parser() -> argparse.ArgumentParser:
     shu = sh.add_parser("undo", help="undo one apply (catalog only)")
     shu.add_argument("apply_id", help="the apply id, e.g. apply-20261118-210500")
     shu.set_defaults(func=cmd_shoots_undo)
+
+    pv = sub.add_parser("previews", help="embedded previews kept on the Mac").add_subparsers(dest="sub", required=True)
+    pvc = pv.add_parser("cache", help="keep the preview of every photo on a connected drive, so it shows unplugged "
+                                      "(read-only on the drive; Ctrl-C pauses, re-run resumes)")
+    pvc.add_argument("mount")
+    pvc.set_defaults(func=cmd_previews_cache)
 
     j = sub.add_parser("jobs", help="recent jobs")
     j.add_argument("--limit", type=int, default=20)

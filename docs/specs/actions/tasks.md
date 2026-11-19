@@ -101,3 +101,18 @@ Housekeeping (low):
 - [ ] 3. Actions from the shoots and phone work
   - ID: act-3 (after sh-2). Rules 10 and 11 use the live plan and suggestion APIs. The time-zone banner's (sp-7b)
     suggestions also appear as actions ("Align Z6 for 2–7 Apr").
+
+- [x] 4. Previews cached while a drive is connected
+  - ID: act-4 (user ask, 2026-11-18). Review and Photos show a thumbnail only while the photo's drive is connected.
+    - `photovault/previews.py`: the cache under `<home>/thumbs/<group_id>.jpg` (the one `/api/groups/<id>/thumb` already
+      fills on demand), `cache_volume(conn, home, mount, volume_id, emit, should_stop)` walks the primary file of every
+      group on a registered drive, skips groups already cached, and stores the embedded preview read by one persistent
+      ExifTool (read-only on the drive; writes only under `<home>`). Ctrl-C pauses; a re-run resumes.
+    - CLI `photovault previews cache <mount>`; `/api/run` `previews_cache {mount}`.
+    - `/api/groups/<id>/thumb` (and `/preview`) answer from the cache first, so cached photos show with the drive unplugged.
+    - Rule 13 **previews_missing** (low): a connected drive with photos that have no cached thumbnail. `do` = run
+      `previews_cache` (only while connected, like every `run`). Never started by itself (rule: a drive is read only when
+      the user presses the button).
+  - Verify: `uv run pytest tests/test_previews.py tests/test_actions.py -q`.
+  - Result (2026-11-18): as specified; 33 passed (6 new); full suite 698 passed. Not run on a real drive yet ([user]:
+    `uv run photovault --json previews cache "/Volumes/<drive>"`, or the action's button).

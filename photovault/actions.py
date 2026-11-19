@@ -17,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from photovault import previews
 from photovault.catalog import repo
 from photovault.protocol import human_bytes
 
@@ -501,6 +502,33 @@ def shoots_review(conn, now, mounted, home, vols) -> list[dict]:
         None, files=n)]
 
 
+def previews_missing(conn, now, mounted, home, vols) -> list[dict]:
+    """act-4: a connected drive whose photos have no preview cached on this Mac yet. Only while it is connected:
+    the cache is read from the drive, and only when the user presses the button."""
+    if home is None:
+        return []
+    have = previews.cached_ids(home)
+    out = []
+    for vid, mount in mounted.items():
+        vol = vols.get(vid)
+        if vol is None or not mount:
+            continue
+        ids = {g for g, _ in previews.volume_primaries(conn, vid)}
+        n = len(ids - have)
+        if not n:
+            continue
+        label = vol["label"]
+        out.append(_action(
+            f"previews-missing:{vid}", "previews_missing", "low",
+            f"Keep previews from {label} while it is connected: {_n(n)} photo{'' if n == 1 else 's'} have none on this Mac",
+            [f"{_n(n)} of {_n(len(ids))} photos on {label} show a thumbnail only while {label} is connected",
+             "Cached thumbnails are small (tens of KB each) and stay in PhotoVault's home folder"],
+            [_need(vol, mounted)], [f"Keep {label} connected", "Run Cache previews (it only reads the drive)"],
+            _run("Cache previews", "previews_cache", {"mount": mount}),
+            f'uv run photovault previews cache "{mount}"', files=n))
+    return out
+
+
 _RECLAIM = re.compile(r"^- Reclaimable: .*\((\d+) bytes\)", re.M)
 _CLUSTERS = re.compile(r"^- Duplicate clusters: (\d+) \((\d+) files\)", re.M)
 
@@ -555,6 +583,7 @@ def compute(conn: sqlite3.Connection, *, now: datetime | None = None,
         lambda: locations_suggested(conn, now, mount_map, home, vols),
         lambda: shoots_review(conn, now, mount_map, home, vols),
         lambda: duplicates_reclaimable(conn, now, mount_map, home, vols),
+        lambda: previews_missing(conn, now, mount_map, home, vols),
     ]
     out: list[dict] = []
     for rule in rules:
