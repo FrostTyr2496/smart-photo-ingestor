@@ -209,6 +209,7 @@ const PATHS: Record<string, ReactNode> = {
     </>
   ),
   play: <path d="M5 3.5l7 4.5-7 4.5z" />,
+  minus: <path d="M3.5 11.5h9" />,
   check: <path d="M3.5 8.5l3 3 6-7" />,
   x: (
     <>

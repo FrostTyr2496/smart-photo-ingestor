@@ -49,6 +49,8 @@ interface Store {
   workflow: Workflow | null;
   /** Bumps whenever a run ends, so open views reload their numbers. */
   epoch: number;
+  /** Terminal-started runs seen to end in the latest activity poll (rv-32); `n` changes with each batch. */
+  endedElsewhere: { n: number; runs: ExtRun[] };
   now: number;
   toasts: Toast[];
   confirm: ConfirmAsk | null;
@@ -113,6 +115,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [pausing, setPausing] = useState<Set<number>>(new Set());
   const [workflow, setWorkflow] = useState<Workflow | null>(null);
   const [epoch, setEpoch] = useState(0);
+  const [endedElsewhere, setEnded] = useState<{ n: number; runs: ExtRun[] }>({ n: 0, runs: [] });
   const [now, setNow] = useState(Date.now());
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [confirm, setConfirm] = useState<ConfirmAsk | null>(null);
@@ -165,6 +168,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setStale(d.stale_jobs || []);
     setRecent(d.recent || []);
     if (gone.length) {
+      setEnded((e) => ({ n: e.n + 1, runs: gone }));
       toast(`${gone.length === 1 ? 'A run' : `${gone.length} runs`} started in a terminal has ended. Its result is under Recently run on Tasks.`);
       setEpoch((n) => n + 1);
       loadDrives().catch(() => {});
@@ -491,6 +495,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     driveFiles,
     workflow,
     epoch,
+    endedElsewhere,
     now,
     toasts,
     confirm,

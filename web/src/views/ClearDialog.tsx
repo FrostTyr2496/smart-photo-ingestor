@@ -5,6 +5,7 @@ import { fmtBytes, plural } from '../lib/format';
 import { clearProgressLine, clearProgressValue, confirmMatches, readClearPlan, verifyEstimate, type ClearPlan } from '../lib/cardClear';
 import { ProgressBar } from '../components/ProgressBar';
 import { useStore } from '../lib/store';
+import type { DialogStatus } from '../lib/notify';
 import type { TaskDetail } from '../lib/types';
 
 /** Stop a dry run nobody is waiting for (pause = SIGINT; a dry run writes nothing). Errors are ignored: it may have ended. */
@@ -13,7 +14,7 @@ function stopDryRun(id: number): void {
 }
 
 /** Clear a card (cc-1, D-096): a dry run shows what is deleted and what is kept; a typed count starts the real run. */
-export function ClearDialog({ card, onClose }: { card: { mount: string; label: string } | null; onClose: () => void }) {
+export function ClearDialog({ card, minimized, onClose, onMinimize, onStatus }: { card: { mount: string | null; label: string } | null; minimized?: boolean; onClose: () => void; onMinimize?: () => void; onStatus?: (s: DialogStatus) => void }) {
   const { startTask } = useStore();
   const [plan, setPlan] = useState<ClearPlan | null>(null);
   const [error, setError] = useState('');
@@ -31,7 +32,7 @@ export function ClearDialog({ card, onClose }: { card: { mount: string; label: s
     setTyped('');
     setProgress({ line: '', value: null });
     void (async () => {
-      const id = await startTask('card_clear', { mount: card.mount, dry_run: true, verify_all: verifyAll });
+      const id = await startTask('card_clear', { mount: card.mount ?? '', dry_run: true, verify_all: verifyAll });
       if (!id) return setError('The dry run could not start.');
       taskId = id;
       if (run.current !== mine) return stopDryRun(id); // the option changed or the dialog closed while it started
@@ -61,19 +62,29 @@ export function ClearDialog({ card, onClose }: { card: { mount: string; label: s
     };
   }, [card, verifyAll]); // eslint-disable-line react-hooks/exhaustive-deps (a changed option runs a new dry run)
 
+  // rv-32: what the dock pill shows while the dialog is minimized.
+  const status = useRef(onStatus);
+  status.current = onStatus;
+  useEffect(() => {
+    if (error) status.current?.({ line: 'Dry run failed', value: null });
+    else if (plan) status.current?.({ line: plan.deletable_files === 0 ? 'Dry run done: nothing to delete' : `Dry run done: ${plural(plan.deletable_files, 'file')} could be deleted`, value: 1 });
+    else status.current?.({ line: progress.line || 'Planning the dry run…', value: progress.value });
+  }, [plan, error, progress]);
+
   const ready = Boolean(plan) && confirmMatches(typed, plan!.deletable_files);
   const go = async () => {
     if (!card || !plan || !ready) return;
     onClose();
-    await startTask('card_clear', { mount: card.mount, confirm: plan.deletable_files, verify_all: verifyAll });
+    await startTask('card_clear', { mount: card.mount ?? '', confirm: plan.deletable_files, verify_all: verifyAll });
   };
 
   return (
     <Modal
       wide
-      open={Boolean(card)}
+      open={Boolean(card) && !minimized}
       title="Clear card"
       onClose={onClose}
+      onMinimize={onMinimize}
       footer={
         <>
           <button type="button" className="btn-ghost" onClick={onClose}>

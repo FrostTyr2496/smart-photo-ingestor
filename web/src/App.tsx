@@ -2,7 +2,10 @@ import { AnimatePresence, MotionConfig, motion } from 'framer-motion';
 import { AmbientGlow } from './components/AmbientGlow';
 import { ContextMenuHost } from './components/ContextMenu';
 import { DevTools } from './components/DevTools';
+import { DialogHost } from './components/DialogHost';
+import { DoneNotifier } from './components/DoneNotifier';
 import { ConfirmDialog, Toasts } from './components/Overlays';
+import { DialogsProvider } from './lib/dialogs';
 import { useEffect, useState } from 'react';
 import { isTypingTarget, modalOpen } from './lib/keys';
 import { usePref } from './lib/prefs';
@@ -119,6 +122,8 @@ function Shell() {
           </div>
         </main>
       </div>
+      <DialogHost />
+      <DoneNotifier />
       <Toasts />
       <ConfirmDialog />
       <ContextMenuHost />
@@ -132,7 +137,9 @@ export default function App() {
     <MotionConfig reducedMotion="user">
       <ThemeProvider>
         <StoreProvider>
-          <Shell />
+          <DialogsProvider>
+            <Shell />
+          </DialogsProvider>
         </StoreProvider>
       </ThemeProvider>
     </MotionConfig>

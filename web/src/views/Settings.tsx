@@ -1,6 +1,8 @@
 import { useEffect, useState, type ChangeEvent } from 'react';
 import { Field } from '../components/Modal';
 import { api } from '../lib/api';
+import { NOTIFY_ASKED_PREF, NOTIFY_PREF } from '../lib/notify';
+import { usePref, writePref } from '../lib/prefs';
 import { useStore } from '../lib/store';
 import { RefsDialog } from './RefsDialog';
 
@@ -22,6 +24,15 @@ export function Settings() {
   const [form, setForm] = useState<Settings | null>(null);
   const [saving, setSaving] = useState(false);
   const [refsOpen, setRefsOpen] = useState(false);
+  const [notify, setNotify] = usePref(NOTIFY_PREF, true);
+  const perm = typeof Notification === 'undefined' ? 'unsupported' : Notification.permission;
+  const onNotify = (on: boolean) => {
+    setNotify(on);
+    if (on && perm === 'default') {
+      writePref(NOTIFY_ASKED_PREF, true);
+      void Notification.requestPermission();
+    }
+  };
 
   useEffect(() => {
     let alive = true;
@@ -96,6 +107,20 @@ export function Settings() {
           </div>
         </section>
       )}
+
+      <section className="card flex flex-col gap-2 p-5">
+        <label className="flex items-start gap-2 text-sm">
+          <input type="checkbox" role="switch" className="mt-1" checked={notify} onChange={(e) => onNotify(e.target.checked)} />
+          <span>
+            <span className="font-medium">Notify when long tasks finish</span>
+            <span className="mt-0.5 block text-xs text-muted">
+              A macOS notification when this tab is in the background. A popup always shows in the app. Stored in this browser only.
+              {notify && perm === 'denied' ? ' The browser has blocked notifications for this page: allow them in its site settings.' : ''}
+              {perm === 'unsupported' ? ' This browser has no notifications.' : ''}
+            </span>
+          </span>
+        </label>
+      </section>
 
       <section className="card flex flex-col gap-3 p-5">
         <div>

@@ -7,11 +7,9 @@ import { fmtBytes, fmtDate, fmtInt, plural, relTime } from '../lib/format';
 import { argvWords, commandKey } from '../lib/labels';
 import { rise, springs } from '../lib/motion';
 import { hrefFor } from '../lib/route';
+import { useDialogs } from '../lib/dialogs';
 import { useStore } from '../lib/store';
 import { cardHeadline, cardHint, TIER, TIER_HINT, TIER_ORDER, TIER_TONE, type Card, type CardCamera, type Tier } from '../lib/tiers';
-import { ClearDialog } from './ClearDialog';
-import { ImportDialog } from './ImportDialog';
-import { MakeGreenDialog } from './MakeGreenDialog';
 import { greenButton, type GreenPlan } from '../lib/makeGreen';
 
 const CARD_PAGE = 1000;
@@ -414,18 +412,10 @@ function summarizeCardFiles(rows: CardFile[]) {
 }
 
 export function Cards({ id }: { id: string | null }) {
-  const [importing, setImporting] = useState<{ mount: string; label: string; volume_id: string | null; test_card?: Card['test_card'] } | null>(null);
-  const onImport = (c: Card) => c.mount && setImporting({ mount: c.mount, label: c.label, volume_id: c.volume_id, test_card: c.test_card });
-  const [clearing, setClearing] = useState<{ mount: string; label: string } | null>(null);
-  const onClear = (c: Card) => c.mount && setClearing({ mount: c.mount, label: c.label });
-  const [greening, setGreening] = useState<{ volume_id: string; label: string } | null>(null);
-  const onGreen = (c: Card) => c.volume_id && setGreening({ volume_id: c.volume_id, label: c.label });
-  return (
-    <>
-      {id ? <CardDetail id={id} onImport={onImport} onClear={onClear} onGreen={onGreen} /> : <CardList onImport={onImport} onClear={onClear} onGreen={onGreen} />}
-      <MakeGreenDialog card={greening} onClose={() => setGreening(null)} />
-      <ImportDialog card={importing} onClose={() => setImporting(null)} />
-      <ClearDialog card={clearing} onClose={() => setClearing(null)} />
-    </>
-  );
+  // The long-running dialogs live at app level (rv-32), so they survive leaving this page while minimized.
+  const { openDialog } = useDialogs();
+  const onImport = (c: Card) => openDialog('import', c);
+  const onClear = (c: Card) => openDialog('clear', c);
+  const onGreen = (c: Card) => openDialog('green', c);
+  return id ? <CardDetail id={id} onImport={onImport} onClear={onClear} onGreen={onGreen} /> : <CardList onImport={onImport} onClear={onClear} onGreen={onGreen} />;
 }
