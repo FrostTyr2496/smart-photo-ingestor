@@ -200,24 +200,39 @@ export function ImportDialog({ card, onClose }: { card: { mount: string; label: 
       onClose={onClose}
       footer={
         <>
-          <button type="button" className="btn-ghost" onClick={onClose}>
-            {phase === 'applied' ? 'Close' : 'Cancel'}
-          </button>
-          <button type="button" className="btn" disabled={!inputs || phase === 'planning' || phase === 'applied'} onClick={dryRun}>
-            {phase === 'planning' ? 'Planning…' : 'Dry run'}
-          </button>
-          <button
-            type="button"
-            className="btn-primary"
-            disabled={!applyReady}
-            title={applyReady ? undefined : 'Run a dry run with these settings first'}
-            onClick={apply}
-          >
-            Apply
-          </button>
+          {phase === 'applied' ? (
+            <button type="button" className="btn-primary" onClick={onClose}>
+              Done
+            </button>
+          ) : (
+            <>
+              <button type="button" className="btn-ghost" onClick={onClose}>
+                Cancel
+              </button>
+              <button type="button" className="btn" disabled={!inputs || phase === 'planning'} onClick={dryRun}>
+                {phase === 'planning' ? 'Planning…' : 'Dry run'}
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={!applyReady}
+                title={applyReady ? undefined : 'Run a dry run with these settings first'}
+                onClick={apply}
+              >
+                Apply
+              </button>
+            </>
+          )}
         </>
       }
     >
+      {phase === 'applied' && (
+        <p className="rounded-lg border border-ok/40 bg-ok/10 px-3 py-2 text-sm">
+          Import started onto {mountName(target, drives)}{inputs?.second ? `, with a second copy onto ${mountName(inputs.second, drives)}` : ''}. It runs in the
+          background: follow it on Tasks, and the card's colours update as files are verified. Show in Finder on a folder
+          below opens it once its files land. You can close this.
+        </p>
+      )}
       <p className="text-sm text-muted">
         Card: {card?.label}
         {hidden.length > 0 && <span className="text-faint"> · Test card: {hidden.join(', ')} not offered (their copies are hidden)</span>}
