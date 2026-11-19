@@ -56,6 +56,8 @@ export interface TaskSummary {
   keep_awake?: boolean;
   /** The first job id a result reported (rv-31); kept by the server after that event leaves its window. */
   job_id?: number | null;
+  /** A make-green run's newest "copying N file(s) from A to B" (rv-36). */
+  route?: string | null;
 }
 
 export interface TaskDetail extends TaskSummary {
@@ -81,6 +83,8 @@ export interface TaskRec {
   jobId: number | null;
   /** The last files the run handled, newest last (rv-34). */
   files?: FileEvt[];
+  /** The drive pair (labels) a make-green run is copying between right now (rv-36). */
+  route?: { from: string; to: string } | null;
 }
 
 export interface ExtJob {

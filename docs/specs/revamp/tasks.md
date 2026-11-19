@@ -476,3 +476,17 @@ Rules for every task:
     dry run only reads its source. Pure rule `driveIO` in `web/src/lib/labels.ts`. The "New" glow wins over it.
   - Verify: `cd web && npm run typecheck && npm test && npm run build`.
   - Result (2026-11-19): typecheck clean; 222 web tests pass (3 new); build committed. Not seen in a browser.
+
+- [x] 36. Make green shows like the other copies
+  - ID: rv-36 (user report, 2026-11-19; D-119)
+  - `backup --card <id> --make-green` names no drive in its words, so its run had no drive header, no sidebar
+    shading and no "from → to". Its drives now come from the card id (drive list) and the route it reports
+    ("copying N file(s) from A to B"); the server keeps the newest route per task (`route` in the task summary),
+    since copy progress overwrites it. The card is shown first in the header but not shaded (it is not read).
+    `runMounts` in `web/src/lib/labels.ts`; the sidebar's busy-drive keys use it too. Terminal make-green runs still
+    show no drives (their progress file keeps only the newest message).
+  - Stat tiles now split a copy message without a file path ("2.8 GB copied, 48.7 MB/s, 0 failed"); rv-34 left it as
+    one tile. The latest-file box names the drive pair and prints the folder once when both sides match.
+  - Verify: `uv run pytest tests/test_web_api.py -q`; `cd web && npm run typecheck && npm test && npm run build`.
+  - Result (2026-11-19): 2 route/job-id server tests pass (1 new); 225 web tests pass (3 new); build committed.
+    Needs a `serve` restart for the server's `route`. Not seen in a browser.

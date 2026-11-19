@@ -13,6 +13,8 @@ import {
   splitMessage,
   splitPath,
   driveIO,
+  parseRoute,
+  runMounts,
   statTiles,
   fileState,
   stepView,
@@ -328,5 +330,28 @@ describe('driveIO (rv-35)', () => {
   it('terminal runs count; a hash reads', () => {
     const ext = { pid: 9, words: ['hash', '/mnt/BAK'], started_at: '2026-11-19T00:00:00Z' };
     expect(driveIO(bak, [], [ext], all)).toEqual([{ mode: 'read', text: 'Hashing' }]);
+  });
+});
+
+describe('make-green drives (rv-36)', () => {
+  const card = drive({ mount: '/mnt/CARD', label: 'CARD', role: 'CARD', key: 'c', volume_id: 'card-1' });
+  const ssd = drive({ mount: '/mnt/SSD', label: 'SSD', role: 'WORKING', key: 's', volume_id: 's' });
+  const bak = drive({ mount: '/mnt/BAK', label: 'BAK', role: 'WORKING', key: 'b', volume_id: 'b' });
+  const all = [card, ssd, bak];
+  const mg = task({ argv: ['--json', 'backup', '--card', 'card-1', '--make-green'], final: false });
+  it('reads the route from its progress message', () => {
+    expect(parseRoute('copying 12 file(s) from SMALL 1TB to Backup Plus')).toEqual({ from: 'SMALL 1TB', to: 'Backup Plus' });
+    expect(parseRoute('1 GB copied, 50 MB/s, 0 failed')).toBeNull();
+  });
+  it('names the card, then the route once known; the card is not touched', () => {
+    expect(runMounts(mg, all)).toEqual(['/mnt/CARD']);
+    const routed = { ...mg, route: { from: 'SSD', to: 'BAK' } };
+    expect(runMounts(routed, all)).toEqual(['/mnt/CARD', '/mnt/SSD', '/mnt/BAK']);
+    expect(runMounts(routed, all, true)).toEqual(['/mnt/SSD', '/mnt/BAK']);
+    expect(driveIO(ssd, [routed], [], all)).toEqual([{ mode: 'read', text: 'Copying to BAK' }]);
+    expect(driveIO(card, [routed], [], all)).toEqual([]);
+  });
+  it('splits a copy message without a file path into tiles', () => {
+    expect(statTiles('2.8 GB copied, 48.7 MB/s, 0 failed').map((t) => t.value)).toEqual(['2.8 GB', '48.7 MB/s', '0']);
   });
 });

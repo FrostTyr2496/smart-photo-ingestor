@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api } from './api';
 import { readPref, writePref } from './prefs';
-import { argvWords, driveName, isHash, workflowSteps, liveStep, STEP_NAME, type WorkflowStep } from './labels';
+import { argvWords, driveName, isHash, parseRoute, workflowSteps, liveStep, STEP_NAME, type WorkflowStep } from './labels';
 import type { Drive, ExtRun, RecentRun, StaleJob, TaskDetail, TaskRec, TaskSummary, CardInfo, FileEvt } from './types';
 
 /** Files a running task's card lists (rv-34). */
@@ -97,6 +97,7 @@ const newTask = (id: number): TaskRec => ({
 export function absorb(t: TaskRec, d: TaskDetail): TaskRec {
   const n: TaskRec = { ...t, argv: d.argv, state: d.state, exitCode: d.exit_code, lastSeq: d.last_seq, keepAwake: Boolean(d.keep_awake) };
   if (typeof d.job_id === 'number') n.jobId = d.job_id;
+  if (d.route) n.route = parseRoute(d.route) ?? n.route;
   if (d.latest_progress) n.progress = d.latest_progress;
   for (const e of d.events) {
     if (n.startMs === null && e.ts) n.startMs = Date.parse(e.ts) || null;
@@ -106,7 +107,10 @@ export function absorb(t: TaskRec, d: TaskDetail): TaskRec {
     }
     else if (e.event === 'warning') n.note = e.message || e.code || '';
     else if (e.event === 'error') n.error = e.message || e.code || '';
-    else if (e.event === 'progress' && e.message) n.note = e.message;
+    else if (e.event === 'progress' && e.message) {
+      n.note = e.message;
+      if (e.phase === 'make_green') n.route = parseRoute(e.message) ?? n.route;
+    }
     else if (e.event === 'item' && typeof e.src === 'string') {
       const f: FileEvt = { state: String(e.state ?? ''), src: e.src };
       if (typeof e.dst === 'string') f.dst = e.dst;

@@ -115,6 +115,9 @@ class _Task:
         # The first job id a result reports (an import's plan), kept apart from `events`: on a long run that event
         # leaves the last-EVENTS_KEPT window, and the UI still needs it to nest a `--follow` copy under its import.
         self.job_id: int | None = None
+        # The newest "copying N file(s) from A to B" of a make-green run (rv-36): it names the drive pair, which the
+        # command words do not, and copy progress overwrites it within seconds.
+        self.route: str | None = None
 
     def add(self, event: dict) -> None:
         event = {**event, "seq": self.next_seq}
@@ -124,6 +127,8 @@ class _Task:
         if self.job_id is None and event.get("event") == "result" and isinstance(job_id, int) \
                 and not isinstance(job_id, bool):
             self.job_id = job_id
+        if event.get("event") == "progress" and event.get("phase") == "make_green" and isinstance(event.get("message"), str):
+            self.route = event["message"]
 
     def finish(self, state: str, exit_code: int | None) -> None:
         self.state = state
@@ -131,7 +136,8 @@ class _Task:
 
     def summary(self) -> dict:
         return {"task_id": self.task_id, "state": self.state, "exit_code": self.exit_code, "argv": self.argv,
-                "last_seq": self.next_seq - 1, "keep_awake": self.keep_awake, "job_id": self.job_id}
+                "last_seq": self.next_seq - 1, "keep_awake": self.keep_awake, "job_id": self.job_id,
+                "route": self.route}
 
     def detail(self, since: int) -> dict:
         events = [e for e in self.events if e["seq"] > since]

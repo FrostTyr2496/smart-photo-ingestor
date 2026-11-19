@@ -68,7 +68,7 @@ task's commit:
 ```
 
 ## Next
-0. **[user] browser check (rv-31 seen working 2026-11-19)** of the Tasks page's side-by-side runs with stat tiles and latest/recent file names (rv-34), clickable drive chips and the sidebar's shading of drives being read/written (rv-35), of the sidebar's "New device detected" glow (plug a card in; it fades once you open or use it) and its Sort / Filter (rv-33), Minimize on Clear/Import/Make green and the done popup + notification (rv-32, Settings switch), of the Clear dialog's "Re-read every copy" option, its bypass warning and per-drive summary (cc-2), of one block per run on Tasks, with the follow copy nested (rv-31), the Import dialog's folder tree and Show in Finder after Apply (im-7), of Recently run on Tasks (rv-30), right-click (rv-28), Show in Photos landing on the photo (rv-27 fix 2) and the file-list
+0. **[user] browser check (rv-31 seen working 2026-11-19)** of the Tasks page's side-by-side runs with stat tiles and latest/recent file names (rv-34), clickable drive chips and the sidebar's shading of drives being read/written (rv-35), Make green's drive header and stat tiles (rv-36), of the sidebar's "New device detected" glow (plug a card in; it fades once you open or use it) and its Sort / Filter (rv-33), Minimize on Clear/Import/Make green and the done popup + notification (rv-32, Settings switch), of the Clear dialog's "Re-read every copy" option, its bypass warning and per-drive summary (cc-2), of one block per run on Tasks, with the follow copy nested (rv-31), the Import dialog's folder tree and Show in Finder after Apply (im-7), of Recently run on Tasks (rv-30), right-click (rv-28), Show in Photos landing on the photo (rv-27 fix 2) and the file-list
    hover preview (rv-29)**, after restarting `serve`. Also the **[user] visual check of the new UI (rv-1..rv-7, rv-12..15)**: restart `serve` (it picks up drive rename and the
    faster drive list). In Photos, connect a drive, check that thumbnails load, then save a location and keywords on a few photos. Also the older
    **[user] visual check (ui-5..15, card-3):** restart `uv run photovault serve` (it picks up ui-11..15), try the
@@ -122,11 +122,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-119 (user+agent): rv-36 Make green's drives come from its reported route (server keeps it as `route`); stat tiles split comma messages.
 - D-118 (user+agent): rv-35 drive chips open their drive (no Open buttons); sidebar tints drives being read (accent) or written (green).
 - D-117 (user+agent): rv-34 Tasks shows an import and its follow-up copy side by side, with stat tiles and the latest files (from `item` events; no protocol change).
 - D-116 (user+agent): a dialog's final button closes it once the work starts; confirm/toasts/popups sit above dialogs.
 - D-116 (user+agent): rv-33 a drive plugged in glows as New until opened, used or dismissed; sidebar Sort (recent, type, format, size, free) and Type/Format filter.
-- D-115 (user+agent): rv-32 Minimize for the Clear/Import/Make green dialogs (dock bottom right); popup + browser notification when a 20 s+ task ends; Settings switch.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

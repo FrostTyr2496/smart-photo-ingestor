@@ -163,6 +163,30 @@ export function taskMounts(words: string[]): string[] {
   return out.filter((m): m is string => Boolean(m));
 }
 
+/** "copying 12 file(s) from SMALL 1TB to Backup Plus" → { from: "SMALL 1TB", to: "Backup Plus" } (rv-36). */
+export function parseRoute(message: string | null | undefined): { from: string; to: string } | null {
+  const m = /^copying \d+ file\(s\) from (.+) to (.+)$/.exec(message || '');
+  return m ? { from: m[1]!, to: m[2]! } : null;
+}
+
+const mountOfLabel = (label: string, drives: Drive[]): string | undefined =>
+  drives.find((d) => d.mounted && (d.label === label || driveName(d) === label))?.mount;
+
+/**
+ * The drives a live task works on, in order. Most commands name them; `backup --card <id> --make-green` names only the
+ * card's id, so its card comes from the drive list and its source and target from the route it reported (rv-36).
+ * `touched` leaves the card out: a make-green run copies between working drives and never reads the card.
+ */
+export function runMounts(t: Pick<TaskRec, 'argv' | 'route'>, drives: Drive[], touched = false): string[] {
+  const words = argvWords(t.argv);
+  const named = taskMounts(words);
+  if (named.length || !words.includes('--make-green')) return named;
+  const card = drives.find((d) => d.volume_id && d.volume_id === flagValue(words, '--card'))?.mount;
+  const from = t.route ? mountOfLabel(t.route.from, drives) : undefined;
+  const to = t.route ? mountOfLabel(t.route.to, drives) : undefined;
+  return [touched ? undefined : card, from, to].filter((m): m is string => Boolean(m));
+}
+
 /** Progress counts files, except metadata work, which counts frames. */
 export function unitFor(argv: string[]): string {
   const kind = commandKey(argvWords(argv));
@@ -260,7 +284,7 @@ export function splitPath(path: string): { name: string; dir: string } {
  */
 export function statTiles(stats: string): { value: string; label: string; warn: boolean }[] {
   return stats
-    .split(' · ')
+    .split(/ · |, /)
     .map((p) => p.trim())
     .filter(Boolean)
     .map((p) => {
@@ -434,10 +458,9 @@ export function driveIO(d: Drive, tasks: TaskRec[], elsewhere: ExtRun[], drives:
   if (!d.mounted || !d.mount) return [];
   const out: DriveIO[] = [];
   const name = (p: string | undefined) => mountName(p, drives);
-  const look = (words: string[]) => {
+  const look = (words: string[], mounts: string[]) => {
     const key = commandKey(words);
     const dry = words.includes('--dry-run');
-    const mounts = taskMounts(words);
     const at = mounts.findIndex((m) => sameMount(m, d.mount));
     if (at < 0) return;
     if (key === 'ingest' || key === 'backup') {
@@ -456,8 +479,8 @@ export function driveIO(d: Drive, tasks: TaskRec[], elsewhere: ExtRun[], drives:
     if (key === 'card_clear') out.push(dry ? { mode: 'read', text: 'Planning a clear' } : { mode: 'write', text: 'Clearing' });
     else if (READS[key]) out.push({ mode: 'read', text: READS[key] });
   };
-  for (const t of tasks) if (!t.final) look(argvWords(t.argv));
-  for (const e of elsewhere) look(e.words || []);
+  for (const t of tasks) if (!t.final) look(argvWords(t.argv), runMounts(t, drives, true));
+  for (const e of elsewhere) look(e.words || [], taskMounts(e.words || []));
   return out;
 }
 

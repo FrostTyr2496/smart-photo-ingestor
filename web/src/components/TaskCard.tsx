@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion';
 import { useState } from 'react';
 import { fmtElapsed, fmtInt, relTime } from '../lib/format';
-import { argvWords, commandKey, fileState, hashOverall, isHash, longLine, pace, shortLine, splitMessage, splitPath, statTiles, summarize, taskTitle, unitFor, type Pace } from '../lib/labels';
+import { argvWords, commandKey, fileState, mountName, runMounts, taskMounts, hashOverall, isHash, longLine, pace, shortLine, splitMessage, splitPath, statTiles, summarize, taskTitle, unitFor, type Pace } from '../lib/labels';
 import { useStore } from '../lib/store';
 import type { Drive, ExtRun, FileEvt, TaskRec } from '../lib/types';
 import { Disclosure, Icon, StatePill } from './bits';
@@ -26,6 +26,15 @@ export interface TaskVM {
   kind: string;
   /** The last files the run handled, newest last (rv-34). */
   files: FileEvt[];
+  /** The drives a copy goes between, by name, when known (rv-36). */
+  route: { from: string; to: string } | null;
+}
+
+/** A copy's source and target names: from the command words, or a make-green run's reported route. */
+function copyRoute(kind: string, mounts: string[], drives: Drive[]): TaskVM['route'] {
+  if ((kind !== 'ingest' && kind !== 'backup') || mounts.length < 2) return null;
+  const [from, to] = mounts.slice(-2);
+  return { from: mountName(from, drives), to: mountName(to, drives) };
 }
 
 export function taskVM(t: TaskRec, drives: Drive[], now: number, driveFiles: Record<string, number> = {}): TaskVM {
@@ -47,6 +56,7 @@ export function taskVM(t: TaskRec, drives: Drive[], now: number, driveFiles: Rec
     pauseId: t.id,
     kind: commandKey(words),
     files: t.files ?? [],
+    route: copyRoute(commandKey(words), runMounts(t, drives, true), drives),
   };
 }
 
@@ -86,6 +96,7 @@ export function extVM(e: ExtRun, drives: Drive[], now: number, driveFiles: Recor
     pauseId: null,
     kind: commandKey(words),
     files: e.files ?? [],
+    route: copyRoute(commandKey(words), taskMounts(words), drives),
   };
 }
 
@@ -113,9 +124,15 @@ function LatestFile({ vm }: { vm: TaskVM }) {
       <p className="mt-1 truncate font-mono text-sm text-ink" title={src}>
         {name}
       </p>
+      {vm.route && last && (
+        <p className="truncate text-xs text-muted">
+          {vm.route.from} → {vm.route.to}
+        </p>
+      )}
       <p className="truncate font-mono text-2xs text-faint" title={last?.dst ? `${src} → ${last.dst}` : src}>
         {dir || '/'}
-        {last?.dst && <> → {splitPath(last.dst).dir || '/'}</>}
+        {/* A backup keeps the folder layout; name the target folder only when it differs. */}
+        {last?.dst && splitPath(last.dst).dir !== dir && <> → {splitPath(last.dst).dir || '/'}</>}
       </p>
       {last?.error && <p className="mt-1 line-clamp-2 text-xs text-err">{last.error}</p>}
     </div>

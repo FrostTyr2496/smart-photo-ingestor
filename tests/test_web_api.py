@@ -964,6 +964,16 @@ def test_task_keeps_its_job_id_after_the_event_leaves_the_window() -> None:
     assert task.detail(-1)["job_id"] == 41
 
 
+def test_task_remembers_the_make_green_route() -> None:
+    """rv-36: make-green names its drive pair only in a progress message; copy progress follows within seconds."""
+    task = web._Task(1, ["backup", "--card", "c1", "--make-green"])
+    assert task.summary()["route"] is None
+    task.add({"event": "progress", "phase": "make_green", "message": "copying 9 file(s) from SSD to BAK"})
+    for i in range(web.EVENTS_KEPT + 5):
+        task.add({"event": "progress", "phase": "copy", "current": i, "message": "1 GB copied, 50 MB/s, 0 failed"})
+    assert task.summary()["route"] == "copying 9 file(s) from SSD to BAK"
+
+
 def test_runner_awake_defaults() -> None:
     assert web.TaskRunner([sys.executable]).awake_argv is None  # custom engine (tests): off
     assert web.TaskRunner(awake_argv=None).awake_argv is None

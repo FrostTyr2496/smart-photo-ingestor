@@ -1,7 +1,7 @@
 // The sidebar's drive list (rv-33): which drives were just plugged in, when each was last used, and how the list is
 // sorted and filtered. Pure functions; the React side is in driveActivity.tsx and Sidebar.tsx.
 import { fsLabel, parseSize } from './format';
-import { argvWords, driveName, isCardDrive, roleKey, sameMount, taskMounts } from './labels';
+import { driveName, isCardDrive, roleKey, runMounts, sameMount, taskMounts } from './labels';
 import type { Route } from './route';
 import type { Drive, ExtRun, TaskRec } from './types';
 
@@ -173,7 +173,7 @@ export function driveForRoute(route: Route, drives: Drive[]): Drive | undefined 
 /** Keys of the drives a running task works on (UI-started or from a terminal). */
 export function busyDriveKeys(tasks: TaskRec[], elsewhere: ExtRun[], drives: Drive[]): string[] {
   const mounts = new Set<string>();
-  for (const t of tasks) if (!t.final) for (const m of taskMounts(argvWords(t.argv))) mounts.add(m);
+  for (const t of tasks) if (!t.final) for (const m of runMounts(t, drives)) mounts.add(m);
   for (const e of elsewhere) for (const m of taskMounts(e.words || [])) mounts.add(m);
   return drives.filter((d) => [...mounts].some((m) => sameMount(m, d.mount))).map((d) => d.key);
 }

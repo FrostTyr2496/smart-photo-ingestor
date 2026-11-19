@@ -16,6 +16,7 @@ import {
   summarize,
   taskMounts,
   recentTask,
+  runMounts,
   taskTitle,
 } from '../lib/labels';
 import { groupRuns, followOf, type RunGroup, type RunLike } from '../lib/runGroups';
@@ -177,7 +178,7 @@ export function Home() {
   const finishedTasks: TaskRec[] = [];
   for (const t of tasks) {
     const words = argvWords(t.argv);
-    const mounts = taskMounts(words);
+    const mounts = t.final ? taskMounts(words) : runMounts(t, drives);
     if (t.final) {
       finishedTasks.push(t);
       for (const m of mounts) devOf(m).finished.push(t);
