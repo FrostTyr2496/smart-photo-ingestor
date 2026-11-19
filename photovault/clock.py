@@ -2,8 +2,9 @@
 
 The phone's GPS fixes (sources iphone/ipad/glasses) are the reference. The timeline is split into runs where the
 fix's `local_offset` stays the same (a trip). For each camera body and run, shifts from -14 h to +14 h in 15-min
-steps are tried on the frames' current corrected UTC, counting frames within +-10 min of some phone fix. A shift is
-suggested only when it is not 0, has at least `min_matches` matches and at least twice the runner-up's. Judgement
+steps are tried on the frames' current corrected UTC, counting sessions (frames chained by <= 15 min) with a frame within +-10 min of a phone fix; only
+time-zone steps are tried (sp-7b, D-077), and the best must beat shift 0 by 3 sessions. A shift is
+suggested only when it is not 0, has at least `min_matches` sessions and at least twice the runner-up's. Judgement
 call: the runner-up ignores shifts within 1 h of the best, so the neighbouring steps do not count against it.
 Shifts of a few minutes cannot be told apart this way. Metadata only (rule 9).
 """
@@ -22,7 +23,10 @@ STEP_S = 900
 MAX_SHIFT_S = 14 * 3600
 TOLERANCE_S = 600
 RUNNER_GAP_S = 3600
-SHIFTS = list(range(-MAX_SHIFT_S, MAX_SHIFT_S + 1, STEP_S))
+SESSION_GAP_S = 900
+MIN_SESSIONS = 3
+# Time-zone steps only (sp-7b, D-077): whole hours plus :30 and :45; a quarter-hour such as 4.25 h is never offered.
+SHIFTS = [s for s in range(-MAX_SHIFT_S, MAX_SHIFT_S + 1, STEP_S) if abs(s) % 3600 in (0, 1800, 2700)]
 
 
 def _phone_points(conn: sqlite3.Connection) -> list[tuple[float, str | None]]:
@@ -47,20 +51,34 @@ def _runs(points: list[tuple[float, str | None]]) -> list[tuple[float, float]]:
     return runs
 
 
-def _matches(frames: list[float], times: list[float], shift: int) -> int:
+def _sessions(times: list[float]) -> list[list[float]]:
+    """Sorted instants chained into sessions by gaps of at most SESSION_GAP_S (as `geo.session_of`)."""
+    out: list[list[float]] = []
+    for t in times:
+        if out and t - out[-1][-1] <= SESSION_GAP_S:
+            out[-1].append(t)
+        else:
+            out.append([t])
+    return out
+
+
+def _matches(sessions: list[list[float]], times: list[float], shift: int) -> int:
+    """Sessions with at least one frame within TOLERANCE_S of a phone fix after the shift."""
     n = 0
     last = len(times)
-    for f in frames:
-        t = f + shift
-        i = bisect_left(times, t)
-        if (i < last and times[i] - t <= TOLERANCE_S) or (i > 0 and t - times[i - 1] <= TOLERANCE_S):
-            n += 1
+    for sess in sessions:
+        for f in sess:
+            t = f + shift
+            i = bisect_left(times, t)
+            if (i < last and times[i] - t <= TOLERANCE_S) or (i > 0 and t - times[i - 1] <= TOLERANCE_S):
+                n += 1
+                break
     return n
 
 
-def suggest_offsets(conn: sqlite3.Connection, *, min_matches: int = 20) -> list[dict]:
+def suggest_offsets(conn: sqlite3.Connection, *, min_matches: int = MIN_SESSIONS) -> list[dict]:
     """Suggestions, one per (body, phone run). Each: body_id, body, first_date, last_date, frames, current_shifts,
-    delta_s, matches, runner_up, and `groups`: [{time_shift_s (the suggested one), group_ids}] to apply."""
+    delta_s, matches (= sessions_matched), sessions_matched, sessions_total, runner_up (sessions), and `groups`: [{time_shift_s (the suggested one), group_ids}] to apply."""
     points = _phone_points(conn)
     if not points:
         return []
@@ -90,12 +108,12 @@ def suggest_offsets(conn: sqlite3.Connection, *, min_matches: int = 20) -> list[
             lo = bisect_left(ftimes, start - MAX_SHIFT_S)
             hi = bisect_left(ftimes, end + MAX_SHIFT_S + 1)
             cand = frames[lo:hi]
-            if len(cand) < min_matches:
+            sessions = _sessions([f["t"] for f in cand])
+            if len(sessions) < min_matches:
                 continue
-            ct = [f["t"] for f in cand]
-            counts = {s: _matches(ct, times, s) for s in SHIFTS}
+            counts = {s: _matches(sessions, times, s) for s in SHIFTS}
             best = max(SHIFTS, key=lambda s: (counts[s], -abs(s)))
-            if best == 0 or counts[best] < min_matches:
+            if best == 0 or counts[best] < min_matches or counts[best] < counts[0] + 3:
                 continue
             runner = max((c for s, c in counts.items() if abs(s - best) > RUNNER_GAP_S), default=0)
             if counts[best] < 2 * runner:
@@ -110,7 +128,8 @@ def suggest_offsets(conn: sqlite3.Connection, *, min_matches: int = 20) -> list[
             out.append({
                 "body_id": body_id, "body": chosen[0]["nick"], "first_date": dates[0], "last_date": dates[-1],
                 "frames": len(chosen), "current_shifts": sorted({f["shift"] for f in chosen}), "delta_s": best,
-                "matches": counts[best], "runner_up": runner,
+                "matches": counts[best], "sessions_matched": counts[best], "sessions_total": len(sessions),
+                "runner_up": runner,
                 "groups": [{"time_shift_s": s, "group_ids": ids} for s, ids in sorted(by_shift.items())],
             })
     out.sort(key=lambda s: (s["first_date"], s["body_id"]))

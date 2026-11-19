@@ -14,6 +14,8 @@ export interface ClockSuggestion {
   current_shifts: number[];
   delta_s: number;
   matches: number;
+  sessions_matched?: number;
+  sessions_total?: number;
   runner_up: number;
   groups: { time_shift_s: number; group_ids: number[] }[];
 }
@@ -84,7 +86,7 @@ export function ClockBanner({ onApplied }: { onApplied: () => void }) {
       {shown.map((s) => (
         <div key={suggestionKey(s)} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-line px-3 py-2 text-sm">
           <span>
-            {s.body} · {rangeText(s)} looks {deltaText(s.delta_s).replace(/ (ahead|behind)$/, '')} off ({s.matches} of its photos line up with the phone's track after the shift).
+            {s.body} · {rangeText(s)} looks {deltaText(s.delta_s).replace(/ (ahead|behind)$/, '')} off ({plural(s.sessions_matched ?? s.matches, 'separate outing')} line up with the phone's track after the shift).
           </span>
           <span className="flex items-center gap-2">
             <button type="button" disabled={busy} onClick={() => void apply(s)}>

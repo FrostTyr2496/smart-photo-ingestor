@@ -214,7 +214,7 @@ reference folder read into `geo_points`) and `geo.suggest` (time-matched suggest
   - Result (2026-11-18): `geo.session_of`, `suggest(reach_s, extended)` with session, far/weak and hint rows plus
     `score`; setting `match_reach_s` (12 h); Suggestions and Settings UI; `places_near` stays on windowed points.
 
-- [ ] 7b. **[stronger]** Time-zone suggestions count independent evidence, not frames
+- [x] 7b. **[stronger]** Time-zone suggestions count independent evidence, not frames
   - ID: sp-7b (user check, 2026-11-18, D-077). Fixes sp-7.
   - Found on the real catalog: all four banners were false. Each rested on **one** session, with one burst or
     timelapse (up to 1,376 frames) landing near one phone photo after the shift (4.25 h, 10 h, 1.75 h, 8.25 h). In one case
@@ -231,3 +231,4 @@ reference folder read into `geo_points`) and `geo.suggest` (time-matched suggest
     (no suggestion); three outings 8 h off (suggestion); a 4.25 h candidate never offered; shift 0 already matching (no
     suggestion). Then rerun on the real catalog read-only and report the counts in the Result line (expected: the four
     false banners are gone).
+  - Result (2026-11-18): `suggest_offsets` counts sessions and tries time-zone steps only; on the real catalog (read-only) 0 suggestions remain (was 4, each on one session); test run 0.6 s.

@@ -132,3 +132,57 @@ def test_runtime_realistic_size(conn):
     t = time.time()
     clock.suggest_offsets(conn)
     print("suggest_offsets runtime", time.time() - t)
+
+
+def _burst(conn, bid, start, n, base, step_s=2):
+    for i in range(n):
+        when = start + timedelta(seconds=step_s * i)
+        repo.insert_group(conn, body_id=bid, shutter_count=base + i, capture_time=when.strftime("%Y-%m-%dT%H:%M:%S"),
+                          capture_offset="+00:00", time_source="exif", canonical_stem=f"b{base + i}",
+                          original_stem=f"b{base + i}", original_num=i, shoot_id=None)
+
+
+def _fix(conn, when, tag):
+    repo.upsert_geo_point(conn, utc_time=utc_text(when), lat=10.0, lon=20.0, alt=None, source="iphone",
+                          source_ref=tag, local_offset="+01:00")
+
+
+def test_one_timelapse_one_phone_photo_gives_nothing(conn):
+    _fix(conn, T0, "a")
+    _fix(conn, T0 + timedelta(days=1), "b")
+    bid = repo.get_or_create_body(conn, "Z 6II", "S1", "Zed")
+    _burst(conn, bid, T0 + timedelta(hours=4, minutes=15), 1000, 1)     # 1,000 frames, one session
+    assert clock.suggest_offsets(conn) == []
+
+
+def test_three_outings_eight_hours_off(conn):
+    bid = repo.get_or_create_body(conn, "Z 6II", "S1", "Zed")
+    for k in range(3):
+        at = T0 + timedelta(days=k)
+        _fix(conn, at, f"p{k}")
+        _burst(conn, bid, at + timedelta(hours=8, minutes=1), 30, 1 + 100 * k)
+    s = clock.suggest_offsets(conn)
+    assert len(s) == 1 and s[0]["delta_s"] == -8 * 3600
+    assert s[0]["sessions_matched"] == 3 and s[0]["sessions_total"] == 3
+
+
+def test_quarter_hour_never_offered(conn):
+    bid = repo.get_or_create_body(conn, "Z 6II", "S1", "Zed")
+    for k in range(4):
+        at = T0 + timedelta(days=k)
+        _fix(conn, at, f"p{k}")
+        _burst(conn, bid, at + timedelta(hours=4, minutes=16), 5, 1 + 100 * k)
+    assert all(s["delta_s"] % 900 == 0 and abs(s["delta_s"]) % 3600 in (0, 1800, 2700) for s in clock.suggest_offsets(conn))
+    assert clock.suggest_offsets(conn) == []
+
+
+def test_shift_zero_already_matching(conn):
+    bid = repo.get_or_create_body(conn, "Z 6II", "S1", "Zed")
+    for k in range(5):
+        at = T0 + timedelta(days=k)
+        _fix(conn, at, f"p{k}")
+        _burst(conn, bid, at + timedelta(minutes=1), 5, 1 + 100 * k)
+    for k in range(3):   # extra sessions that line up with some other shift
+        _fix(conn, T0 + timedelta(days=10 + k), f"q{k}")
+        _burst(conn, bid, T0 + timedelta(days=10 + k, hours=8), 5, 900 + 100 * k)
+    assert clock.suggest_offsets(conn) == []
