@@ -163,11 +163,16 @@ def index_volume(
     flush()
 
     emit.emit("progress", phase="usage", current=0, total=0, message="sorting the files that are not photos")
+    gone_rows = [r for k, r in existing.items() if k not in seen and r["state"] != "missing"]
+    stored = repo.volume_usage(conn, vid).get("video_no_camera")
+    # idx-14: no video added, changed or gone since the last walk, so its non-camera count still holds.
+    videos_changed = any(e.kind == "video" for e in todo) or any(r["kind"] == "video" for r in gone_rows)
     rows = usage.usage_rows(walked, lrdata, mount,
-                            lambda paths: metadata.read_metadata(paths, workers=cfg.exiftool_workers).meta)
+                            lambda paths: metadata.read_metadata(paths, workers=cfg.exiftool_workers).meta,
+                            reuse_video_no_camera=None if videos_changed else stored)
     with repo.transaction(conn):
         repo.replace_volume_usage(conn, vid, rows)
-        gone = [r["instance_id"] for k, r in existing.items() if k not in seen and r["state"] != "missing"]
+        gone = [r["instance_id"] for r in gone_rows]
         missing = repo.mark_missing(conn, gone) if gone else 0
         repo.set_job_state(conn, job_id, "done")
         repo.set_job_result(conn, job_id, {"files": len(entries), "indexed": len(todo) - errors,

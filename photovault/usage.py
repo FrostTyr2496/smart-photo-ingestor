@@ -47,8 +47,14 @@ _EXTS: dict[str, frozenset[str]] = {
 
 # A camera-style stem: an optional short prefix ending `_` (letters first, digits allowed, as in a Nikon custom
 # prefix), up to four letters, then 4+ digits, e.g. DSC_3460, DJI_0882, GX010004, IMG_E0772, C0001,
-# PXL_20240101_123456789, VID_20240101_123456, Z61_0001.
-_CAMERA_STEM = re.compile(r"(?:[A-Za-z][A-Za-z0-9]{0,4}_)?[A-Za-z]{0,4}\d{4,}(?:[_-]\d+)*")
+# PXL_20240101_123456789, VID_20240101_123456, Z61_0001. Also DJI Fly and export names (dji_fly_20240101_...,
+# dji_export_...) and PhotoVault's own D-005 stem (M0001_20240101-123456...).
+_CAMERA_STEM = re.compile(
+    r"(?:[A-Za-z][A-Za-z0-9]{0,4}_)?[A-Za-z]{0,4}\d{4,}(?:[_-]\d+)*"
+    r"|dji_(?:fly|export)_.+"
+    r"|M\d{4}_\d{8}-\d{6}.*",
+    re.IGNORECASE,
+)
 # Sidecars a camera or phone writes beside a clip. Not `.srt`: a movie's subtitles share its stem.
 _CAMERA_SIBLINGS = frozenset({"lrv", "thm", "aae", "xmp"})
 
@@ -136,8 +142,12 @@ def disk_used(mount: Path) -> int | None:
 
 
 def usage_rows(entries: list[FileEntry], lrdata: list[Path], mount: Path,
-               read_meta: Callable[[list[Path]], dict[Path, dict]]) -> dict[str, tuple[int, int]]:
-    """`{category: (files, bytes)}` for one complete walk of a volume (`scan.walk_all`)."""
+               read_meta: Callable[[list[Path]], dict[Path, dict]],
+               reuse_video_no_camera: tuple[int, int] | None = None) -> dict[str, tuple[int, int]]:
+    """`{category: (files, bytes)}` for one complete walk of a volume (`scan.walk_all`).
+
+    `reuse_video_no_camera` is the stored `(files, bytes)` of a re-index in which no video changed (idx-14):
+    it is used as is and `read_meta` (ExifTool) is not called."""
     rows: dict[str, list[int]] = {}
 
     def add(cat: str, files: int, size: int) -> None:
@@ -150,8 +160,11 @@ def usage_rows(entries: list[FileEntry], lrdata: list[Path], mount: Path,
             add(category(PurePosixPath(e.rel_path).name), 1, e.size)
     if lrdata:
         add("lightroom", *tree_size(lrdata))
-    for e in non_camera_videos(entries, read_meta):
-        add("video_no_camera", 1, e.size)
+    if reuse_video_no_camera is not None:
+        add("video_no_camera", *reuse_video_no_camera)
+    else:
+        for e in non_camera_videos(entries, read_meta):
+            add("video_no_camera", 1, e.size)
     used = disk_used(mount)
     if used is not None:
         add(DISK_USED, 0, used)

@@ -28,6 +28,8 @@ def test_category(name: str, cat: str) -> None:
 @pytest.mark.parametrize("stem, ok", [
     ("DSC_3460", True), ("DJI_0882", True), ("GX010004", True), ("IMG_E0772", True), ("C0001", True),
     ("PXL_20240101_123456789", True), ("Z61_0001", True),
+    ("dji_fly_20240101_123456_0001_1700000000_photo", True), ("dji_export_20240101_123456_1", True),
+    ("M0001_20240101-123456", True), ("M0001_20240101-123456_2", True),
     ("Inception (2010)", False), ("S01E02", False), ("holiday", False), ("Movie.2010.1080p", False),
 ])
 def test_camera_stem(stem: str, ok: bool) -> None:

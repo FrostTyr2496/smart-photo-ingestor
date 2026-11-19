@@ -169,3 +169,35 @@ def test_index_counts_files_it_does_not_track(env, capsys, monkeypatch) -> None:
     assert rows["video_other"] == (1, 300)
     assert rows["video_no_camera"] == (1, 400)
     assert "Movies/Film (2010).mp4" in states(c)  # still tracked as a video instance
+
+
+def test_reindex_without_video_changes_does_not_run_exiftool(env, capsys, monkeypatch) -> None:
+    """idx-14: a no-op re-index reuses the stored video_no_camera count; a new video brings ExifTool back."""
+    import photovault.index as index_mod
+    from photovault.metadata import MetadataResult
+
+    movies = env["drive"] / "Movies"
+    movies.mkdir()
+    (movies / "Film (2010).mp4").write_bytes(b"v" * 400)
+    calls: list[list[str]] = []
+
+    def read(paths, **kw):  # noqa: ANN001
+        calls.append([Path(p).name for p in paths if "Movies" in str(p)])
+        r = fake_read([p for p in paths if "Movies" not in str(p)], **kw)
+        return MetadataResult(meta=r.meta, errors={})
+
+    monkeypatch.setattr(index_mod.metadata, "read_metadata", read)
+    assign(capsys, env["drive"])
+    c = conn()
+    vid = c.execute("SELECT volume_id FROM volumes").fetchone()[0]
+    index_volume(c, load_config(), env["drive"], emit=Emitter(io.StringIO()))
+    assert any(calls) and repo.volume_usage(c, vid)["video_no_camera"] == (1, 400)
+
+    calls.clear()
+    index_volume(c, load_config(), env["drive"], emit=Emitter(io.StringIO()))
+    assert not any(calls)  # ExifTool never saw a movie
+    assert repo.volume_usage(c, vid)["video_no_camera"] == (1, 400)
+
+    (movies / "Other (2011).mp4").write_bytes(b"w" * 100)
+    index_volume(c, load_config(), env["drive"], emit=Emitter(io.StringIO()))
+    assert any(calls) and repo.volume_usage(c, vid)["video_no_camera"] == (2, 500)

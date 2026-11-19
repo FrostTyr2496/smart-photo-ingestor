@@ -27,13 +27,14 @@ result). Build them as written there.
   - Verify: `uv run pytest tests/test_activity.py -q` with a test for each case.
   - Result (2026-11-18): `activity.pause_ownerless` (used by `snapshot` and by `cli.main` before ingest, resume, index, hash and cards) pauses running jobs no live process owns (mount match or `resume <id>`) and emits a `warning`; tests in `tests/test_activity.py`.
 
-- [ ] 2. Drive usage: more camera stems, and no ExifTool on a no-op re-index
+- [x] 2. Drive usage: more camera stems, and no ExifTool on a no-op re-index
   - ID: idx-14 (approved, D-069)
   - `photovault/usage.py` `_CAMERA_STEM` also matches DJI Fly and export stems (`dji_fly_…`, `dji_export_…`) and
     PhotoVault's own stem (`M\d{4}_\d{8}-\d{6}…`, `system-design.md` §6).
   - When a re-index finds no `video` instance to (re)classify and `volume_usage` already holds
     `video_no_camera` for the drive, reuse the stored count instead of running ExifTool over every movie.
   - Verify: `uv run pytest tests/test_usage.py -q` (stem cases; a re-index test that asserts ExifTool is not called).
+  - Result (2026-11-18): `_CAMERA_STEM` matches `dji_fly_`, `dji_export_` and `M\d{4}_\d{8}-\d{6}` stems; `index_volume` passes the stored `video_no_camera` to `usage_rows` when no video was added, changed or gone; `tests/test_index.py` asserts ExifTool sees no movie on a no-op re-index.
 
 - [ ] 3. **[stronger]** Camera bracket flag and steps, and the production segmenter
   - ID: seq-1b (approved, D-069: eval-1's four answers; `docs/reviews/2026-11-11-eval-1-sequencing.md`)
