@@ -1636,6 +1636,12 @@ class _Handler(BaseHTTPRequestHandler):
             path = unquote(url.path)
             if method == "GET" and path == "/api/events":
                 return self._events()
+            if method == "GET" and path == "/api/generation":
+                # A cheap poll in place of /api/events: a held stream per tab used up the browser's six connections
+                # to this host, so every other request queued (the UI stuck on loading).
+                watcher = self.server.app.watcher
+                with watcher.cond:
+                    return self._send_json(200, {"generation": watcher.generation})
             if method == "GET" and path in ("/", "/next", "/next/"):  # the UI (D-059), a Vite build of web/
                 return self._static("next/index.html")
             if method == "GET" and path.startswith("/static/"):

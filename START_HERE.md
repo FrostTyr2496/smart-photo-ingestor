@@ -122,11 +122,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-113 (agent): the UI polls `/api/generation` instead of holding `/api/events` open (six-connection limit froze loading).
 - D-112 (agent): rv-31 Tasks groups running work by run (card -> target once; follow copy nested), not by drive.
 - D-111 (user+agent): tc-1 test card mode: hide chosen drives' copies of one card's files (settings row, no schema change).
 - D-110 (agent): im-7 ingest result carries `planned_items`; the Import dialog shows a folder tree and stays open after Apply for Show in Finder.
 - D-109 (user+agent): rv-30 Recently run on Tasks, from `<home>/activity/history.jsonl` written by every engine run at exit.
-- D-108 (user): bk-7 Make green copies yellow card files onto a connected second drive; follow jobs also copy skipped-as-present files.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

@@ -1237,3 +1237,9 @@ def test_card_detail_carries_the_test_card_badge(srv: Client) -> None:
     status, body = srv.call("GET", "/api/cards/vol-card/files")
     assert status == 200 and body["card"]["test_card"] == {"hidden": [label]}
     assert body["card"]["tier"] == "only_on_card"
+
+
+def test_generation_poll_answers_without_holding_a_connection(srv: Client) -> None:
+    """The UI polls this instead of /api/events, so tabs no longer use up the browser's connections to the host."""
+    status, body = srv.call("GET", "/api/generation")
+    assert status == 200 and isinstance(body["generation"], int)

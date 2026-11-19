@@ -11,6 +11,7 @@ const TASK_LIST_MS = 5000; // re-read the full task list
 const ACTIVITY_MS = 3000; // re-read runs started outside the UI (ui-11)
 const DRIVE_DEBOUNCE_MS = 300;
 const DRIVE_LATE_MS = 2000;
+const GENERATION_POLL_MS = 2000;
 
 export interface Toast {
   id: number;
@@ -261,15 +262,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // The server sends `event: drives` when a drive is plugged in or leaves.
     let driveTimer = 0;
     let lateTimer = 0;
-    const source = typeof EventSource !== 'undefined' ? new EventSource('/api/events') : null;
-    source?.addEventListener('drives', () => {
+    // Poll the drive generation instead of holding an EventSource open: a held stream per tab used up the
+    // browser's six connections to this host, and every other request queued behind them (stuck loading).
+    let generation: number | null = null;
+    const onDrives = () => {
       window.clearTimeout(driveTimer);
       driveTimer = window.setTimeout(() => {
         loadDrives().catch(() => {});
         window.clearTimeout(lateTimer);
         lateTimer = window.setTimeout(() => loadDrives().catch(() => {}), DRIVE_LATE_MS);
       }, DRIVE_DEBOUNCE_MS);
-    });
+    };
+    const genTimer = window.setInterval(() => {
+      if (document.hidden) return;
+      api<{ generation: number }>('GET', '/api/generation')
+        .then((g) => {
+          if (generation !== null && g.generation !== generation) onDrives();
+          generation = g.generation;
+        })
+        .catch(() => {});
+    }, GENERATION_POLL_MS);
     const onVisible = () => {
       if (!document.hidden) loadDrives().catch(() => {});
     };
@@ -279,7 +291,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       window.clearTimeout(timer);
       window.clearTimeout(driveTimer);
       window.clearTimeout(lateTimer);
-      source?.close();
+      window.clearInterval(genTimer);
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [loadDrives, loadActivity]);
