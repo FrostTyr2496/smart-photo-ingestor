@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   addKeywords,
+  fmtApart,
+  fmtGapShort,
   applyFields,
   autoStep,
   mapsUrl,
@@ -340,5 +342,17 @@ describe('place names (sp-3)', () => {
 describe('mapsUrl', () => {
   it('opens Google Maps at the coordinates only', () => {
     expect(mapsUrl(12.5, -45.25)).toBe('https://www.google.com/maps/search/?api=1&query=12.500000,-45.250000');
+  });
+});
+
+describe('fmtApart / fmtGapShort (sp-8)', () => {
+  it('words a phone point distance', () => {
+    expect(fmtApart(-23 * 3600)).toBe('23 h earlier');
+    expect(fmtApart(106 * 60)).toBe('1 h 46 min later');
+    expect(fmtApart(-67 * 60)).toBe('1 h 07 min earlier');
+  });
+  it('shortens a signed gap', () => {
+    expect(fmtGapShort(-67 * 60)).toBe('−1 h 07');
+    expect(fmtGapShort(88 * 60)).toBe('+1 h 28');
   });
 });

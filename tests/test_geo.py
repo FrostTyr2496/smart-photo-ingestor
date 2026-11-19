@@ -8,7 +8,7 @@ import pytest
 
 from photovault.catalog import db, repo
 from photovault.config import load_config
-from photovault.geo import group_utc, places_near, suggest, utc_text
+from photovault.geo import group_utc, places_near, session_of, suggest, utc_text
 
 
 def row(**kw) -> dict:
@@ -93,7 +93,7 @@ def test_suggest_orders_by_nearness_and_fills_fields(conn) -> None:
     assert out[0]["source"] == "interpolated"
     assert [s["source_ref"] for s in out[1:]] == ["d1", "p1", "p0"]
     assert out[1] == {"lat": 10.0, "lon": 20.0, "alt": 50.0, "source": "drone", "source_ref": "d1",
-                      "delta_s": -60, "confidence": "high", "place_name": None, "city": None, "state": None,
+                      "delta_s": -60, "confidence": "high", "score": 1.0, "place_name": None, "city": None, "state": None,
                       "country": None}
     assert out[2]["delta_s"] == 400 and out[2]["confidence"] == "medium"
     assert len(suggest(conn, gid)) == 3  # default limit
@@ -153,3 +153,110 @@ def test_places_near_distinct_nearest_first(conn) -> None:
     out = places_near(conn, gid, window_s=3600)
     assert [(p["place_name"], p["city"]) for p in out] == [("Harbourton Quay", "Harbourton"), (None, "Northland Falls")]
     assert out[0]["delta_s"] == -120 and out[0]["state"] == "Westshire"
+
+
+# --- sp-8: session, farther tiers, last known place (D-074, D-075); coordinates and places are invented
+
+def frame(conn, n: int, at: datetime) -> int:
+    body = repo.get_or_create_body(conn, "NIKON Z 6_2", "0000001", "Z6")
+    return repo.insert_group(conn, body_id=body, shutter_count=n + 100,
+                             capture_time=at.replace(tzinfo=None).isoformat(timespec="seconds"),
+                             capture_offset="+00:00", time_source="exif", canonical_stem=f"DSC_{n:04d}",
+                             original_stem=f"DSC_{n:04d}", original_num=n, shoot_id=None)
+
+
+def phone(conn, at: datetime, ref: str, place: str | None = "Harbourton", lat: float = 10.0, lon: float = 20.0) -> None:
+    repo.upsert_geo_point(conn, utc_time=utc_text(at), lat=lat, lon=lon, alt=None, source="iphone", source_ref=ref,
+                          place_name=None, city=place, state=None, country=None)
+
+
+def test_session_of_chains_by_gap(conn) -> None:
+    ids = [frame(conn, i, T0 + timedelta(minutes=10 * i)) for i in range(4)]
+    frame(conn, 9, T0 + timedelta(hours=3))  # a gap above 15 min
+    assert [f["group_id"] for f in session_of(conn, ids[1])] == ids
+    assert len(session_of(conn, ids[1], gap_s=300)) == 1
+
+
+def test_case_a_one_sided_far_is_weak(conn) -> None:
+    gid = frame(conn, 1, T0)
+    for i in range(2, 30):
+        frame(conn, i, T0 + timedelta(seconds=40 * i))
+    phone(conn, T0 + timedelta(minutes=106), "p1")  # 1 h 46 min after, nothing before
+    out = suggest(conn, gid)
+    assert [(s["confidence"], s["source_ref"]) for s in out] == [("weak", "p1")]  # far, lowered one tier
+    assert out[0]["delta_s"] == 106 * 60 and out[0]["score"] == 0.2
+
+
+def test_case_b_day_with_only_hints(conn) -> None:
+    gid = frame(conn, 1, T0)
+    phone(conn, T0 - timedelta(hours=23), "before", place="Harbourton")
+    phone(conn, T0 + timedelta(hours=29), "after", place="Eastvale", lat=11.0)
+    out = suggest(conn, gid)
+    assert [(s["confidence"], s["source_ref"]) for s in out] == [("hint", "before"), ("hint", "after")]
+    assert places_near(conn, gid) == []  # places_near stays on the windowed points
+
+
+def test_case_c_session_row_and_far_row(conn) -> None:
+    gid = frame(conn, 1, T0)
+    frame(conn, 2, T0 + timedelta(minutes=10))
+    frame(conn, 3, T0 + timedelta(minutes=24))  # chains to the photo with gaps of at most 15 min
+    phone(conn, T0 + timedelta(minutes=42), "next", place="Eastvale", lat=30.0)  # 18 min from frame 3
+    phone(conn, T0 - timedelta(minutes=50), "prev")
+    out = suggest(conn, gid)
+    session = [s for s in out if s["source"] == "session"]
+    assert [s["source_ref"] for s in session] == ["next"]
+    assert session[0]["via"] == {"stem": "DSC_0003", "delta_s": 18 * 60} and session[0]["confidence"] == "low"
+    assert session[0]["delta_s"] == 42 * 60
+    far = [s for s in out if s["source"] == "iphone"]
+    assert {s["source_ref"]: s["confidence"] for s in far} == {"prev": "far", "next": "far"}
+
+
+def test_case_c_far_tier_for_42_minutes(conn) -> None:
+    gid = frame(conn, 1, T0)
+    phone(conn, T0 - timedelta(minutes=42), "prev", place="Eastvale", lat=30.0)
+    phone(conn, T0 + timedelta(hours=2), "next", place="Harbourton")
+    out = suggest(conn, gid)
+    near = [s for s in out if s["source_ref"] == "prev"][0]
+    assert near["confidence"] == "far" and near["score"] == 0.4  # two-sided evidence, own tier
+
+
+def test_case_d_stayed_put_interpolation_is_raised_and_first(conn) -> None:
+    gid = frame(conn, 1, T0)
+    phone(conn, T0 - timedelta(minutes=67), "a")
+    phone(conn, T0 + timedelta(minutes=88), "b")
+    out = suggest(conn, gid)
+    assert [s["source"] for s in out] == ["interpolated", "iphone", "iphone"]
+    assert out[0]["confidence"] == "low" and out[0]["score"] == 0.6  # larger gap 88 min = far, raised one tier
+    assert out[0]["ends"]["stayed"] and out[0]["ends"]["before_s"] == -67 * 60 and out[0]["ends"]["after_s"] == 88 * 60
+    assert [s["confidence"] for s in out[1:]] == ["far", "far"]
+
+
+def test_case_e_far_apart_interpolation_is_lowered(conn) -> None:
+    gid = frame(conn, 1, T0)
+    phone(conn, T0 - timedelta(minutes=67), "a", place="Harbourton", lat=10.0)
+    phone(conn, T0 + timedelta(minutes=88), "b", place="Eastvale", lat=10.3)  # about 33 km
+    out = suggest(conn, gid)
+    interp = [s for s in out if s["source"] == "interpolated"][0]
+    assert interp["confidence"] == "weak" and not interp["ends"]["stayed"] and 30 < interp["ends"]["km"] < 36
+    assert out[0]["source"] == "iphone" and out[0]["source_ref"] == "a"  # the nearer single point first
+
+
+def test_session_rows_dedupe_by_place(conn) -> None:
+    gid = frame(conn, 1, T0)
+    frame(conn, 2, T0 + timedelta(minutes=14))
+    phone(conn, T0 + timedelta(minutes=14, seconds=300), "a")
+    phone(conn, T0 + timedelta(minutes=14, seconds=100), "b")  # same place, closer to the frame
+    out = [s for s in suggest(conn, gid, window_s=600, limit=10) if s["source"] == "session"]
+    assert [s["source_ref"] for s in out] == ["b"]
+
+
+def test_stayed_put_by_distance_or_place(conn) -> None:
+    gid = frame(conn, 1, T0)
+    phone(conn, T0 - timedelta(hours=2), "a", place="Harbourton", lat=10.0)
+    phone(conn, T0 + timedelta(hours=2), "b", place="Eastvale", lat=10.001)  # 111 m, different names
+    assert [s["source"] for s in suggest(conn, gid)][0] == "interpolated"
+    third = frame(conn, 3, T0 + timedelta(days=4))
+    phone(conn, T0 + timedelta(days=4, hours=-2), "e", place="Harbourton", lat=10.0)
+    phone(conn, T0 + timedelta(days=4, hours=2), "f", place="Eastvale", lat=10.5)  # 55 km, different places
+    interp = [s for s in suggest(conn, third) if s["source"] == "interpolated"][0]
+    assert not interp["ends"]["stayed"]

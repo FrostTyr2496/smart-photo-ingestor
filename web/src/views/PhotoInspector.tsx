@@ -16,6 +16,8 @@ import {
   fmtDelta,
   gapLabel,
   GPS_LABEL,
+  fmtApart,
+  fmtGapShort,
   hasEdits,
   nominatimPlace,
   placeEdits,
@@ -59,6 +61,9 @@ interface Suggestion {
   city?: string | null;
   state?: string | null;
   country?: string | null;
+  score?: number;
+  via?: { stem: string; delta_s: number } | null;
+  ends?: { before_s: number; after_s: number; km: number; stayed: boolean; before_place: string | null; after_place: string | null };
 }
 
 /** One row of GET /api/groups/<id>/places: a distinct phone place near the photo's time (sp-3). */
@@ -422,16 +427,31 @@ function Suggestions({ first, pool, selected, windowS, onUse }: { first: PhotoGr
   const ids = useMemo(() => new Set(selected.map((g) => g.group_id)), [selected]);
   const near = nearestWithLocation(first, pool, ids, windowS);
 
-  const rows: Array<{ key: string; text: string; sub: ReactNode; loc: PendingLoc; fields?: PlaceFields }> = [];
+  const rows: Array<{ key: string; text: string; sub: ReactNode; loc: PendingLoc; fields?: PlaceFields; quiet?: boolean }> = [];
   for (const [i, s] of (list ?? []).entries()) {
     const fields: PlaceFields = { place_name: s.place_name ?? null, city: s.city ?? null, state: s.state ?? null, country: s.country ?? null };
     const label = placeLabel(fields);
-    const when = s.delta_s === 0 ? 'between two fixes' : fmtDelta(s.delta_s);
+    const tier = s.confidence;
+    const outer = tier === 'far' || tier === 'weak' || tier === 'hint';
+    const when = outer ? fmtApart(s.delta_s) : s.delta_s === 0 ? 'between two fixes' : fmtDelta(s.delta_s);
+    const name = label || GPS_LABEL[s.source] || s.source;
+    const prefix = tier === 'hint' ? (s.delta_s < 0 ? 'Last known: ' : 'Next known: ') : '';
+    const via = s.via ? `via ${s.via.stem} · phone ${fmtDelta(s.via.delta_s)} · ` : '';
+    let text = `${prefix}${name} · ${when}`;
+    if (s.ends) {
+      const e = s.ends;
+      const gaps = `${fmtGapShort(e.before_s)} / ${fmtGapShort(e.after_s)}`;
+      text = e.stayed
+        ? `At ${e.before_place ?? e.after_place ?? 'the same spot'} before and after (${gaps})`
+        : `Between ${e.before_place ?? 'one place'} and ${e.after_place ?? 'another'}, ${e.km} km apart (${gaps})`;
+    }
+    const tierText = tier === 'hint' ? 'a hint, not a match' : tier === 'weak' ? 'weak: check it' : tier === 'far' ? 'far: check it' : `${tier} confidence`;
     rows.push({
       key: `s${i}`,
-      text: label ? `${label} · ${when}` : `${GPS_LABEL[s.source] ?? s.source} · ${when}`,
+      quiet: (s.score ?? 1) < 0.4,
+      text,
       fields,
-      sub: <><Coord lat={s.lat} lon={s.lon} /> · {s.confidence} confidence</>,
+      sub: <>{via}<Coord lat={s.lat} lon={s.lon} /> · {tierText}</>,
       loc: { lat: s.lat, lon: s.lon, alt: s.alt ?? null, source: 'match' },
     });
   }
@@ -449,7 +469,7 @@ function Suggestions({ first, pool, selected, windowS, onUse }: { first: PhotoGr
     <div className="flex flex-col gap-1">
       <p className="text-xs text-muted">{selected.length > 1 ? 'Suggested from the first photo:' : 'Suggested:'}</p>
       {rows.map((r) => (
-        <div key={r.key} className="flex items-center justify-between gap-2 rounded-lg border border-line px-2.5 py-1.5">
+        <div key={r.key} className={`flex items-center justify-between gap-2 rounded-lg border border-line px-2.5 py-1.5 ${r.quiet ? 'opacity-60' : ''}`}>
           <div className="min-w-0">
             <p className="truncate text-xs">{r.text}</p>
             <p className="truncate font-mono text-2xs text-faint">{r.sub}</p>

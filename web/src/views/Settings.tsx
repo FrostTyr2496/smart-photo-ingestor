@@ -9,10 +9,11 @@ interface Settings {
   copyright: string;
   default_offset: string;
   match_window_s: string;
+  match_reach_s: string;
   mac_folder: string;
 }
 
-const KEYS: Array<keyof Settings> = ['creator', 'copyright', 'default_offset', 'match_window_s', 'mac_folder'];
+const KEYS: Array<keyof Settings> = ['creator', 'copyright', 'default_offset', 'match_window_s', 'match_reach_s', 'mac_folder'];
 
 /** Defaults for photo metadata and the Mac photo folder (rv-5). */
 export function Settings() {
@@ -79,6 +80,9 @@ export function Settings() {
           <Field label="Match GPS points within (seconds)">
             <input type="number" min={0} max={86400} value={form.match_window_s} onChange={set('match_window_s')} className="h-9" />
           </Field>
+          <Field label="Reach for farther suggestions (seconds)">
+            <input type="number" min={0} max={86400} value={form.match_reach_s} onChange={set('match_reach_s')} className="h-9" />
+          </Field>
           <div className="flex flex-col gap-1.5">
             <Field label="Photo folder on this Mac (used as a working drive)">
               <input value={form.mac_folder} onChange={set('mac_folder')} placeholder="~/Sandbox" className="h-9" />
@@ -118,6 +122,7 @@ function pick(s: Partial<Settings> | undefined): Settings {
     copyright: s?.copyright ?? '',
     default_offset: s?.default_offset ?? '',
     match_window_s: s?.match_window_s ?? '',
+    match_reach_s: s?.match_reach_s ?? '',
     mac_folder: s?.mac_folder ?? '',
   };
 }

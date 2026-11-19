@@ -524,6 +524,7 @@ def test_places_endpoint(srv: Client) -> None:
 def test_settings_defaults_and_updates(srv: Client) -> None:
     status, body = srv.call("GET", "/api/settings")
     assert body["settings"] == {"creator": "", "copyright": "", "default_offset": "+00:00", "match_window_s": 1800,
+                                "match_reach_s": 43200,
                                 "mac_folder": "~/Sandbox"}
     status, body = srv.call("POST", "/api/settings", {"creator": " Mush ", "match_window_s": 600,
                                                       "default_offset": "+01:00"})
@@ -532,6 +533,10 @@ def test_settings_defaults_and_updates(srv: Client) -> None:
     assert body["settings"]["default_offset"] == "+01:00"
     assert srv.call("POST", "/api/settings", {"unknown_key": 1})[0] == 400
     assert srv.call("POST", "/api/settings", {"match_window_s": 99999})[0] == 400
+    status, body = srv.call("POST", "/api/settings", {"match_reach_s": "7200"})
+    assert status == 200 and body["settings"]["match_reach_s"] == 7200
+    assert srv.call("POST", "/api/settings", {"match_reach_s": 86401})[0] == 400
+    assert srv.call("POST", "/api/settings", {"match_reach_s": "soon"})[0] == 400
     assert srv.call("POST", "/api/settings", {"default_offset": "nowhere"})[0] == 400
     assert srv.call("POST", "/api/settings", {})[0] == 400
 

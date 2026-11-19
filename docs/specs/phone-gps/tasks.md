@@ -185,7 +185,7 @@ reference folder read into `geo_points`) and `geo.suggest` (time-matched suggest
     case gives no suggestion).
   - Result (2026-11-18): `uv run pytest tests/test_clock.py tests/test_web_api.py -q` → 68 passed; web typecheck, 43 tests and build pass.
 
-- [ ] 8. **[stronger]** Suggestions that reach further: through the session, a farther tier, and last known place
+- [x] 8. **[stronger]** Suggestions that reach further: through the session, a farther tier, and last known place
   - ID: sp-8 (user spot check, 2026-11-18, D-074). Before sp-6; sp-6 reuses its session helper.
   - Found on the real catalog: only ±`match_window_s` (default 1800) is searched. That missed (a) a 22-min burst whose
     nearest phone photo was 1 h 46 min away; (b) a day when the phone took no photos for about 23 h either side; and
@@ -197,13 +197,19 @@ reference folder read into `geo_points`) and `geo.suggest` (time-matched suggest
       - **Via session:** for each phone point within the window of *any* frame in the session (not the photo itself),
         the best one per distinct place. Source `session`; `delta_s` is measured to the photo; `via` names the nearest
         frame's stem and its own delta. Confidence is that frame's delta tier.
-      - **Farther:** when no row is within the window, the nearest phone point before and the nearest after within
-        `reach_s` (default 6 h, new setting `match_reach_s`), with confidence `far`. When both exist, are less than 1 km
-        apart, and have the same place, add an `interpolated` row ("you were at Harbourton at both ends") with
-        confidence `far`.
+      - **Farther (D-075):** when no row is within the window, the nearest phone point before and after within
+        `reach_s` (default 12 h = "43200", new setting `match_reach_s`). Tiers by |Δ|: high ≤ 2 min, medium ≤ 15 min,
+        low ≤ `match_window_s`, far ≤ 3 h, weak ≤ reach. Both sides, stayed put (< 1 km or the same place): an
+        `interpolated` row ("At Harbourton before and after (−1 h 07 / +1 h 28)"), tier of the larger gap raised one
+        tier (never above medium). Both sides, apart: the interpolated row shows the distance, tier lowered one tier
+        (weak stays weak); the nearer single point ranks above it. One side only: that point, lowered one tier. Rows
+        carry `score` = the tier's base (high 1.0, medium 0.8, low 0.6, far 0.4, weak 0.2, hint 0.1); the extra rows
+        are sorted by it and the UI fades rows below 0.4. Inside the window the existing interpolation is unchanged.
       - **Last / next known:** when nothing is within reach, the nearest point before and after within 48 h, with
         confidence `hint`. The UI shows them as "Last known: Harbourton · 23 h earlier"; Use still works.
   - UI (`PhotoInspector.tsx` Suggestions): labels for each confidence tier; a `via` row reads "via DSC_2301 · phone +3 min";
     `far` and `hint` rows are visually quieter. Settings gets "Reach for farther suggestions" (`match_reach_s`).
   - Verify: `uv run pytest tests/test_geo.py tests/test_web_api.py -q`; `cd web && npm test`; **[user]** recheck the
     four photos from the spot check (`docs/private/` notes).
+  - Result (2026-11-18): `geo.session_of`, `suggest(reach_s, extended)` with session, far/weak and hint rows plus
+    `score`; setting `match_reach_s` (12 h); Suggestions and Settings UI; `places_near` stays on windowed points.

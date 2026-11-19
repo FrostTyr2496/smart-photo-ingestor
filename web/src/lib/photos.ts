@@ -348,6 +348,24 @@ export function fmtDelta(seconds: number): string {
   return `${sign}${Math.floor(abs / 3600)} h ${String(Math.floor((abs % 3600) / 60)).padStart(2, '0')} min`;
 }
 
+/** "23 h earlier" / "1 h 46 min later": a phone point's distance from the photo (delta = point minus photo). */
+export function fmtApart(seconds: number): string {
+  const abs = Math.abs(Math.round(seconds));
+  const h = Math.floor(abs / 3600);
+  const m = Math.floor((abs % 3600) / 60);
+  const span = h >= 10 || (h > 0 && m === 0) ? `${h} h` : h > 0 ? `${h} h ${String(m).padStart(2, '0')} min` : `${Math.max(m, 1)} min`;
+  return `${span} ${seconds < 0 ? 'earlier' : 'later'}`;
+}
+
+/** "−1 h 07" / "+1 h 28": a short signed gap for the stayed-put label. */
+export function fmtGapShort(seconds: number): string {
+  const sign = seconds < 0 ? '−' : '+';
+  const abs = Math.abs(Math.round(seconds));
+  const h = Math.floor(abs / 3600);
+  const m = Math.floor((abs % 3600) / 60);
+  return h > 0 ? `${sign}${h} h ${String(m).padStart(2, '0')}` : `${sign}${Math.max(m, 1)} min`;
+}
+
 /** Seconds between two capture times, ignoring zones (both are the camera's clock). */
 export function secondsBetween(a: string | null, b: string | null): number | null {
   if (!a || !b) return null;

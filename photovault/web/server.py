@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 ROLE_CHOICES = ("WORKING", "MASTER", "LEGACY")
 SETTING_DEFAULTS = {"creator": "", "copyright": "", "default_offset": "+00:00", "match_window_s": "1800",
+                    "match_reach_s": "43200",
                     "mac_folder": DEFAULT_MAC_FOLDER}
 GPS_SOURCES = ("match", "map", "search", "neighbour")
 EVENTS_KEPT = 500
@@ -592,7 +593,7 @@ def _settings(conn) -> dict:
     out: dict[str, Any] = {}
     for key, default in SETTING_DEFAULTS.items():
         value = repo.get_setting(conn, key, default)
-        out[key] = int(value) if key == "match_window_s" else value
+        out[key] = int(value) if key in ("match_window_s", "match_reach_s") else value
     return out
 
 
@@ -675,7 +676,8 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
             return 200, _thumb(app, conn, group_id)
         try:
             window = int(repo.get_setting(conn, "match_window_s", SETTING_DEFAULTS["match_window_s"]))
-            found = suggest(conn, group_id, window_s=window)
+            reach = int(repo.get_setting(conn, "match_reach_s", SETTING_DEFAULTS["match_reach_s"]))
+            found = suggest(conn, group_id, window_s=window, reach_s=reach)
         except ValueError as exc:
             raise NotFound(str(exc)) from exc
         return 200, {"suggestions": found}
@@ -1054,15 +1056,15 @@ def _post_settings(conn, body: Any) -> dict:
             if not volumes.is_folder_volume(Path(value.strip()).expanduser()):
                 raise BadRequest("mac_folder must be an existing folder inside your home folder (not home itself)")
             values[key] = value.strip()
-        else:  # match_window_s
+        else:  # match_window_s, match_reach_s
             if isinstance(value, bool) or not isinstance(value, (int, str)):
-                raise BadRequest("match_window_s must be a whole number of seconds")
+                raise BadRequest(f"{key} must be a whole number of seconds")
             try:
                 seconds = int(value)
             except ValueError as exc:
-                raise BadRequest("match_window_s must be a whole number of seconds") from exc
+                raise BadRequest(f"{key} must be a whole number of seconds") from exc
             if not 0 <= seconds <= 86_400:
-                raise BadRequest("match_window_s must be between 0 and 86400")
+                raise BadRequest(f"{key} must be between 0 and 86400")
             values[key] = str(seconds)
     with repo.transaction(conn):
         for key, value in values.items():
