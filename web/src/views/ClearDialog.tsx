@@ -73,6 +73,7 @@ export function ClearDialog({ card, onClose }: { card: { mount: string; label: s
       {plan && (
         <div className="flex flex-col gap-3 text-sm">
           <div className="rounded-xl border border-line bg-raised/40 p-3">
+            <p className="label mb-1">Dry run · nothing has been deleted</p>
             <p className="font-medium">
               {plan.deletable_files === 0
                 ? 'Nothing can be deleted from this card right now.'
