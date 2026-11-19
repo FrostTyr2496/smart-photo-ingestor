@@ -81,6 +81,17 @@ def cmd_volumes_assign(args, cfg, emit) -> int:
     return EXIT_OK
 
 
+def _positive_int(text: str) -> int:
+    """argparse type: an integer of at least 1."""
+    try:
+        n = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError("use a whole number") from None
+    if n < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return n
+
+
 class _Stop:
     def __init__(self) -> None:
         self.flag = False
@@ -111,7 +122,7 @@ def cmd_ingest(args, cfg, emit) -> int:
     conn.execute("BEGIN IMMEDIATE")
     try:
         job_id = plan_card_ingest(conn, cfg, source=Path(args.source), target=Path(args.target),
-                                  shoot_name=args.name, emit=emit)
+                                  shoot_name=args.name, emit=emit, limit=args.limit)
     except BaseException:
         conn.execute("ROLLBACK")
         raise
@@ -461,6 +472,8 @@ def build_parser() -> argparse.ArgumentParser:
     ing.add_argument("--target", required=True, help="WORKING drive mount")
     ing.add_argument("--name", default=None, help="optional shoot name for the folder")
     ing.add_argument("--dry-run", action="store_true", help="plan and show, write nothing")
+    ing.add_argument("--limit", type=_positive_int, default=None, metavar="N",
+                     help="import only the first N frames by capture time (a small batch; D-090)")
     ing.set_defaults(func=cmd_ingest)
 
     r = sub.add_parser("resume", help="resume a paused or failed job")

@@ -266,11 +266,16 @@ def build_argv(cmd: str, args: dict) -> list[str]:
         label = _text_arg(args, "label", required=False)
         return argv + (["--label", label] if label else [])
     if cmd == "ingest":
-        _allow_only(args, {"source", "target", "name", "dry_run"})
+        _allow_only(args, {"source", "target", "name", "dry_run", "limit"})
         argv = ["ingest", "--source", _path_arg(args, "source"), "--target", _path_arg(args, "target")]
         name = _text_arg(args, "name", required=False)
         if name:
             argv += ["--name", name]
+        limit = args.get("limit")
+        if limit is not None:
+            if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+                raise BadRequest("limit must be a positive integer")
+            argv += ["--limit", str(limit)]
         return argv + (["--dry-run"] if _bool_arg(args, "dry_run") else [])
     if cmd == "resume":
         _allow_only(args, {"job_id"})

@@ -60,10 +60,31 @@ def _target_volume(conn: sqlite3.Connection, target: Path) -> sqlite3.Row:
     return row
 
 
+def _batch(groups: list, limit: int | None) -> set[int]:
+    """Indexes of the groups a ``--limit`` batch keeps: the first `limit` by capture time (D-090). Groups with no
+    time sort last, by card path. Every group is kept when `limit` is None."""
+    if limit is None:
+        return set(range(len(groups)))
+    if limit < 1:
+        raise ValueError("limit must be at least 1")
+
+    def key(n: int) -> tuple:
+        g = groups[n]
+        t = g.capture_time.replace(tzinfo=None).isoformat() if g.capture_time else ""
+        return (g.capture_time is None, t, g.primary.entry.rel_path)
+
+    return set(sorted(range(len(groups)), key=key)[:limit])
+
+
 def plan_card_ingest(
-    conn: sqlite3.Connection, cfg: Config, *, source: Path, target: Path, shoot_name: str | None, emit: Emitter
+    conn: sqlite3.Connection, cfg: Config, *, source: Path, target: Path, shoot_name: str | None, emit: Emitter,
+    limit: int | None = None,
 ) -> int:
-    """Plan an ingest of card `source` onto WORKING volume `target`; returns the job id. Does not commit."""
+    """Plan an ingest of card `source` onto WORKING volume `target`; returns the job id. Does not commit.
+
+    `limit` keeps only the first N capture groups by capture time (D-090). Names are still reserved for every
+    group on the card, so a batch names its files exactly as a later full import of the same card would.
+    """
     source, target = Path(source), Path(target)
     if _inside(source, target):
         raise ValueError("source and target overlap; refusing")
@@ -100,12 +121,17 @@ def plan_card_ingest(
                 g.serial = g.serial or serial
                 body_inferred += 1
 
+    keep = _batch(groups, limit)
+    groups_total, files_total = len(groups), sum(len(g.members) for g in groups)
     items: list[dict] = []
     folders: Counter[str] = Counter()
     unknown_models: Counter[str] = Counter()
     mtime_dated = 0
     used: set[str] = set()
-    for group in groups:
+    for gi, group in enumerate(groups):
+        if gi not in keep:
+            _reserve_names(conn, cfg, group, shoot_name, used)
+            continue
         nick = body_nickname(cfg, group.model)
         if group.model and group.model not in cfg.bodies:
             unknown_models[group.model] += 1
@@ -145,14 +171,7 @@ def plan_card_ingest(
                 subsec=group.subsec,
             )
         for member in group.members:
-            name = member_filename(stem, member, group)
-            dst = str(folder / name)
-            n = 2
-            while repo.path_key(dst) in used:  # two groups produced one name: keep both, never overwrite
-                p = PurePosixPath(folder / name)
-                dst = str(p.with_name(f"{p.stem}_{n}{p.suffix}"))
-                n += 1
-            used.add(repo.path_key(dst))
+            dst = _unique_dst(folder, member_filename(stem, member, group), used)
             folders[str(folder)] += 1
             items.append({"src_rel": member.entry.rel_path, "dst_rel": dst, "group_id": group_id,
                           "role": member.role, "entry": member.entry})
@@ -190,11 +209,18 @@ def plan_card_ingest(
                   message=f"this card spans {len(shoot_days)} shoot days; the name {shoot_name!r} is applied to all of them")
     if free is not None and planned_bytes > free:
         emit.emit("warning", code="no_space", message=f"needs {human_bytes(planned_bytes)}, target has {human_bytes(free)} free")
+    if limit is not None:
+        emit.emit("warning", code="batch",
+                  message=f"batch: {len(keep)} of {groups_total} frames ({len(items)} of {files_total} files); "
+                  "run the import again without a limit for the rest")
     emit.emit(
         "result",
         job_id=job_id,
         files=len(items),
-        groups=len(groups),
+        groups=len(keep),
+        limit=limit,
+        groups_total=groups_total,
+        files_total=files_total,
         kinds=dict(kinds),
         planned_bytes=planned_bytes,
         planned=human_bytes(planned_bytes),
@@ -205,6 +231,33 @@ def plan_card_ingest(
         sample=[f"{it['src_rel']} -> {it['dst_rel']}" for it in items[:5]],
     )
     return job_id
+
+
+def _unique_dst(folder: PurePosixPath, name: str, used: set[str]) -> str:
+    """`folder/name`, with ``_2``, ``_3``… when two groups produce one name: keep both, never overwrite."""
+    dst = str(folder / name)
+    n = 2
+    while repo.path_key(dst) in used:
+        p = PurePosixPath(folder / name)
+        dst = str(p.with_name(f"{p.stem}_{n}{p.suffix}"))
+        n += 1
+    used.add(repo.path_key(dst))
+    return dst
+
+
+def _reserve_names(conn: sqlite3.Connection, cfg: Config, group, shoot_name: str | None, used: set[str]) -> None:
+    """Reserve the names a group outside the batch would get, without writing to the catalog (D-090)."""
+    nick = body_nickname(cfg, group.model)
+    body = conn.execute("SELECT body_id FROM bodies WHERE model = ? AND serial = ?",
+                        (group.model, group.serial or "")).fetchone() if group.model else None
+    existing = repo.find_group(conn, body["body_id"], group.shutter_count) if body is not None else None
+    if existing is not None and existing["shoot_id"] is not None:
+        stem = existing["canonical_stem"]
+    else:
+        stem = canonical_stem(group, nick, cfg.naming.template)
+    folder = dest_dir(cfg, shoot_date(group.capture_time, cfg.naming.day_boundary_hour), shoot_name, nick)
+    for member in group.members:
+        _unique_dst(folder, member_filename(stem, member, group), used)
 
 
 def _policy_met(cfg: Config, counts: dict[str, int]) -> bool:

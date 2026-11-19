@@ -52,11 +52,14 @@ target are skipped (`skipped_dup`, D-036), so a batch is never copied twice.
     imports land under `working_subdir`.
   - Verify: `uv run pytest tests/test_volumes.py tests/test_cli.py -q`
 
-- [ ] 3. Import in small batches
+- [x] 3. Import in small batches
   - ID: im-3 (D-090)
   - `plan_card_ingest(..., limit: int | None = None)` per the batch definition; the result event adds `limit`,
     `groups_total` and `files_total` (whole card). CLI `ingest --limit N` (N ≥ 1); web `ingest` accepts `limit`.
-  - Verify: `uv run pytest tests/test_ingest.py tests/test_web_api.py -q`
+  - Verify: `uv run pytest tests/test_cli.py tests/test_web_api.py -q` (ingest tests live in `test_cli.py`)
+  - Result (2026-11-18): `uv run pytest tests/test_cli.py tests/test_web_api.py tests/test_ingest_faults.py -q` → 97
+    passed. Groups outside the batch still reserve their names (no catalog writes), so a batch names files exactly
+    as a full import would; a `batch` warning states "N of M frames".
 
 - [ ] 4. **[stronger]** Import from the Cards view: dry-run plan, then apply
   - ID: im-4 (D-091)

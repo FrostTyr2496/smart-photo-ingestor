@@ -276,3 +276,56 @@ def test_hash_skip_prefix_outside_the_mount_is_a_usage_error(env, capsys) -> Non
         code, lines = run(capsys, "hash", str(drive), "--skip-prefix", bad)
         assert code == 2
         assert [e["code"] for e in lines if e["event"] == "error"] == ["usage"]
+
+
+# --------------------------------------------------------------------------- batches (im-3, D-090)
+
+def test_limit_imports_the_earliest_frames_then_the_rest(env, capsys) -> None:
+    assign(capsys, env)
+    src = ["--source", str(env["card"]), "--target", str(env["work"])]
+    code, lines = run(capsys, "ingest", *src, "--limit", "1", "--dry-run")
+    plan = result(lines)
+    assert code == 0 and (plan["files"], plan["groups"], plan["limit"]) == (2, 1, 1)
+    assert (plan["groups_total"], plan["files_total"]) == (3, 6)
+    assert any(e["event"] == "warning" and e["code"] == "batch" for e in lines)
+    assert all("DSC_0001" in s for s in plan["sample"])  # earliest capture time first
+
+    code, lines = run(capsys, "ingest", *src, "--limit", "2")
+    assert code == 0 and result(lines)["copied"] == 4
+    first = sorted(p.name for p in media_files(env["work"]))
+    code, lines = run(capsys, "card-status", str(env["card"]))
+    assert code == 3 and result(lines)["safe"] == 4
+
+    code, lines = run(capsys, "ingest", *src)  # the rest: the batch is not copied again
+    assert code == 0 and result(lines)["copied"] == 2 and result(lines)["skipped_dup"] == 4
+    names = sorted(p.name for p in media_files(env["work"]))
+    assert len(names) == 6 and set(first) <= set(names)
+    assert run(capsys, "card-status", str(env["card"]))[0] == 0
+
+
+def test_a_batch_names_files_as_a_full_import_would(env, capsys, monkeypatch) -> None:
+    """Two frames that produce one name: the second gets `_2` even when the batch leaves the first out."""
+    for f in (env["card"] / "DCIM" / "100NZ6_2").iterdir():  # keep only DSC_0001.NEF: the sample lists 5 files
+        if f.name != "DSC_0001.NEF":
+            f.unlink()
+    d2 = env["card"] / "DCIM" / "101NZ6_2"
+    d2.mkdir()
+    (d2 / "DSC_0001.NEF").write_bytes(os.urandom(300_000))  # same metadata as 100NZ6_2/DSC_0001 → same name
+    assign(capsys, env)
+    src = ["--source", str(env["card"]), "--target", str(env["work"])]
+    full = {e.split(" -> ")[0]: e.split(" -> ")[1] for e in result(run(capsys, "ingest", *src, "--dry-run")[1])["sample"]}
+    assert full["DCIM/101NZ6_2/DSC_0001.NEF"].endswith("_2.NEF")
+
+    real_batch = ingest_mod._batch
+
+    def only_the_second(groups, limit):  # noqa: ANN001
+        return {n for n, g in enumerate(groups) if g.primary.entry.rel_path.startswith("DCIM/101")} if limit else real_batch(groups, limit)
+
+    monkeypatch.setattr(ingest_mod, "_batch", only_the_second)
+    batch = result(run(capsys, "ingest", *src, "--limit", "1", "--dry-run")[1])
+    assert batch["sample"] == [f"DCIM/101NZ6_2/DSC_0001.NEF -> {full['DCIM/101NZ6_2/DSC_0001.NEF']}"]
+
+
+def test_limit_must_be_positive(env, capsys) -> None:
+    code = cli.main(["--json", "ingest", "--source", str(env["card"]), "--target", str(env["work"]), "--limit", "0"])
+    assert code != 0

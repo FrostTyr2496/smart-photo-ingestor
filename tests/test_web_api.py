@@ -357,6 +357,8 @@ def test_run_rejects_unknown_and_bad_arguments(srv: Client) -> None:
         {"cmd": "resume", "args": {"job_id": "1"}},                       # must be an integer
         {"cmd": "resume", "args": {"job_id": -1}},
         {"cmd": "ingest", "args": {"source": mount, "target": mount, "dry_run": "yes"}},
+        {"cmd": "ingest", "args": {"source": mount, "target": mount, "limit": 0}},
+        {"cmd": "ingest", "args": {"source": mount, "target": mount, "limit": "10"}},
         {"cmd": "meta_refs", "args": {"folder": mount, "label": "a\nb"}},
     ]
     for body in bad:
@@ -371,6 +373,8 @@ def test_run_rejects_unknown_and_bad_arguments(srv: Client) -> None:
      ["volumes", "assign", "/m", "--role", "WORKING", "--label", "WORK"]),
     ("ingest", {"source": "/c", "target": "/t", "name": "Night", "dry_run": True},
      ["ingest", "--source", "/c", "--target", "/t", "--name", "Night", "--dry-run"]),
+    ("ingest", {"source": "/c", "target": "/t", "limit": 10, "dry_run": True},
+     ["ingest", "--source", "/c", "--target", "/t", "--limit", "10", "--dry-run"]),
     ("resume", {"job_id": 3}, ["resume", "3"]),
     ("card_status", {"mount": "/c"}, ["card-status", "/c"]),
     ("index", {"mount": "/w"}, ["index", "/w"]),
