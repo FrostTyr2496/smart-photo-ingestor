@@ -108,6 +108,16 @@ already verified on the target are skipped (`skipped_dup`, D-036), so a batch is
   - Result (2026-11-18): `uv run pytest tests/test_card_clear.py -q` → 13 passed; `uv run pytest -q` full suite green;
     web typecheck clean, `npm test` 123 passed, build committed. Schema V8 (cu-0 moves to V9). See D-097.
 
+- [x] 7b. **[stronger]** Card clear: verify all copies
+  - ID: cc-2 (D-114; after cc-1)
+  - Option `verify all copies`, ON by default (CLI `--verify-all-copies` / `--no-verify-all-copies`, task arg `verify_all`): the
+    dry run re-reads every copy that makes a file green and keeps files whose copy is missing, bad or on a drive that is
+    not connected; the run re-reads all of a group's copies just before deleting it. OFF warns (`single_copy_check`).
+    Baseline checks are not bypassable. Clear dialog: checkbox, bypass warning, per-drive summary.
+  - Verify: `uv run pytest tests/test_card_clear.py tests/test_web_api.py -q`; `cd web && npm run typecheck && npm test && npm run build`.
+  - Result (2026-11-19): `uv run pytest tests/test_card_clear.py tests/test_web_api.py -q` -> 106 passed; `uv run pytest -q` -> 795 passed, 4 skipped; web typecheck clean,
+    189 tests passed, build done. Also fixed the `test-card mark` warning text. Not seen in a browser.
+
 - [x] 8. Dry-run folder tree and Show in Finder
   - ID: im-7 (D-102)
   - The ingest dry-run result (or a task-detail fetch) gives every planned `src_rel -> dst_rel`; the Import dialog

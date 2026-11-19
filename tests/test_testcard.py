@@ -82,11 +82,11 @@ def test_clear_recheck_refuses_when_copies_get_hidden_after_planning(env, capsys
     item = {"rel_path": inst["rel_path"], "asset_id": inst["asset_id"]}
     wk = {v["label"]: v["volume_id"] for v in repo.list_volumes(c)}
     connected = {wk["WORK"]: env["vols"] / "WORK"}
-    card_clear._check_file(c, card, env["card"], item, connected)  # passes: two verified copies, WORK re-read
+    card_clear._check_file(c, card, env["card"], item, connected, verify_all=False)  # passes: two verified copies, WORK re-read
     assert mark(capsys, env, "WORK2")[0] == 0
     c = conn_()
     with pytest.raises(card_clear.Surprise, match="two verified copies"):
-        card_clear._check_file(c, card, env["card"], item, connected)
+        card_clear._check_file(c, card, env["card"], item, connected, verify_all=False)
 
 
 def test_ingest_copies_instead_of_skipping_when_copies_are_hidden(env, capsys, tmp_path) -> None:

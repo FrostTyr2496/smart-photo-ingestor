@@ -279,7 +279,8 @@ def cmd_cards_clear(args, cfg, emit) -> int:
     root = Path(args.root) if args.root else VOLUMES_ROOT
     try:
         if args.dry_run:
-            plan = card_clear.plan_clear(conn, cfg, Path(args.mount), volumes_root=root, emit=emit)
+            plan = card_clear.plan_clear(conn, cfg, Path(args.mount), volumes_root=root, emit=emit,
+                                         verify_all=args.verify_all_copies)
             emit.emit("warning", code="dry_run", message="dry run: nothing was deleted")
             emit.emit("result", **card_clear.public_plan(plan))
             return EXIT_OK
@@ -289,7 +290,7 @@ def cmd_cards_clear(args, cfg, emit) -> int:
         stop = _Stop()
         stop.install(emit)
         out = card_clear.run_clear(conn, cfg, Path(args.mount), confirm=args.confirm, volumes_root=root, emit=emit,
-                                   should_stop=stop)
+                                   should_stop=stop, verify_all=args.verify_all_copies)
     except (card_clear.ClearRefused, volumes.UnknownVolume) as exc:
         emit.emit("error", code="clear_refused", message=str(exc))
         return EXIT_USAGE
@@ -304,8 +305,10 @@ def cmd_test_card(args, cfg, emit) -> int:
             if not args.card:
                 raise ValueError("name the card: test-card mark <card> --hide <drive>")
             card = testcard.resolve(conn, args.card)
-            testcard.mark(conn, card, [testcard.resolve(conn, h) for h in args.hide or []])
-            emit.emit("warning", code="test_card", message="test card on: its files show only-on-card until copied again")
+            hidden = [testcard.resolve(conn, h) for h in args.hide or []]
+            testcard.mark(conn, card, hidden)
+            names = ", ".join(repo.get_volume(conn, h)["label"] for h in hidden)
+            emit.emit("warning", code="test_card", message=f"test card on: copies on {names} do not count for this card's files")
         elif args.action == "clear":
             testcard.clear(conn)
     except ValueError as exc:
@@ -672,6 +675,9 @@ def build_parser() -> argparse.ArgumentParser:
     ccl.add_argument("mount")
     ccl.add_argument("--dry-run", action="store_true", help="show what would be deleted and kept; delete nothing")
     ccl.add_argument("--confirm", type=int, metavar="N", help="the file count a dry run reported")
+    ccl.add_argument("--verify-all-copies", action=argparse.BooleanOptionalAction, default=True,
+                     help="re-read every copy that makes a file green before deleting (default); "
+                          "--no-verify-all-copies re-reads only one and trusts the catalog for the rest")
     ccl.add_argument("--root", help=argparse.SUPPRESS)
     ccl.set_defaults(func=cmd_cards_clear)
     cl = crd.add_parser("list", help="every card, ranked green/yellow/red, and the cameras on them")

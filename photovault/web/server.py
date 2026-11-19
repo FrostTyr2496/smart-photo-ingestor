@@ -315,8 +315,10 @@ def build_argv(cmd: str, args: dict) -> list[str]:
         _allow_only(args, {"mount"})
         return ["cards", "check", _path_arg(args, "mount")]
     if cmd == "card_clear":
-        _allow_only(args, {"mount", "dry_run", "confirm"})
+        _allow_only(args, {"mount", "dry_run", "confirm", "verify_all"})
         argv = ["cards", "clear", _path_arg(args, "mount")]
+        if "verify_all" in args and not _bool_arg(args, "verify_all"):
+            argv.append("--no-verify-all-copies")
         if _bool_arg(args, "dry_run"):
             return argv + ["--dry-run"]
         confirm = args.get("confirm")

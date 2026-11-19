@@ -161,9 +161,9 @@ def test_no_copy_drive_connected_refuses(env, capsys) -> None:
 
 def test_one_copy_drive_unplugged_still_needs_a_connected_copy(env, capsys) -> None:
     shutil.rmtree(env["vols"] / "WORK2")
-    code, lines = clear(capsys, env, "--dry-run")
+    code, lines = clear(capsys, env, "--dry-run", "--no-verify-all-copies")
     assert result(lines)["deletable_files"] == 3  # the catalog still holds two copies; WORK is re-read
-    code, lines = clear(capsys, env, "--confirm", "3")
+    code, lines = clear(capsys, env, "--confirm", "3", "--no-verify-all-copies")
     assert code == 0 and result(lines)["deleted"] == 3
 
 
@@ -173,7 +173,7 @@ def test_changed_copy_stops(env, capsys) -> None:
         st = p.stat()
         p.write_bytes(os.urandom(st.st_size))
         os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns))
-    code, lines = clear(capsys, env, "--confirm", "3")
+    code, lines = clear(capsys, env, "--confirm", "3", "--no-verify-all-copies")  # the baseline stops by itself
     assert code == 1 and "does not match" in result(lines)["stopped"]
     assert (dcim(env) / "DSC_0001.NEF").exists()
 
@@ -233,3 +233,101 @@ def test_web_argv() -> None:
                 {"mount": "/m", "confirm": True}, {"mount": "/m", "force": True}):
         with pytest.raises(BadRequest):
             build_argv("card_clear", bad)
+
+
+# ----------------------------------------------------------------- verify all copies (cc-2, D-114)
+
+
+def unread_drive(env: dict) -> str:
+    """The copy drive the baseline check does NOT re-read (it reads the first volume id)."""
+    rows = conn_().execute("SELECT volume_id, label FROM volumes WHERE label IN ('WORK','WORK2')").fetchall()
+    return sorted(rows, key=lambda r: r["volume_id"])[1]["label"]
+
+
+def corrupt(env: dict, drive: str, name: str = "DSC_0001.NEF") -> None:
+    p = env["vols"] / drive / "Photos" / name
+    st = p.stat()
+    p.write_bytes(os.urandom(st.st_size))
+    os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns))
+
+
+def test_verify_all_is_on_by_default_and_reports_drives(env, capsys) -> None:
+    code, lines = clear(capsys, env, "--dry-run")
+    plan = result(lines)
+    assert plan["deletable_files"] == 3 and plan["verify"]["all_copies"] is True and plan["verify"]["verified_at"]
+    by = {d["label"]: d for d in plan["verify"]["drives"]}
+    assert set(by) == {"WORK", "WORK2"} and by["WORK"]["files"] == 4 and by["WORK2"]["mismatches"] == 0
+    # (4: frame 6's NEF is read before its group is held back)
+    assert any(e.get("event") == "progress" and e.get("phase") == "verify" for e in lines)
+    assert not any(e.get("code") == "single_copy_check" for e in lines)
+
+
+def test_bad_unread_copy_keeps_the_group_and_refuses_the_run(env, capsys) -> None:
+    bad = unread_drive(env)
+    corrupt(env, bad)
+    code, lines = clear(capsys, env, "--dry-run")
+    plan = result(lines)
+    assert plan["deletable_files"] == 2 and plan["kept"]["verify_mismatch"]["files"] == 1
+    assert plan["verify_kept"][0]["reason"] == f"copy on {bad} missing or does not match"
+    assert {d["label"]: d["mismatches"] for d in plan["verify"]["drives"]}[bad] == 1
+    before = tree_hashes(env["card"])
+    code, lines = clear(capsys, env, "--confirm", "3")
+    assert code == 2 and "does not match" in lines[-1]["message"]
+    assert tree_hashes(env["card"]) == before
+    code, lines = clear(capsys, env, "--confirm", "2")
+    assert code == 0 and result(lines)["deleted"] == 2 and (dcim(env) / "DSC_0001.NEF").exists()
+
+
+def test_run_time_check_reads_every_copy(env) -> None:
+    c = conn_()
+    card = c.execute("SELECT * FROM volumes WHERE role = 'CARD'").fetchone()
+    from photovault import cards
+    from photovault.protocol import Emitter
+    plan = card_clear.plan_clear(c, load_config(), env["card"], volumes_root=env["vols"], emit=Emitter())
+    item = next(i for i in plan["_deletable"] if i["rel_path"].endswith("DSC_0001.NEF"))
+    connected = {v: Path(m) for v, m in plan["connected"].items()}
+    card_clear._check_file(c, card, env["card"], item, connected)
+    corrupt(env, unread_drive(env))
+    with pytest.raises(card_clear.Surprise, match="does not match"):
+        card_clear._check_file(c, card, env["card"], item, connected)
+    card_clear._check_file(c, card, env["card"], item, connected, verify_all=False)  # the bypass trusts the catalog
+    del connected[next(v for v, m in connected.items() if m.name == "WORK2")]
+    with pytest.raises(card_clear.Surprise, match="not connected"):
+        card_clear._check_file(c, card, env["card"], item, connected)
+
+
+def test_disconnected_second_drive_keeps_files_with_reason(env, capsys) -> None:
+    shutil.rmtree(env["vols"] / "WORK2")
+    code, lines = clear(capsys, env, "--dry-run")
+    plan = result(lines)
+    assert plan["deletable_files"] == 0 and plan["kept"]["verify_not_connected"]["files"] == 4
+    assert all(k["reason"] == "a drive needed to check its copies is not connected (WORK2)" for k in plan["verify_kept"])
+    code, lines = clear(capsys, env, "--dry-run", "--no-verify-all-copies")
+    assert result(lines)["deletable_files"] == 3  # today's behaviour
+
+
+def test_bypass_reproduces_old_behaviour_and_warns(env, capsys) -> None:
+    corrupt(env, unread_drive(env))
+    code, lines = clear(capsys, env, "--dry-run", "--no-verify-all-copies")
+    plan = result(lines)
+    assert plan["deletable_files"] == 3 and plan["verify"] == {"all_copies": False, "drives": [], "verified_at": None}
+    warn = [e for e in lines if e.get("code") == "single_copy_check"]
+    assert warn and "trusted from the catalog" in warn[0]["message"]
+    code, lines = clear(capsys, env, "--confirm", "3", "--no-verify-all-copies")
+    assert code == 0 and result(lines)["deleted"] == 3  # the unread copy was never looked at
+
+
+def test_group_with_a_bad_member_copy_is_kept_whole(env, capsys) -> None:
+    corrupt(env, unread_drive(env), "DSC_0002.JPG")
+    code, lines = clear(capsys, env, "--dry-run")
+    plan = result(lines)
+    assert plan["deletable_files"] == 1  # frame 1 only; frame 2's NEF is held back by its JPG
+    assert plan["kept"]["verify_mismatch"]["files"] == 1 and plan["kept"]["group_not_green"]["files"] == 2
+
+
+def test_web_argv_verify_all() -> None:
+    from photovault.web.server import build_argv
+    assert build_argv("card_clear", {"mount": "/m", "dry_run": True, "verify_all": False}) == [
+        "cards", "clear", "/m", "--no-verify-all-copies", "--dry-run"]
+    assert build_argv("card_clear", {"mount": "/m", "confirm": 3, "verify_all": True}) == [
+        "cards", "clear", "/m", "--confirm", "3"]

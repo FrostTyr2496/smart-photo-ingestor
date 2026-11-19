@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { confirmMatches, readClearPlan } from './cardClear';
+import { confirmMatches, readClearPlan, verifyEstimate } from './cardClear';
 
 describe('readClearPlan', () => {
   it('reads the plan and sorts kept reasons by size', () => {
@@ -30,5 +30,28 @@ describe('confirmMatches', () => {
     expect(confirmMatches('', 6)).toBe(false);
     expect(confirmMatches('0', 0)).toBe(false);
     expect(confirmMatches('6x', 6)).toBe(false);
+  });
+});
+
+describe('verify all copies (cc-2)', () => {
+  it('reads the verify summary and the kept reasons', () => {
+    const { plan } = readClearPlan([
+      {
+        event: 'result', deletable_files: 2, deletable_bytes: 100, groups: 1, kept_files: 1, kept: {}, copy_drives: ['A', 'B'],
+        verify: { all_copies: true, drives: [{ label: 'A', files: 2, bytes: 100, mismatches: 1 }], verified_at: '2026-11-19T10:00:00+00:00' },
+        verify_kept: [{ rel_path: 'DCIM/x.NEF', reason: 'copy on A missing or does not match' }],
+      },
+    ]);
+    expect(plan?.verify.all_copies).toBe(true);
+    expect(plan?.verify.drives[0]?.mismatches).toBe(1);
+    expect(plan?.verify_kept[0]?.reason).toContain('copy on A');
+  });
+  it('defaults to a bypassed verify when the result has none', () => {
+    const { plan } = readClearPlan([{ event: 'result', deletable_files: 1, deletable_bytes: 1, kept: {} }]);
+    expect(plan?.verify).toEqual({ all_copies: false, drives: [], verified_at: null });
+    expect(plan?.verify_kept).toEqual([]);
+  });
+  it('estimates the extra read', () => {
+    expect(verifyEstimate({ deletable_bytes: 100, copy_drives: ['A', 'B'] })).toEqual({ bytes: 200, drives: ['A', 'B'] });
   });
 });

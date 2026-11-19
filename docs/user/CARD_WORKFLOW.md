@@ -51,6 +51,14 @@ separate one, for example for a trial run.
 
 To index an existing drive and find duplicates (`index`, `hash`, `report duplicates`), see `INDEX_WORKFLOW.md`.
 
+## Clearing a card: re-read every copy
+
+Cards -> Clear (or `cards clear <mount> --dry-run`) shows what is safe to delete. By default it re-reads every copy that
+makes a file green (the backup copies, or both working copies) from their drives, so a copy that went bad since it was
+verified keeps the file on the card. Those drives must be plugged in, and a hard drive makes it slower. You can untick
+"Re-read every copy before deleting" (`--no-verify-all-copies`) to bypass it knowingly: then only one copy is re-read
+and the other is trusted from the catalog. Everything else (the card file's own checksum, DCIM only) is always checked.
+
 ## Test cards
 
 To rehearse a real import with a card the catalog already has copies of, mark it as a test card:

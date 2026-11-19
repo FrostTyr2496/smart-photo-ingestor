@@ -7,7 +7,15 @@ A file under a CARD's ``DCIM/`` is deletable only when ALL of this holds, checke
 - the file is green (D-089): verified on a MASTER, or on two or more different WORKING/MASTER volumes;
 - re-read from the card, its SHA-256 equals the asset's SHA-256, and size and mtime match the catalog;
 - the catalog still holds the qualifying verified copies (``verified_sha256`` equal to the asset's);
-- one such copy on a connected drive is re-hashed from the drive and equals the asset's SHA-256.
+- one such copy on a connected drive is re-hashed from the drive and equals the asset's SHA-256 (the baseline,
+  never bypassable).
+
+Verify all copies (cc-2, D-114; ON by default, ``--no-verify-all-copies`` bypasses): EVERY qualifying copy that makes
+the file green (all MASTER copies, else all WORKING/MASTER copies) is re-read from its drive and must match, and each
+such drive must be connected. The dry run does this for every deletable file (progress phase ``verify``, a per-drive
+summary in ``result.verify``, files kept as ``verify_not_connected`` / ``verify_mismatch``); ``run_clear`` re-plans with
+the same verify and then re-reads all of a group's copies again just before deleting it, any failure being a
+`Surprise`. With the option off only one copy is re-read and a ``single_copy_check`` warning is emitted.
 
 A capture group (RAW + JPEG, a photo and its sidecars) is deleted whole or not at all. Any surprise stops the run.
 A deleted card instance becomes ``missing``; every deletion is a ``job_items`` row of a ``card_clear`` job.
@@ -18,7 +26,8 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from collections import Counter
+from collections import Counter, defaultdict
+from datetime import UTC, datetime
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 
@@ -38,7 +47,11 @@ REASONS = {
     "needs_backup": "One copy only",
     "copy_not_connected": "No drive holding a copy is connected",
     "group_not_green": "Another file of the same frame is not safe",
+    "verify_not_connected": "A drive needed to check its copies is not connected",
+    "verify_mismatch": "A copy is missing or does not match",
 }
+SINGLE_COPY_WARNING = ("Only one copy of each file is re-read before deleting; the other copy is trusted from the "
+                       "catalog.")
 
 
 class ClearRefused(ValueError):
@@ -47,6 +60,86 @@ class ClearRefused(ValueError):
 
 class Surprise(Exception):
     """A check failed just before a deletion; the run stops."""
+
+
+# --------------------------------------------------------------------------- copies
+
+
+def _copy_rows(conn: sqlite3.Connection, asset_id: int, sha: str, card_volume_id: str) -> list[sqlite3.Row]:
+    """The qualifying verified copies of an asset off the card (test-card hidden drives excluded, D-111)."""
+    hide, hide_p = testcard.sql_hide(conn, "i")
+    return conn.execute(
+        f"""
+        SELECT i.volume_id, i.rel_path, v.role, v.label FROM instances i JOIN volumes v ON v.volume_id = i.volume_id
+        WHERE i.asset_id = ? AND i.state = 'verified' AND i.verified_sha256 = ? AND v.role IN ('WORKING','MASTER')
+          AND i.volume_id != ?{hide} ORDER BY v.role = 'MASTER' DESC, i.volume_id, i.rel_path
+        """,
+        (asset_id, sha, card_volume_id, *hide_p),
+    ).fetchall()
+
+
+def _green(copies: list) -> bool:
+    return any(c["role"] == "MASTER" for c in copies) or len({c["volume_id"] for c in copies}) >= 2
+
+
+def _needed(copies: list) -> list:
+    """The copies that make a file green: the MASTER copies if any, else every WORKING/MASTER copy."""
+    masters = [c for c in copies if c["role"] == "MASTER"]
+    return masters or list(copies)
+
+
+def _copy_ok(path: Path, asset) -> bool:
+    try:
+        return path.is_file() and path.stat().st_size == asset["size"] and sha256_file(path) == asset["sha256"]
+    except OSError:
+        return False
+
+
+def _names(labels) -> str:
+    return ", ".join(sorted(set(labels)))
+
+
+def _verify_files(conn: sqlite3.Connection, card_volume_id: str, files: list[dict], connected: dict[str, Path],
+                  emit: Emitter) -> tuple[dict[str, tuple[str, str]], list[dict]]:
+    """Re-read every needed copy of each file (cc-2). Returns ``({rel: (code, reason)}, per-drive summary)``."""
+    failed: dict[str, tuple[str, str]] = {}
+    reads: dict[tuple[str, str], dict] = {}
+    users: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for f in files:
+        rel = f["rel_path"]
+        asset = conn.execute("SELECT sha256, size FROM assets WHERE asset_id = ?", (f["asset_id"],)).fetchone()
+        copies = _copy_rows(conn, f["asset_id"], asset["sha256"], card_volume_id)
+        if not _green(copies):
+            failed[rel] = ("verify_mismatch", "the catalog no longer holds two verified copies or a backup copy")
+            continue
+        need = _needed(copies)
+        absent = [c["label"] for c in need if c["volume_id"] not in connected]
+        if absent:
+            failed[rel] = ("verify_not_connected",
+                           f"a drive needed to check its copies is not connected ({_names(absent)})")
+            continue
+        for c in need:
+            key = (c["volume_id"], c["rel_path"])
+            reads.setdefault(key, {"label": c["label"], "path": connected[c["volume_id"]] / c["rel_path"],
+                                   "asset": asset})
+            users[key].append(rel)
+    per: dict[str, dict] = {}
+    total_bytes = sum(r["asset"]["size"] for r in reads.values())
+    done = done_bytes = 0
+    for key, r in reads.items():
+        d = per.setdefault(r["label"], {"label": r["label"], "files": 0, "bytes": 0, "mismatches": 0})
+        ok = _copy_ok(r["path"], r["asset"])
+        d["files"] += 1
+        d["bytes"] += r["asset"]["size"]
+        if not ok:
+            d["mismatches"] += 1
+            for rel in users[key]:
+                failed.setdefault(rel, ("verify_mismatch", f"copy on {r['label']} missing or does not match"))
+        done += 1
+        done_bytes += r["asset"]["size"]
+        emit.emit("progress", phase="verify", current=done, total=len(reads), bytes_done=done_bytes,
+                  bytes_total=total_bytes, message=f"re-reading copies {done}/{len(reads)}")
+    return failed, sorted(per.values(), key=lambda d: d["label"])
 
 
 # --------------------------------------------------------------------------- planning
@@ -105,8 +198,12 @@ def _group_ids(conn: sqlite3.Connection, asset_ids: list[int]) -> dict[int, int 
     return out
 
 
-def plan_clear(conn: sqlite3.Connection, cfg: Config, mount: Path, *, volumes_root: Path, emit: Emitter) -> dict:
-    """What a clear would delete and what it keeps, by reason. Read-only (never writes the catalog or the card)."""
+def plan_clear(conn: sqlite3.Connection, cfg: Config, mount: Path, *, volumes_root: Path, emit: Emitter,
+               verify_all: bool = True) -> dict:
+    """What a clear would delete and what it keeps, by reason. Read-only (never writes the catalog or the card).
+    With ``verify_all`` (default) every copy that makes a file green is re-read from its drive (cc-2, D-114)."""
+    if not verify_all:
+        emit.emit("warning", code="single_copy_check", message=SINGLE_COPY_WARNING)
     card = _card_volume(conn, mount)
     connected = connected_volumes(conn, volumes_root, emit)
     files = cards.card_files(conn, card["volume_id"], mount=Path(mount))
@@ -131,6 +228,16 @@ def plan_clear(conn: sqlite3.Connection, cfg: Config, mount: Path, *, volumes_ro
             reason[rel] = "copy_not_connected"
         else:
             reason[rel] = None
+    verify: dict = {"all_copies": False, "drives": [], "verified_at": None}
+    verify_kept: list[dict] = []
+    if verify_all:
+        cand = [f for f in files if reason[f["rel_path"]] is None]
+        failed, drives_summary = _verify_files(conn, card["volume_id"], cand, connected, emit)
+        for rel, (code, text) in failed.items():
+            reason[rel] = code
+            verify_kept.append({"rel_path": rel, "code": code, "reason": text})
+        verify = {"all_copies": True, "drives": drives_summary,
+                  "verified_at": datetime.now(UTC).isoformat(timespec="seconds")}
     blocked = {groups.find(f"f:{f['rel_path']}") for f in files if reason[f["rel_path"]] is not None}
     for f in files:
         rel = f["rel_path"]
@@ -150,6 +257,7 @@ def plan_clear(conn: sqlite3.Connection, cfg: Config, mount: Path, *, volumes_ro
         "kept": {k: {"files": n, "text": REASONS[k]} for k, n in kept.items()},
         "kept_files": sum(kept.values()),
         "copy_drives": copy_drives,
+        "verify": verify, "verify_kept": verify_kept[:200],
         "connected": {v: str(m) for v, m in connected.items()},
         "_deletable": [{"rel_path": f["rel_path"], "size": f["size"], "asset_id": f["asset_id"],
                         "group": order[groups.find(f"f:{f['rel_path']}")]} for f in deletable],
@@ -164,7 +272,8 @@ def public_plan(plan: dict) -> dict:
 # --------------------------------------------------------------------------- running
 
 
-def _check_file(conn: sqlite3.Connection, card: sqlite3.Row, mount: Path, item: dict, connected: dict[str, Path]) -> None:
+def _check_file(conn: sqlite3.Connection, card: sqlite3.Row, mount: Path, item: dict, connected: dict[str, Path],
+                verify_all: bool = True) -> None:
     """Every check for one file, just before its group is deleted. Raises `Surprise`."""
     rel = item["rel_path"]
     inst = repo.get_instance(conn, card["volume_id"], rel)
@@ -186,18 +295,18 @@ def _check_file(conn: sqlite3.Connection, card: sqlite3.Row, mount: Path, item: 
         raise Surprise(f"{rel}: cannot re-read the card file ({exc})") from exc
     if card_sha != asset["sha256"]:
         raise Surprise(f"{rel}: the card file's checksum no longer matches the catalog")
-    hide, hide_p = testcard.sql_hide(conn, "i")  # D-111: test-card copies on hidden drives do not count
-    copies = conn.execute(
-        f"""
-        SELECT i.volume_id, i.rel_path, v.role FROM instances i JOIN volumes v ON v.volume_id = i.volume_id
-        WHERE i.asset_id = ? AND i.state = 'verified' AND i.verified_sha256 = ? AND v.role IN ('WORKING','MASTER')
-          AND i.volume_id != ?{hide}
-        """,
-        (item["asset_id"], asset["sha256"], card["volume_id"], *hide_p),
-    ).fetchall()
-    vols = {c["volume_id"] for c in copies}
-    if not (any(c["role"] == "MASTER" for c in copies) or len(vols) >= 2):
+    copies = _copy_rows(conn, item["asset_id"], asset["sha256"], card["volume_id"])  # D-111 hidden drives excluded
+    if not _green(copies):
         raise Surprise(f"{rel}: the catalog no longer holds two verified copies or a backup copy")
+    if verify_all:  # cc-2: every copy that makes the file green is re-read, and its drive must be connected
+        need = _needed(copies)
+        absent = [c["label"] for c in need if c["volume_id"] not in connected]
+        if absent:
+            raise Surprise(f"{rel}: a drive needed to check its copies is not connected ({_names(absent)})")
+        for c in need:
+            if not _copy_ok(connected[c["volume_id"]] / c["rel_path"], asset):
+                raise Surprise(f"{rel}: the copy on {c['label']} is missing or does not match; restore it first")
+        return
     # One copy on a connected drive is re-read: a backup drive first, else the first drive by id (deterministic).
     for c in sorted(copies, key=lambda c: (c["role"] != "MASTER", c["volume_id"])):
         root = connected.get(c["volume_id"])
@@ -226,10 +335,10 @@ def _delete(conn: sqlite3.Connection, card: sqlite3.Row, mount: Path, rel: str) 
 
 
 def run_clear(conn: sqlite3.Connection, cfg: Config, mount: Path, *, confirm: int, volumes_root: Path, emit: Emitter,
-              should_stop: Callable[[], bool] = lambda: False) -> dict:
+              should_stop: Callable[[], bool] = lambda: False, verify_all: bool = True) -> dict:
     """Delete the plan's files group by group. ``confirm`` must equal the planned file count. Returns the summary."""
     mount = Path(mount)
-    plan = plan_clear(conn, cfg, mount, volumes_root=volumes_root, emit=emit)
+    plan = plan_clear(conn, cfg, mount, volumes_root=volumes_root, emit=emit, verify_all=verify_all)
     n = plan["deletable_files"]
     if confirm != n:
         raise ClearRefused(f"confirmation {confirm} does not match the {n} file(s) this clear would delete; "
@@ -242,7 +351,7 @@ def run_clear(conn: sqlite3.Connection, cfg: Config, mount: Path, *, confirm: in
     items = plan["_deletable"]
     with repo.transaction(conn):
         job_id = repo.create_job(conn, kind="card_clear", source_volume_id=card["volume_id"], target_volume_id=None,
-                                 params={"confirm": confirm, "files": n, "groups": plan["groups"]})
+                                 params={"confirm": confirm, "files": n, "groups": plan["groups"], "verify_all": verify_all})
         repo.add_job_items(conn, job_id, [{"seq": i, "src_rel": it["rel_path"], "group_id": None}
                                           for i, it in enumerate(items, 1)])
         repo.set_job_state(conn, job_id, "running")
@@ -261,7 +370,7 @@ def run_clear(conn: sqlite3.Connection, cfg: Config, mount: Path, *, confirm: in
             emit.emit("progress", phase="clear", current=deleted, total=n, message=f"group {gi}/{len(by_group)}")
             for it in members:
                 current = it["rel_path"]
-                _check_file(conn, card, mount, it, connected)
+                _check_file(conn, card, mount, it, connected, verify_all)
             for it in members:
                 current = it["rel_path"]
                 seq = seq_of[it["rel_path"]]
