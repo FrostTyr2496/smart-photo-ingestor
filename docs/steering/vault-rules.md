@@ -7,6 +7,9 @@ Imported by `CLAUDE.md`. These hold for every task. Changing one is a proposal t
    to WORKING and MASTER volumes, never to CARD or LEGACY volumes.
    **Exception (D-052, user-approved):** the user-triggered `volumes rename` may change a volume's name on any
    role, after a warning. It changes no file on the volume.
+   **Exception (D-092, user-approved):** the user-triggered card clear may delete media files on a CARD volume,
+   only files that are backed up per D-089 when checked just before deletion, after a dry run and a typed
+   confirmation. The engine never deletes on any other role, and never formats.
 2. **Agents never write to `/Volumes`.** The PreToolUse hook `.claude/hooks/guard_volumes.py` enforces it.
    Real-drive runs (ingest, `volumes assign`, indexing, hashing) are **[user]** steps: print the exact
    command for the user. Tests use `tmp_path`, never `/Volumes`.
@@ -20,6 +23,7 @@ Imported by `CLAUDE.md`. These hold for every task. Changing one is a proposal t
    uncached, compares SHA-256, then renames. It never overwrites an existing file.
 4. **No deletes in the engine** (Phases 1–4). Clearing a card means the user formats it in camera after
    `card-status` is green.
+   **Exception (D-092, user-approved):** the card clear of rule 1 (`photovault/card_clear.py`), and nothing else.
 5. **Identity is the SHA-256 of the bytes.** Filenames, paths, mtimes, sizes, partial hashes and
    `(serial, shutter count)` only narrow candidates or group files. A file is skipped as a duplicate only
    when its full hash matches an asset that has a `verified` instance on a non-CARD volume.

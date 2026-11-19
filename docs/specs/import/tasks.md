@@ -9,12 +9,12 @@ formatted in camera. With one drive the files turn **yellow**: one verified copy
 full card.
 
 Rules for every task:
-- vault-rules apply. Cards stay read-only; the engine never deletes (rule 4): "removing" card files means the
-  user formats the card in camera once it is green (or yellow, if they accept one copy).
-- No schema change, no new dependency. The second copy is the backup job of spec `backup` (bk-3), which already
+- vault-rules apply. Cards stay read-only except for the card clear (cc-1, D-092): it deletes only files that are
+  green when checked just before deletion, after a dry run and a typed confirmation.
+- No new dependency. The only schema change is cc-1's job kind (D-092). The second copy is the backup job of spec `backup` (bk-3), which already
   allows a second WORKING drive as its target.
 - Tests use `tmp_path` and fakes for `volumes.probe` and `metadata.read_metadata`; never `/Volumes`.
-- Real runs (the role change of Backup Plus, every real import) are **[user]** steps.
+- Real runs (the role change of Backup Plus, every real import, every real card clear) are **[user]** steps.
 
 ## Shared definitions
 
@@ -82,6 +82,19 @@ target are skipped (`skipped_dup`, D-036), so a batch is never copied twice.
   - Web, batch of 100: dry run in the Import dialog, then Apply. With bk-3 in: the same with Backup Plus ticked as
     the second drive → those files green.
   - Full card: dry run, then apply. Paste back timings, counts, `sync_method` and the card's tiers.
+
+- [ ] 7. **[stronger]** Safe card clear
+  - ID: cc-1 (D-092; vault-rules 1 and 4 exceptions)
+  - Migration: job kind `card_clear` (items: `src_rel` = the card file, `state` `committed` once deleted,
+    `failed` with the reason). `photovault/card_clear.py`: `plan_clear(conn, cfg, mount) -> dict` (read-only:
+    groups whose every card file is green, the kept files by reason) and `run_clear(conn, cfg, mount, *,
+    confirm: int, emit, should_stop)`. Per group, just before deleting: re-hash each card file (must equal the
+    asset's SHA-256), re-check the qualifying verified copies in the catalog, re-hash one copy on a connected
+    drive. Any surprise stops the run. Deleted card instances → `missing`. Only files under `DCIM/`, only on
+    CARD volumes; never formats.
+  - CLI: `cards clear <mount> [--dry-run] --confirm N` (N must equal the planned file count). Web: `card_clear`
+    with a typed-count confirm; the card shows "Cleared by PhotoVault on <date>".
+  - Verify: `uv run pytest tests/test_card_clear.py -q`
 
 ## Order
 
