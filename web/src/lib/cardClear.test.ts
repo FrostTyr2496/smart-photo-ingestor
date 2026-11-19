@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { confirmMatches, readClearPlan, verifyEstimate } from './cardClear';
+import { clearProgressLine, clearProgressValue } from './cardClear';
 
 describe('readClearPlan', () => {
   it('reads the plan and sorts kept reasons by size', () => {
@@ -53,5 +54,19 @@ describe('verify all copies (cc-2)', () => {
   });
   it('estimates the extra read', () => {
     expect(verifyEstimate({ deletable_bytes: 100, copy_drives: ['A', 'B'] })).toEqual({ bytes: 200, drives: ['A', 'B'] });
+  });
+});
+
+
+describe('clear dry-run progress (cc-2)', () => {
+  it('shows copies and bytes while verifying', () => {
+    const p = { phase: 'verify', current: 412, total: 2233, bytes_done: 9.1e9, bytes_total: 41e9 };
+    expect(clearProgressLine(p)).toMatch(/^Re-reading copies: 412 of 2,233 · /);
+    expect(clearProgressValue(p)).toBeCloseTo(9.1 / 41);
+  });
+  it('is empty before any progress and falls back to the message', () => {
+    expect(clearProgressLine(null)).toBe('');
+    expect(clearProgressValue({ phase: 'plan' })).toBeNull();
+    expect(clearProgressLine({ phase: 'plan', message: 'reading the catalog' })).toBe('Reading the catalog');
   });
 });

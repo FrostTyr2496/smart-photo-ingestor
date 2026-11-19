@@ -2,9 +2,15 @@ import { useEffect, useRef, useState } from 'react';
 import { Field, Modal } from '../components/Modal';
 import { api } from '../lib/api';
 import { fmtBytes, plural } from '../lib/format';
-import { confirmMatches, readClearPlan, verifyEstimate, type ClearPlan } from '../lib/cardClear';
+import { clearProgressLine, clearProgressValue, confirmMatches, readClearPlan, verifyEstimate, type ClearPlan } from '../lib/cardClear';
+import { ProgressBar } from '../components/ProgressBar';
 import { useStore } from '../lib/store';
 import type { TaskDetail } from '../lib/types';
+
+/** Stop a dry run nobody is waiting for (pause = SIGINT; a dry run writes nothing). Errors are ignored: it may have ended. */
+function stopDryRun(id: number): void {
+  api('POST', `/api/tasks/${id}/pause`, {}).catch(() => undefined);
+}
 
 /** Clear a card (cc-1, D-096): a dry run shows what is deleted and what is kept; a typed count starts the real run. */
 export function ClearDialog({ card, onClose }: { card: { mount: string; label: string } | null; onClose: () => void }) {
@@ -13,23 +19,32 @@ export function ClearDialog({ card, onClose }: { card: { mount: string; label: s
   const [error, setError] = useState('');
   const [typed, setTyped] = useState('');
   const [verifyAll, setVerifyAll] = useState(true);
+  const [progress, setProgress] = useState<{ line: string; value: number | null }>({ line: '', value: null });
   const run = useRef(0);
 
   useEffect(() => {
     if (!card) return undefined;
     const mine = ++run.current;
+    let taskId: number | null = null;
     setPlan(null);
     setError('');
     setTyped('');
+    setProgress({ line: '', value: null });
     void (async () => {
       const id = await startTask('card_clear', { mount: card.mount, dry_run: true, verify_all: verifyAll });
       if (!id) return setError('The dry run could not start.');
+      taskId = id;
+      if (run.current !== mine) return stopDryRun(id); // the option changed or the dialog closed while it started
       for (;;) {
         await new Promise((r) => window.setTimeout(r, 700));
         if (run.current !== mine) return undefined;
         try {
           const d = await api<TaskDetail>('GET', `/api/tasks/${id}?since=-1`);
-          if (d.state === 'running') continue;
+          if (d.state === 'running') {
+            const p = (d.latest_progress ?? null) as Parameters<typeof clearProgressLine>[0];
+            setProgress({ line: clearProgressLine(p), value: clearProgressValue(p) });
+            continue;
+          }
           const read = readClearPlan(d.events);
           if (read.plan) setPlan(read.plan);
           else setError(read.error || 'The dry run did not finish.');
@@ -41,6 +56,8 @@ export function ClearDialog({ card, onClose }: { card: { mount: string; label: s
     })();
     return () => {
       run.current += 1;
+      // A superseded dry run would keep re-reading the same drives beside the new one: stop it.
+      if (taskId !== null) stopDryRun(taskId);
     };
   }, [card, verifyAll]); // eslint-disable-line react-hooks/exhaustive-deps (a changed option runs a new dry run)
 
@@ -91,7 +108,14 @@ export function ClearDialog({ card, onClose }: { card: { mount: string; label: s
           </p>
         )}
       </div>
-      {!plan && !error && <div className="card h-24 animate-pulse" />}
+      {!plan && !error && (
+        <div className="rounded-xl border border-line p-3 text-sm">
+          <p className="label mb-1">Dry run · nothing is deleted</p>
+          <p className="text-muted">{progress.line || (verifyAll ? 'Planning, then re-reading every copy…' : 'Planning…')}</p>
+          <ProgressBar value={progress.value} live className="mt-2" />
+          {verifyAll && <p className="mt-1 text-xs text-faint">Re-reading every copy takes a while on hard drives. You can untick the option to bypass it.</p>}
+        </div>
+      )}
       {error && <p className="text-sm text-err">{error}</p>}
       {plan && (
         <div className="flex flex-col gap-3 text-sm">

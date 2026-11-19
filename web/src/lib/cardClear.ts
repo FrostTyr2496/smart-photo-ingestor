@@ -1,3 +1,4 @@
+import { fmtBytes } from './format';
 // Pure helpers for the "Clear card" dialog (cc-1, D-096): read the dry-run plan and check the typed count.
 import type { TaskEvent } from './types';
 
@@ -79,3 +80,22 @@ export function readClearPlan(events: TaskEvent[]): { plan: ClearPlan | null; er
 
 /** The typed confirmation must be exactly the planned file count (digits only, no spaces). */
 export const confirmMatches = (typed: string, count: number): boolean => count > 0 && /^\d+$/.test(typed) && Number(typed) === count;
+
+
+/** A dry run's live progress as one line ("Re-reading copies: 412 of 2,233 · 9.1 GB of 41.0 GB"), or '' before any. */
+export function clearProgressLine(p: { phase?: string; current?: number; total?: number; message?: string; bytes_done?: number; bytes_total?: number } | null | undefined): string {
+  if (!p) return '';
+  if (p.phase === 'verify' && typeof p.current === 'number' && typeof p.total === 'number') {
+    const bytes = typeof p.bytes_done === 'number' && typeof p.bytes_total === 'number' && p.bytes_total > 0 ? ` · ${fmtBytes(p.bytes_done)} of ${fmtBytes(p.bytes_total)}` : '';
+    return `Re-reading copies: ${p.current.toLocaleString('en-US')} of ${p.total.toLocaleString('en-US')}${bytes}`;
+  }
+  return p.message ? p.message.charAt(0).toUpperCase() + p.message.slice(1) : '';
+}
+
+/** Fraction done of a verify pass (bytes when known, else copies), or null before it starts. */
+export function clearProgressValue(p: { phase?: string; current?: number; total?: number; bytes_done?: number; bytes_total?: number } | null | undefined): number | null {
+  if (!p || p.phase !== 'verify') return null;
+  if (typeof p.bytes_done === 'number' && typeof p.bytes_total === 'number' && p.bytes_total > 0) return p.bytes_done / p.bytes_total;
+  if (typeof p.current === 'number' && typeof p.total === 'number' && p.total > 0) return p.current / p.total;
+  return null;
+}
