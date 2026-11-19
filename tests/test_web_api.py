@@ -848,7 +848,7 @@ def test_cards_list_and_ranked_files(srv: Client) -> None:
     assert [(f["rel_path"].rsplit("/", 1)[1], f["tier"]) for f in body["files"]] == [
         ("N.NEF", "only_on_card"), ("P.NEF", "needs_backup")]  # most urgent first
     assert body["files"][1]["copies"] == [{"role": "WORKING", "label": "WORK", "volume_id": "vol-work"}]
-    assert body["files"][1]["reason"] == "Only on WORK, not on a backup drive yet"  # names the drive
+    assert body["files"][1]["reason"] == "On WORK; needs a second working or backup drive"  # names the drive
     assert body["card"]["copies_by_volume"] == [{"volume_id": "vol-work", "label": "WORK", "role": "WORKING",
                                                  "files": 1, "bytes": 50}]
     assert body["card"]["tier"] == "only_on_card"

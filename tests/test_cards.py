@@ -182,6 +182,27 @@ def test_card_turns_green_when_every_file_is_on_master(env, capsys) -> None:
     assert {c["tier"] for c in listing(capsys, env)["cameras"]} == {"backed_up"}
 
 
+def test_two_working_drives_are_green_and_legacy_never_counts(env, capsys) -> None:
+    """D-089: verified on two different WORKING/MASTER drives = green; a LEGACY copy is never the second one."""
+    run(capsys, "cards", "check", str(env["card"]))
+    work2 = env["vols"] / "WORK2"
+    (work2 / "Photos").mkdir(parents=True)
+    src = env["card"] / "DCIM" / "100NZ6_2"
+    for n in (2, 3):  # 2 is already on WORKING, 3 only on LEGACY
+        shutil.copy2(src / f"DSC_{n:04d}.NEF", work2 / "Photos" / f"DSC_{n:04d}.NEF")
+    assert run(capsys, "volumes", "assign", str(work2), "--role", "WORKING", "--label", "WORK2")[0] == 0
+    run(capsys, "index", str(work2))
+    run(capsys, "hash", str(work2))
+    t = tiers(env)
+    assert t["DSC_0002.NEF"] == "backed_up"  # WORK + WORK2
+    assert t["DSC_0003.NEF"] == "needs_backup"  # WORK2 + OLD (LEGACY)
+    c = db.connect(load_config().catalog_path)
+    vid = c.execute("SELECT volume_id FROM volumes WHERE role = 'CARD'").fetchone()[0]
+    reasons = {Path(f["rel_path"]).name: f["reason"] for f in cards.card_files(c, vid, mount=env["card"])}
+    assert "WORK" in reasons["DSC_0002.NEF"] and "WORK2" in reasons["DSC_0002.NEF"]
+    assert "second" in reasons["DSC_0003.NEF"]
+
+
 def test_index_only_ranks_red_without_a_full_read(env, capsys) -> None:
     """After the index (partial hashes) but before the hash: no candidate means red; a candidate means unchecked."""
     c = db.connect(load_config().catalog_path)

@@ -1,10 +1,11 @@
-"""Cards: is each file on a camera card safe to remove? (spec `cards`, D-046, D-048). Read-only on every card.
+"""Cards: is each file on a camera card safe to remove? (spec `cards`, D-046, D-048, D-089). Read-only on every card.
 
 A card file is ranked by where else its bytes live (identity is the full SHA-256, vault-rules 5; a copy on a
 CARD never counts):
 
-- ``backed_up`` (green): a verified copy on a MASTER (backup) drive.
-- ``needs_backup`` (yellow): a verified copy on WORKING (the Mac folder included) or LEGACY, none on MASTER.
+- ``backed_up`` (green): a verified copy on a MASTER (backup) drive, or on two or more different WORKING/MASTER
+  drives (the Mac folder counts as one; D-089).
+- ``needs_backup`` (yellow): any other verified copy: one WORKING drive, or LEGACY drives only.
 - ``only_on_card`` (red): no verified copy anywhere else, or the card could not read the file.
 - ``unchecked`` (grey): not checked yet, or changed since, or its size and partial hash match a hashed file
   elsewhere but its own full hash is not known yet.
@@ -27,6 +28,7 @@ from photovault.index import baseline_hash, index_volume
 from photovault.protocol import Emitter
 from photovault.scan import walk
 
+WRITABLE_ROLES = ("WORKING", "MASTER")  # drives the engine manages; LEGACY never counts toward green (D-089)
 TIERS = ("only_on_card", "unchecked", "needs_backup", "backed_up")  # worst first
 RANK = {t: n for n, t in enumerate(TIERS)}
 EMPTY = "empty"
@@ -100,10 +102,13 @@ def _classify(row: sqlite3.Row) -> tuple[str, str, list[dict]]:
             return "unchecked", f"Looks like a file on {row['candidate']}; check the card to confirm", copies
         return "only_on_card", "No other drive has this file", copies
     masters = [c["label"] for c in copies if c["role"] == "MASTER"]
+    writable = [c["label"] for c in copies if c["role"] in WRITABLE_ROLES]
     if masters:
         return "backed_up", f"On backup drive {_names(masters)}", copies
+    if len(writable) >= 2:  # two different managed drives (D-089); `copies` is already one row per volume
+        return "backed_up", f"On {_names(writable)}", copies
     if copies:
-        return "needs_backup", f"Only on {_names([c['label'] for c in copies])}, not on a backup drive yet", copies
+        return "needs_backup", f"On {_names([c['label'] for c in copies])}; needs a second working or backup drive", copies
     return "only_on_card", "No other drive has this file", copies
 
 

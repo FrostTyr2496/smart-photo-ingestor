@@ -37,8 +37,8 @@ Reference docs:
   APFS HDD, LEGACY) indexed, its hash paused on I/O errors (resume with idx-11); the 12 TB is offline.
 - **Metrics (met-1, D-054):** every CLI command except `serve` records bytes, MB/s and read errors per drive to
   `<home>/metrics.sqlite`; `photovault metrics [--days N]` reports, `metrics backfill` estimates past work.
-- Policy: one verified copy on WORKING = safe to format (D-003). The Cards view's colours are a separate, stricter
-  answer (D-046): green only when a MASTER holds the file.
+- Policy: one verified copy on WORKING = safe to format (D-003). The Cards view's colours are stricter (D-089):
+  green = on a MASTER or on two different WORKING/MASTER drives; yellow ("One copy") = one drive.
 - **Web UI (D-045, specs `docs/specs/ui`, `docs/specs/cards`):** `uv run photovault serve` → 127.0.0.1:8765.
   Drives (with Ignore, ui-9), tasks, a metadata view, a drive summary (ui-7) with copies across drives (ui-8), a
   Cards view (card-3; `cards check <mount>` = index + hash, read-only), and one filter bar for drive and card file
@@ -74,8 +74,9 @@ task's commit:
    Tasks home page, the sidebar groups, drives, cards, a step's Run button (e.g. Hash) and the editor (Photos).
 1. **[user] re-index Big Boy Old** (`uv run photovault index "/Volumes/Big Boy Old"`), then open its drive page.
    Then:
-2. **[user] ing-11:** the first real import (commands in `docs/user/CARD_WORKFLOW.md`), after ing-12, then paste back the
-   timings, `sync_method` and counts.
+2. **Import (spec `docs/specs/import`, D-088..D-091), replaces ing-11's run:** im-1 done; next im-3 (`--limit`), im-2
+   (LEGACY → WORKING for Backup Plus), im-4 (Cards → dry-run plan → apply); then [user] im-5, im-6 with X9 Pro
+   (small batches → web dry run → full card). bk-3 adds the second drive (green in one pass).
 3. **[user] idx-6:** resume the PP 1 hash with `--skip-prefix` on the damaged folder, then run `report duplicates`
    ("If a drive shows I/O errors" in `docs/user/INDEX_WORKFLOW.md`). idx-5 is done except `lrcat mark`.
 4. **Curation (spec `docs/specs/curation`, D-069):** wave 1 is approved and ready: ing-13, idx-9, idx-10, idx-14,
@@ -111,11 +112,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
-- D-087 (agent): sh-3b review lists trips and shoots on connected drives first (toggle to turn off).
-- D-086 (agent): sh-1 planner (gap 8 h, stoplist, volumes per shoot), act-1 engine (12 rules), act-2 pane (doable-now first).
-- D-085 (agent): idx-9 ownerless jobs paused, idx-14 camera stems + ExifTool skip, lr-0 `.acr`; rv-25 filter bar.
-- D-084 (user): Actions, a ranked to-do list separate from Tasks.
-- D-083 (agent): sh-0b time model (`timemodel.py`, body clocks, wall dates, subsec) and sh-3 review mode landed.
+- D-091 (user): import flow: every card listed (unplugged greyed), dry-run plan in the browser, then apply; X9 Pro first.
+- D-090 (user): `ingest --limit N` imports in small batches (first N frames by capture time).
+- D-089 (user): green = on a MASTER or on two different WORKING/MASTER drives; replaces D-046's MASTER-only green.
+- D-088 (user): Backup Plus (exFAT, no conversion) becomes WORKING via an explicit `--change-role`; the 12 TB stays MASTER.
+- D-087 (user): review puts trips with a frame on a connected drive first.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

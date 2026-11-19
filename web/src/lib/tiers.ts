@@ -1,4 +1,4 @@
-// What a card's files are, ranked by where else their bytes are (card-3, D-046). Ported from the earlier plain-JS UI.
+// What a card's files are, ranked by where else their bytes are (card-3, D-046, D-089). Ported from the earlier plain-JS UI.
 import { plural } from './format';
 import { roleLabel } from './labels';
 import type { FilesBytes } from './types';
@@ -9,7 +9,7 @@ export const TIER_ORDER: Tier[] = ['only_on_card', 'unchecked', 'needs_backup', 
 export const TIER: Record<Tier | 'empty', { label: string; pill: string; headline: string }> = {
   only_on_card: { label: 'Only on this card', pill: 'Back up now', headline: 'Back up now.' },
   unchecked: { label: 'Not checked', pill: 'Not checked', headline: 'Not checked yet.' },
-  needs_backup: { label: 'Needs backup', pill: 'Needs backup', headline: 'Needs backup.' },
+  needs_backup: { label: 'One copy', pill: 'One copy', headline: 'One copy only.' },
   backed_up: { label: 'Backed up', pill: 'Safe to remove', headline: 'Safe to remove.' },
   empty: { label: 'Empty', pill: 'Empty', headline: 'No photos on this card.' },
 };
@@ -17,8 +17,8 @@ export const TIER: Record<Tier | 'empty', { label: string; pill: string; headlin
 export const TIER_HINT: Record<Tier | 'empty', string> = {
   only_on_card: 'No other drive has these files. Import or copy them before you format the card.',
   unchecked: 'Check the card to compare it with your other drives. Checking only reads the card.',
-  needs_backup: 'They are on a working or legacy drive, but not on a backup (master) drive yet.',
-  backed_up: 'Every file is on a backup (master) drive.',
+  needs_backup: 'They are on one drive only. Copy them to a second working or backup drive. Format the card now only if you must.',
+  backed_up: 'Every file is on two drives, or on a backup (master) drive.',
   empty: '',
 };
 
@@ -76,12 +76,12 @@ export function cardCopyNames(c: Card, roles?: string[]): string {
 
 export function cardHint(c: Card): string {
   if (c.tier === 'needs_backup') {
-    const on = cardCopyNames(c, ['WORKING', 'LEGACY']);
-    return on ? `They are on ${on}, but not on a backup (master) drive yet.` : TIER_HINT.needs_backup;
+    const on = cardCopyNames(c);
+    return on ? `Some files have one copy, on ${on}. A second working or backup drive makes them safe; format now only if you must.` : TIER_HINT.needs_backup;
   }
   if (c.tier === 'backed_up') {
-    const on = cardCopyNames(c, ['MASTER']);
-    return on ? `Every file is on ${on}.` : TIER_HINT.backed_up;
+    const on = cardCopyNames(c, ['WORKING', 'MASTER']);
+    return on ? `Every file has two copies or a backup copy, on ${on}.` : TIER_HINT.backed_up;
   }
   return TIER_HINT[c.tier];
 }
@@ -90,12 +90,12 @@ export function cardHeadline(c: Card): string {
   if (c.tier === 'only_on_card') return `Back up now: ${plural(c.counts.only_on_card.files, 'file')} only on this card.`;
   if (c.tier === 'unchecked') return `Not checked: ${plural(c.counts.unchecked.files, 'file')} still to compare.`;
   if (c.tier === 'needs_backup') {
-    const on = cardCopyNames(c, ['WORKING', 'LEGACY']);
-    return `Needs backup: ${plural(c.counts.needs_backup.files, 'file')} ${on ? `only on ${on}, ` : ''}not on a backup drive yet.`;
+    const on = cardCopyNames(c);
+    return `One copy: ${plural(c.counts.needs_backup.files, 'file')} ${on ? `only on ${on}` : 'on one drive only'}. Format only if you must.`;
   }
   if (c.tier === 'backed_up') {
-    const on = cardCopyNames(c, ['MASTER']);
-    return `Safe to remove: every file is on ${on ? `backup drive ${on}` : 'a backup drive'}.`;
+    const on = cardCopyNames(c, ['WORKING', 'MASTER']);
+    return `Safe to remove: every file is backed up${on ? ` on ${on}` : ''}.`;
   }
   return TIER.empty.headline;
 }

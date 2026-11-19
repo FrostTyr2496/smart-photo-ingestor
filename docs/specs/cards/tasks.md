@@ -14,6 +14,8 @@ Rules for every task:
 
 Tier of one file on a card (identity is the full hash, vault-rules 5; a CARD copy never counts):
 - `backed_up` (green): a `verified` instance of its asset on a MASTER volume.
+  **Superseded by D-089 (spec `import`, im-1):** also green when verified on two or more different WORKING/MASTER
+  volumes; LEGACY copies never count toward green.
 - `needs_backup` (yellow): a `verified` instance on WORKING (the Mac folder included) or LEGACY, none on MASTER.
 - `only_on_card` (red): no `verified` non-CARD instance; or no hashed asset elsewhere has its size and partial
   hash (then no full match is possible, so no full read is needed); or the card could not read it.

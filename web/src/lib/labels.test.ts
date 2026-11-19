@@ -184,7 +184,7 @@ describe('cards', () => {
   it('words each tier as the original UI did', () => {
     expect(cardHeadline(card('only_on_card', counts(3, 0, 7, 0)))).toBe('Back up now: 3 files only on this card.');
     expect(cardHeadline(card('needs_backup', counts(0, 0, 10, 0), [{ volume_id: 'x', label: 'X9', role: 'WORKING', files: 10, bytes: 0 }]))).toBe(
-      'Needs backup: 10 files only on X9 (Working drive), not on a backup drive yet.',
+      'One copy: 10 files only on X9 (Working drive). Format only if you must.',
     );
     expect(worstTier([{ mounted: true, tier: 'backed_up' }, { mounted: true, tier: 'needs_backup' }, { mounted: false, tier: 'only_on_card' }])).toBe('needs_backup');
     expect(worstTier([{ mounted: false, tier: 'only_on_card' }])).toBeNull();

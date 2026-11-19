@@ -202,7 +202,7 @@ export function splitMessage(message: string | undefined): { stats: string; path
 const TIER_HEAD: Record<string, string> = {
   only_on_card: 'Back up now.',
   unchecked: 'Not checked yet.',
-  needs_backup: 'Needs backup.',
+  needs_backup: 'One copy only.',
   backed_up: 'Safe to remove.',
   empty: 'No photos on this card.',
 };
