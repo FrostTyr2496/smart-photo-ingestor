@@ -81,7 +81,7 @@ Rules for every task:
     `cd web && npm test`.
   - Result (2026-11-18): `photovault/timemodel.py` (`instant`, `instant_info`, `BodyClocks`, `wall_clock`); `geo.group_utc`, `suggest`, `session_of`, `clock.suggest_offsets` and `meta scan` follow the instant. `/api/groups` rows carry `time_provenance`, `time_correction_s`, `time_user_shift`, `wall_time`, `wall_date`; `/api/photo-days` and the `day` filter use the wall date. `GET/POST /api/body-clock` and `POST /api/body-clock/<id>/delete`; the banner's Apply writes a row (suggestions carry `start_utc`/`end_utc`). `subsec` is stored by ingest, index and `meta scan`, and `vault_name` uses it. 594 passed, 9 skipped; web 71 tests.
 
-- [ ] 2. **[stronger]** The planner, calibrated on the real catalog
+- [x] 2. **[stronger]** The planner, calibrated on the real catalog
   - ID: sh-1 (after sh-0b). _Design:_ review §3–4.
   - `photovault/shoots.py` `plan(conn, *, gap_h=8, split_km=50, merge_h=36, region_km=300, frm=None, to=None) -> dict`
     in the format above. It is pure and writes nothing.
@@ -95,6 +95,7 @@ Rules for every task:
     the real catalog, with the report in `docs/private/`. The default `gap_h` follows the result.
   - Verify: `uv run pytest tests/test_shoots.py -q` on synthetic timelines (a night crossing midnight, a trip, a move of
     more than 50 km, two bodies, a locked shoot, a decision replayed after a re-plan).
+  - Result (2026-11-18): `photovault/shoots.py` (`plan`, `calibrate`, `write_plan`); 27 tests in `tests/test_shoots.py`. Calibration on the real catalog (65,194 frames, 17 date-prefixed folders as truth; recall counts a folder's start and end edges): gap_h 4 / 6 / 8 / 12 gave 207 / 188 / 182 / 169 shoots, precision 0.54 / 0.55 / 0.58 / 0.59, recall 0.79 / 0.72 / 0.72 / 0.72, folders kept whole 7 / 8 / 8 / 8 of 17 (the rest are multi-day folders, i.e. trips). Default `gap_h` stays 8. A real plan: 182 shoots, 36 trips, 135 flagged, 30 `local_offset` proposals, 2.3 s, 115 MB.
 
 - [ ] 3. `shoots plan` CLI and the plan API
   - ID: sh-2 (after sh-1).

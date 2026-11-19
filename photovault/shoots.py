@@ -1,0 +1,687 @@
+"""The shoot planner (sh-1, D-080; review `docs/reviews/2026-11-18-sh-0-shoot-tagging.md` §§3-4).
+
+`plan` reads the catalog and returns a dry-run proposal of trips and shoots in the plan-file format of
+`docs/specs/shoots/tasks.md`; it writes nothing. `calibrate` scores the boundary step against the date-prefixed
+folders. `write_plan` is the only writer, and it writes one JSON file under ``<home>/plans``.
+
+Every comparison uses the instant (`timemodel`); the wall clock gives the shoot date, display and names.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import math
+import re
+import sqlite3
+import unicodedata
+from bisect import bisect_left, bisect_right
+from collections import Counter
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+from . import naming
+from .catalog import repo
+from .timemodel import BodyClocks, instant_info, offset_tz
+
+PHONE_SOURCES = ("iphone", "ipad", "glasses")
+PHONE_MATCH_S = 2 * 3600
+SPAN_PAD_S = 1800
+QUICK_GAP_S = 900          # never split between frames closer than this
+SPLIT_GAP_S = 3600         # a location split needs a gap above this
+
+_DATED_RE = re.compile(r"^(\d{4})[-_.]?(\d{2})[-_.]?(\d{2})\s*[-–—_.:]*\s*(.+)$")
+_BARE_DATE_RE = re.compile(r"^\d{4}([-_. ]?\d{2}){0,2}$")
+_BUILTIN_STOP = [
+    re.compile(p, re.I) for p in (
+        r"^dcim$", r"^\d{3}nc\w+$", r"^\d{3}[a-z]{3}\w*$", r"^card\s*\d*$", r"^card export$", r"^camera imports?$",
+        r"^imports?$", r"^exports?$", r"^raw$", r"^selected$", r"^selects?$", r"^photos?$", r"^pictures$",
+        r"^100apple$", r"^misc$")
+]
+
+
+# ---------------------------------------------------------------- small helpers
+
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    a = math.sin((p2 - p1) / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(math.radians(lon2 - lon1) / 2) ** 2
+    return 6371.0 * 2 * math.asin(min(1.0, math.sqrt(a)))
+
+
+def clean_name(text: str) -> str:
+    """Drop private-use and control glyphs, normalise to NFC, collapse spaces."""
+    text = unicodedata.normalize("NFC", text)
+    text = "".join(c for c in text if unicodedata.category(c) not in ("Co", "Cc", "Cf", "Cs", "Cn"))
+    return re.sub(r"\s+", " ", text).strip(" -_.,")
+
+
+def _sha(prefix: str, first: int, last: int) -> str:
+    return prefix + hashlib.sha1(f"{first}-{last}".encode()).hexdigest()[:16]
+
+
+def _mode(values) -> Any:
+    c = Counter(v for v in values if v)
+    return c.most_common(1)[0][0] if c else None
+
+
+def _fmt_off(seconds: int) -> str:
+    sign = "+" if seconds >= 0 else "-"
+    seconds = abs(seconds)
+    return f"{sign}{seconds // 3600:02d}:{seconds % 3600 // 60:02d}"
+
+
+def _is_container(name: str, stop: set[str]) -> bool:
+    low = name.lower()
+    return (low in stop or _BARE_DATE_RE.match(name) is not None or any(p.match(name) for p in _BUILTIN_STOP)
+            or not any(ch.isalpha() for ch in name))
+
+
+def folder_info(rel_path: str | None, stop: set[str]) -> tuple[tuple[str, str] | None, list[str]]:
+    """``(dated, humans)`` for a path: the deepest ``YYYYMMDD - Name`` folder as ``(path-key, name)``, and the other
+    human folder names (deepest first) that are not containers or stoplisted."""
+    if not rel_path:
+        return None, []
+    parts = [clean_name(p) for p in rel_path.split("/")[:-1]]
+    dated = None
+    humans: list[str] = []
+    for i in range(len(parts) - 1, -1, -1):
+        part = parts[i]
+        if not part:
+            continue
+        m = _DATED_RE.match(part)
+        if m and any(ch.isalpha() for ch in m.group(4)):
+            if dated is None:
+                dated = ("/".join(parts[:i + 1]), clean_name(m.group(4)))
+            continue
+        if not _is_container(part, stop):
+            humans.append(part)
+    return dated, humans
+
+
+# ---------------------------------------------------------------- loading
+
+class Item:
+    __slots__ = ("gid", "when", "ts", "body", "seq", "locked", "shoot_id", "cap", "off", "rel", "lat", "lon",
+                 "city", "state", "place", "dated", "humans")
+
+
+class Phone:
+    """Phone points as parallel arrays, for nearest-in-time lookups."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        marks = ",".join("?" * len(PHONE_SOURCES))
+        rows = conn.execute(
+            f"SELECT utc_time, lat, lon, local_offset, place_name, city, state, country FROM geo_points "
+            f"WHERE source IN ({marks})", PHONE_SOURCES).fetchall()
+        pts = []
+        for r in rows:
+            try:
+                t = datetime.fromisoformat(r["utc_time"])
+            except ValueError:
+                continue
+            if t.tzinfo is None:
+                t = t.replace(tzinfo=UTC)
+            pts.append((t.timestamp(), r["lat"], r["lon"], r["local_offset"], r["place_name"], r["city"],
+                        r["state"], r["country"]))
+        pts.sort(key=lambda p: p[0])
+        self.pts = pts
+        self.ts = [p[0] for p in pts]
+        self.home = _mode(p[3] for p in pts)
+
+    def nearest(self, ts: float, within_s: float = PHONE_MATCH_S):
+        if not self.ts:
+            return None
+        i = bisect_left(self.ts, ts)
+        best, best_d = None, within_s + 1
+        for j in (i - 1, i):
+            if 0 <= j < len(self.ts) and abs(self.ts[j] - ts) < best_d:
+                best, best_d = self.pts[j], abs(self.ts[j] - ts)
+        return best if best_d <= within_s else None
+
+    def span(self, lo: float, hi: float):
+        return self.pts[bisect_left(self.ts, lo - SPAN_PAD_S):bisect_right(self.ts, hi + SPAN_PAD_S)]
+
+
+def _stoplist(conn: sqlite3.Connection, extra: list[str] | None = None) -> set[str]:
+    raw = repo.get_setting(conn, "shoot_name_stoplist", "[]")
+    try:
+        items = json.loads(raw) if raw else []
+    except ValueError:
+        items = []
+    return {clean_name(str(x)).lower() for x in [*items, *(extra or [])]}
+
+
+def load_items(conn: sqlite3.Connection, stop: set[str], phone: Phone) -> tuple[list[Item], int]:
+    """All groups with a capture time, sorted by instant, plus the count without one."""
+    default_offset = repo.get_setting(conn, "default_offset", "+00:00")
+    clocks = BodyClocks.load(conn)
+    nickname = {r["body_id"]: r["nickname"] for r in conn.execute("SELECT body_id, nickname FROM bodies")}
+    cur = conn.execute(
+        """SELECT g.group_id, g.body_id, g.capture_time, g.capture_offset, g.shoot_id, g.sequence_id,
+                  COALESCE(m.time_shift_s, 0) AS time_shift_s, m.lat, m.lon, m.city, m.state, m.place_name,
+                  i.rel_path, (v.role = 'WORKING') AS working
+           FROM capture_groups g
+           LEFT JOIN group_meta m ON m.group_id = g.group_id
+           LEFT JOIN assets a ON a.group_id = g.group_id AND a.group_role = 'primary'
+           LEFT JOIN instances i ON i.asset_id = a.asset_id AND i.state IN ('indexed', 'verified')
+           LEFT JOIN volumes v ON v.volume_id = i.volume_id
+           ORDER BY g.group_id""")
+    items: dict[int, Item] = {}
+    best_pref: dict[int, int] = {}
+    unplaced = 0
+    seen_none: set[int] = set()
+    for r in cur:
+        gid = r["group_id"]
+        it = items.get(gid)
+        if it is None:
+            if gid in seen_none:
+                continue
+            info = instant_info(r, default_offset, clocks)
+            if info is None:
+                seen_none.add(gid)
+                unplaced += 1
+                continue
+            it = Item()
+            it.gid, it.when, it.ts = gid, info.when, info.when.timestamp()
+            it.body = nickname.get(r["body_id"]) or "?"
+            it.seq, it.shoot_id, it.cap, it.off = r["sequence_id"], r["shoot_id"], r["capture_time"], r["capture_offset"]
+            it.locked = r["shoot_id"] is not None
+            it.rel = None
+            it.city, it.state, it.place = r["city"], r["state"], r["place_name"]
+            if r["lat"] is not None and r["lon"] is not None:
+                it.lat, it.lon = r["lat"], r["lon"]
+            else:
+                p = phone.nearest(it.ts)
+                it.lat, it.lon = (p[1], p[2]) if p else (None, None)
+            it.dated, it.humans = None, []
+            items[gid] = it
+            best_pref[gid] = -1
+        if r["rel_path"] is not None and (pref := 2 if r["working"] else 1) > best_pref[gid]:
+            best_pref[gid] = pref
+            it.rel = r["rel_path"]
+    out = sorted(items.values(), key=lambda x: (x.ts, x.gid))
+    for it in out:
+        it.dated, it.humans = folder_info(it.rel, stop)
+    return out, unplaced
+
+
+# ---------------------------------------------------------------- boundaries
+
+def segments(items: list[Item], gap_h: float, split_km: float) -> list[tuple[int, int]]:
+    """Index ranges ``(lo, hi)`` inclusive of the shoots, over a time-sorted item list."""
+    n = len(items)
+    if not n:
+        return []
+    gap_s = gap_h * 3600
+
+    def same_seq(k: int) -> bool:
+        return items[k].seq is not None and items[k].seq == items[k + 1].seq
+
+    cands: list[tuple[int, int]] = []
+    lo = 0
+    for k in range(n - 1):
+        if items[k + 1].ts - items[k].ts >= gap_s and not same_seq(k):
+            cands.append((lo, k))
+            lo = k + 1
+    cands.append((lo, n - 1))
+
+    out: list[tuple[int, int]] = []
+    for a, b in cands:
+        start = a
+        last = None  # index of the previous located item in this candidate
+        for j in range(a, b + 1):
+            if items[j].lat is None:
+                continue
+            if last is not None and haversine_km(items[last].lat, items[last].lon, items[j].lat, items[j].lon) > split_km:
+                best, best_gap = None, 0.0
+                for k in range(max(last, start), j):
+                    g = items[k + 1].ts - items[k].ts
+                    if g > SPLIT_GAP_S and g >= QUICK_GAP_S and g > best_gap and not same_seq(k):
+                        best, best_gap = k, g
+                if best is not None:
+                    out.append((start, best))
+                    start = best + 1
+            last = j
+        out.append((start, b))
+    return out
+
+
+# ---------------------------------------------------------------- shoot building
+
+def _evenly(seq: list, n: int) -> list:
+    if len(seq) <= n:
+        return list(seq)
+    return [seq[round(i * (len(seq) - 1) / (n - 1))] for i in range(n)]
+
+
+def _max_extent_km(pts: list[tuple[float, float]]) -> float:
+    if len(pts) < 2:
+        return 0.0
+    pts = _evenly(pts, 200)
+    far = max(pts, key=lambda p: haversine_km(pts[0][0], pts[0][1], p[0], p[1]))
+    return max(haversine_km(far[0], far[1], p[0], p[1]) for p in pts)
+
+
+def _part_of_day(hour: int) -> str:
+    return "morning" if 5 <= hour < 12 else "afternoon" if 12 <= hour < 17 else "evening" if 17 <= hour < 22 else "night"
+
+
+def _build_shoot(items: list[Item], lo: int, hi: int, phone: Phone, default_offset: str,
+                 stop: set[str], rejected: set[str]) -> dict:
+    seg = items[lo:hi + 1]
+    first, last = seg[0], seg[-1]
+    camera_off = _mode(i.off for i in seg) or default_offset
+    pts_phone = phone.span(first.ts, last.ts)
+
+    # local_offset proposal
+    offs = [p[3] for p in pts_phone if p[3]]
+    proposal = None
+    tz_change = False
+    if offs:
+        top, count = Counter(offs).most_common(1)[0]
+        if count / len(offs) >= 0.8 and top != camera_off:
+            try:
+                same = offset_tz(top).utcoffset(None) == offset_tz(camera_off).utcoffset(None)
+            except ValueError:
+                same = False
+            proposal = None if same else top
+        shares = Counter(offs)
+        if proposal or sum(1 for v in shares.values() if v / len(offs) >= 0.2) >= 2:
+            tz_change = True
+    wall_off = proposal or camera_off
+    tz = offset_tz(wall_off) if proposal else offset_tz(camera_off)
+
+    def wall(it: Item) -> datetime:
+        if proposal:
+            return it.when.astimezone(tz).replace(tzinfo=None)
+        return datetime.fromisoformat(str(it.cap)[:19])
+
+    w0, w1 = wall(first), wall(last)
+    iso_off = _fmt_off(int(tz.utcoffset(None).total_seconds()))
+
+    located = [(i.lat, i.lon) for i in seg if i.lat is not None]
+    centroid = ({"lat": sum(p[0] for p in located) / len(located), "lon": sum(p[1] for p in located) / len(located)}
+                if located else None)
+    gaps = sorted(((seg[k + 1].ts - seg[k].ts, seg[k].gid) for k in range(len(seg) - 1)), reverse=True)[:20]
+    gaps = [{"after_group_id": g, "gap_s": int(s)} for s, g in gaps if s > 0]
+    by_body = Counter(i.body for i in seg)
+
+    # flags
+    flags: list[str] = []
+    if _max_extent_km(located) > 25:
+        flags.append("multi_place")
+    if tz_change:
+        flags.append("tz_change")
+    med = {}
+    for body in by_body:
+        ts = sorted(i.ts for i in seg if i.body == body)
+        if len(ts) >= 3:
+            med[body] = ts[len(ts) // 2]
+    names = sorted(med)
+    mismatch = False
+    for x in range(len(names)):
+        for y in range(x + 1, len(names)):
+            d = abs(med[names[x]] - med[names[y]])
+            if d >= 3000 and abs(d - round(d / 3600) * 3600) <= 300:
+                mismatch = True
+    if mismatch:
+        flags.append("body_clock_mismatch")
+    if len(seg) >= 1000:
+        ds = sorted(seg[k + 1].ts - seg[k].ts for k in range(len(seg) - 1))
+        if ds and ds[len(ds) // 2] <= 10:
+            flags.append("huge_timelapse")
+
+    # names, best first
+    cands: list[tuple[str, str]] = []
+    dated_counts = Counter(i.dated[1] for i in seg if i.dated)
+    if dated_counts:
+        nm, c = dated_counts.most_common(1)[0]
+        if c / len(seg) >= 0.5:
+            cands.append((nm, "folder"))
+    place = _mode([*(p[4] for p in pts_phone), *(i.place for i in seg)])
+    city = _mode([*(p[5] for p in pts_phone), *(i.city for i in seg)])
+    if place:
+        cands.append((clean_name(place), "phone"))
+    if city:
+        cands.append((clean_name(city), "phone"))
+    other = Counter(h for i in seg for h in i.humans[:1])
+    cands += [(h, "folder_other") for h, _ in other.most_common(3)]
+    cands += [(nm, "folder_other") for nm, _ in dated_counts.most_common(3) if (nm, "folder") not in cands]
+    shoot_date = naming.shoot_date(w0).isoformat()
+    cands.append((f"{shoot_date} · {first.body}", "fallback"))
+    seen: set[str] = set()
+    uniq: list[tuple[str, str]] = []
+    for value, src in cands:
+        low = value.lower()
+        if not value or low in seen or low in rejected or (src == "folder_other" and low in stop):
+            continue
+        seen.add(low)
+        uniq.append((value, src))
+    if not uniq:
+        uniq = [(f"{shoot_date} · {first.body}", "fallback")]
+    top_val, top_src = uniq[0]
+    weak = top_src in ("fallback", "folder_other")
+    if weak:
+        flags.append("weak_name")
+    export = lambda s: "folder" if s == "folder_other" else s  # noqa: E731
+    name = {"value": top_val, "source": export(top_src),
+            "alternatives": [{"value": v, "source": export(s)} for v, s in uniq[1:]]}
+
+    gids = [i.gid for i in seg]
+    return {
+        "proposal_id": _sha("s:", gids[0], gids[-1]), "trip_id": None, "name": name,
+        "shoot_date": shoot_date,
+        "start_instant": first.when.isoformat(timespec="seconds"), "end_instant": last.when.isoformat(timespec="seconds"),
+        "wall": {"start": w0.isoformat() + iso_off, "end": w1.isoformat() + iso_off},
+        "local_offset": ({"value": proposal, "camera": camera_off, "source": "phone", "changes": True} if proposal
+                         else {"value": camera_off, "camera": camera_off, "source": "camera", "changes": False}),
+        "group_ids": gids,
+        "counts": {"frames": len(seg), "by_body": dict(by_body), "located": len(located)},
+        "sample_group_ids": [g for g in _evenly(gids, 12)],
+        "centroid": centroid,
+        "points": [[round(a, 5), round(b, 5)] for a, b in _evenly(located, 50)],
+        "gaps": gaps, "flags": flags, "locked": False,
+        # private bookkeeping, removed before output
+        "_phone_off": _mode(offs), "_state": _mode(p[6] for p in pts_phone) or _mode(i.state for i in seg),
+        "_country": _mode(p[7] for p in pts_phone), "_humans": {h for i in seg for h in i.humans},
+        "_t0": first.ts, "_t1": last.ts, "_w0": w0, "_w1": w1, "_body": first.body,
+    }
+
+
+def _locked_shoots(conn: sqlite3.Connection, items: list[Item]) -> list[dict]:
+    meta = {r["shoot_id"]: r for r in conn.execute("SELECT * FROM shoots")}
+    by: dict[int, list[Item]] = {}
+    for it in items:
+        if it.locked:
+            by.setdefault(it.shoot_id, []).append(it)
+    out = []
+    for sid, seg in by.items():
+        r = meta.get(sid)
+        gids = [i.gid for i in seg]
+        by_body = Counter(i.body for i in seg)
+        located = [(i.lat, i.lon) for i in seg if i.lat is not None]
+        lo = r["local_offset"] if r is not None and "local_offset" in r.keys() else None
+        cam = _mode(i.off for i in seg) or "+00:00"
+        out.append({
+            "proposal_id": _sha("s:", gids[0], gids[-1]), "trip_id": None,
+            "name": {"value": r["name"] if r else f"shoot {sid}",
+                     "source": (r["name_source"] if r is not None and r["name_source"] else "user"), "alternatives": []},
+            "shoot_date": r["shoot_date"] if r else str(seg[0].cap)[:10],
+            "start_instant": seg[0].when.isoformat(timespec="seconds"), "end_instant": seg[-1].when.isoformat(timespec="seconds"),
+            "wall": {"start": str(seg[0].cap)[:19], "end": str(seg[-1].cap)[:19]},
+            "local_offset": {"value": lo or cam, "camera": cam, "source": "shoot" if lo else "camera", "changes": False},
+            "group_ids": gids,
+            "counts": {"frames": len(seg), "by_body": dict(by_body), "located": len(located)},
+            "sample_group_ids": _evenly(gids, 12),
+            "centroid": ({"lat": sum(p[0] for p in located) / len(located), "lon": sum(p[1] for p in located) / len(located)}
+                         if located else None),
+            "points": [[round(a, 5), round(b, 5)] for a, b in _evenly(located, 50)],
+            "gaps": [], "flags": [], "locked": True, "_t0": seg[0].ts, "_t1": seg[-1].ts,
+        })
+    return out
+
+
+# ---------------------------------------------------------------- trips
+
+def _date_range(d0: str, d1: str) -> str:
+    a, b = datetime.fromisoformat(d0), datetime.fromisoformat(d1)
+    if a == b:
+        return f"{a.day} {a:%b}"
+    if a.year != b.year:
+        return f"{a.day} {a:%b %Y}–{b.day} {b:%b %Y}"
+    if a.month != b.month:
+        return f"{a.day} {a:%b}–{b.day} {b:%b}"
+    return f"{a.day}–{b.day} {a:%b}"
+
+
+def _make_trips(shoots: list[dict], phone: Phone, merge_h: float, region_km: float) -> list[list[dict]]:
+    groups: list[list[dict]] = []
+    cur: list[dict] = []
+    for s in shoots:
+        if cur:
+            p = cur[-1]
+            ok = s["_t0"] - p["_t1"] <= merge_h * 3600
+            if ok:
+                near = (s["centroid"] and p["centroid"]
+                        and haversine_km(s["centroid"]["lat"], s["centroid"]["lon"], p["centroid"]["lat"],
+                                         p["centroid"]["lon"]) <= region_km)
+                away = (phone.home and s["_phone_off"] and p["_phone_off"]
+                        and s["_phone_off"] != phone.home and p["_phone_off"] != phone.home)
+                shared = bool(s["_humans"] & p["_humans"])
+                ok = bool(near or away or shared)
+            if ok:
+                cur.append(s)
+                continue
+            groups.append(cur)
+        cur = [s]
+    if cur:
+        groups.append(cur)
+    return [g for g in groups if len(g) >= 2]
+
+
+def _trip_dict(members: list[dict], pid: str | None = None) -> dict:
+    d0, d1 = members[0]["shoot_date"], max(s["shoot_date"] for s in members)
+    rng = _date_range(d0, d1)
+    region = _mode(s.get("_state") for s in members) or _mode(s.get("_country") for s in members)
+    first_gid, last_gid = members[0]["group_ids"][0], members[-1]["group_ids"][-1]
+    name = ({"value": f"{clean_name(region)} · {rng}", "source": "phone",
+             "alternatives": [{"value": f"{d0} trip", "source": "fallback"}]} if region
+            else {"value": f"{d0} trip", "source": "fallback", "alternatives": []})
+    return {"proposal_id": pid or _sha("t:", first_gid, last_gid), "name": name, "start_date": d0, "end_date": d1,
+            "shoot_ids": [s["proposal_id"] for s in members], "flags": []}
+
+
+# ---------------------------------------------------------------- decisions
+
+def _decisions(conn: sqlite3.Connection) -> list[dict]:
+    try:
+        rows = conn.execute(
+            "SELECT proposal_id, kind, payload_json FROM shoot_plan_decisions ORDER BY decision_id").fetchall()
+    except sqlite3.OperationalError:
+        return []
+    out = []
+    for r in rows:
+        try:
+            payload = json.loads(r["payload_json"] or "{}")
+        except ValueError:
+            payload = {}
+        out.append({"id": r["proposal_id"], "kind": r["kind"], **(payload if isinstance(payload, dict) else {})})
+    return out
+
+
+def _replay_structure(items: list[Item], segs: list[tuple[int, int]], decisions: list[dict]) -> list[tuple[int, int]]:
+    pos = {it.gid: k for k, it in enumerate(items)}
+    segs = list(segs)
+
+    def find(pid: str) -> int | None:
+        for idx, (a, b) in enumerate(segs):
+            if _sha("s:", items[a].gid, items[b].gid) == pid:
+                return idx
+        return None
+
+    for d in decisions:
+        idx = find(d["id"]) if str(d["id"]).startswith("s:") else None
+        if idx is None:
+            continue
+        a, b = segs[idx]
+        if d["kind"] == "split":
+            k = pos.get(d.get("after_group_id"))
+            if k is not None and a <= k < b:
+                segs[idx:idx + 1] = [(a, k), (k + 1, b)]
+        elif d["kind"] == "merge":
+            other = idx - 1 if d.get("with") == "prev" else idx + 1
+            if 0 <= other < len(segs) and segs[min(idx, other)][1] + 1 == segs[max(idx, other)][0]:
+                lo, hi = min(idx, other), max(idx, other)
+                segs[lo:hi + 1] = [(segs[lo][0], segs[hi][1])]
+    return segs
+
+
+# ---------------------------------------------------------------- plan
+
+def plan(conn: sqlite3.Connection, *, gap_h: float = 8, split_km: float = 50, merge_h: float = 36,
+         region_km: float = 300, frm: str | None = None, to: str | None = None,
+         now: datetime | None = None) -> dict:
+    """A dry-run proposal of trips and shoots in the plan-file format. Pure: reads the catalog, writes nothing."""
+    now = now or datetime.now(UTC)
+    default_offset = repo.get_setting(conn, "default_offset", "+00:00")
+    decisions = _decisions(conn)
+    rejected = {clean_name(str(d.get("value", ""))).lower() for d in decisions if d["kind"] == "reject_name"}
+    stop = _stoplist(conn, [d.get("value", "") for d in decisions if d["kind"] == "reject_name"])
+    phone = Phone(conn)
+    items, unassigned = load_items(conn, stop, phone)
+    if frm:
+        items = [i for i in items if str(i.cap)[:10] >= frm]
+    if to:
+        items = [i for i in items if str(i.cap)[:10] <= to]
+    total_frames = len(items)
+
+    locked_items = [i for i in items if i.locked]
+    free = [i for i in items if not i.locked]
+    segs = _replay_structure(free, segments(free, gap_h, split_km), decisions)
+    shoots = [_build_shoot(free, a, b, phone, default_offset, stop, rejected) for a, b in segs]
+
+    # one name per date: suffix duplicates with the part of the day, then a number
+    def dupes() -> Counter:
+        return Counter((s["shoot_date"], s["name"]["value"].lower()) for s in shoots)
+
+    for s in shoots:
+        if dupes()[(s["shoot_date"], s["name"]["value"].lower())] > 1:
+            s["name"]["value"] += f" · {_part_of_day(s['_w0'].hour)}"
+    count: Counter = Counter()
+    for s in shoots:
+        key = (s["shoot_date"], s["name"]["value"].lower())
+        count[key] += 1
+        if dupes()[key] > 1 and count[key] > 1:
+            s["name"]["value"] += f" {count[key]}"
+
+    shoots += _locked_shoots(conn, locked_items)
+    shoots.sort(key=lambda s: (s["_t0"], s["proposal_id"]))
+
+    unlocked = [s for s in shoots if not s["locked"]]
+    trip_groups = _make_trips(unlocked, phone, merge_h, region_km)
+    trips = [_trip_dict(g) for g in trip_groups]
+    by_id = {s["proposal_id"]: s for s in shoots}
+    for t in trips:
+        for sid in t["shoot_ids"]:
+            by_id[sid]["trip_id"] = t["proposal_id"]
+    trip_by_id = {t["proposal_id"]: t for t in trips}
+
+    # decisions on top
+    for d in decisions:
+        s, t = by_id.get(d["id"]), trip_by_id.get(d["id"])
+        kind = d["kind"]
+        if kind == "move" and s is not None and not s["locked"]:
+            target = d.get("trip_id")
+            if target is not None and target not in trip_by_id:
+                continue
+            if s["trip_id"]:
+                trip_by_id[s["trip_id"]]["shoot_ids"].remove(s["proposal_id"])
+            s["trip_id"] = target
+            if target:
+                trip_by_id[target]["shoot_ids"].append(s["proposal_id"])
+        elif kind == "rename" and str(d.get("value", "")).strip():
+            value = clean_name(str(d["value"]))
+            tgt = s or t
+            if tgt is not None and not tgt.get("locked"):
+                old = tgt["name"]
+                alts = [{"value": old["value"], "source": old["source"]}, *old["alternatives"]]
+                tgt["name"] = {"value": value, "source": d.get("source") or "user",
+                               "alternatives": [a for a in alts if a["value"] != value]}
+                if s is not None and "weak_name" in s["flags"]:
+                    s["flags"].remove("weak_name")
+        elif kind == "accept" and (s is not None and not s["locked"]):
+            s["state"] = "accepted"
+        elif kind == "skip" and (s is not None and not s["locked"]):
+            s["state"] = "skipped"
+    for t in trips:
+        members = sorted((by_id[i] for i in t["shoot_ids"]), key=lambda s: s["_t0"])
+        t["shoot_ids"] = [m["proposal_id"] for m in members]
+        if members:
+            t["start_date"] = members[0]["shoot_date"]
+            t["end_date"] = max(m["shoot_date"] for m in members)
+    trips = [t for t in trips if t["shoot_ids"]]
+
+    for s in shoots:
+        for k in [k for k in s if k.startswith("_")]:
+            del s[k]
+    flagged = sum(1 for s in shoots if s["flags"])
+    plan_id = "shoots-" + now.strftime("%Y%m%d-%H%M%S")
+    return {
+        "plan_id": plan_id, "created_at": now.isoformat(timespec="seconds"),
+        "params": {"gap_h": gap_h, "split_km": split_km, "merge_h": merge_h, "region_km": region_km,
+                   "from": frm, "to": to},
+        "summary": {"frames": total_frames, "shoots": len(shoots), "trips": len(trips), "unassigned": unassigned,
+                    "locked": sum(1 for s in shoots if s["locked"]), "flagged": flagged},
+        "trips": trips, "shoots": shoots,
+    }
+
+
+def write_plan(conn: sqlite3.Connection, home: Path, **kw: Any) -> Path:
+    """Run `plan` and write it to ``<home>/plans/<plan_id>.json``. The only writer here."""
+    result = plan(conn, **kw)
+    folder = Path(home) / "plans"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{result['plan_id']}.json"
+    path.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
+    return path
+
+
+# ---------------------------------------------------------------- calibration
+
+def calibrate(conn: sqlite3.Connection, gap_values=(4, 6, 8, 12), split_km: float = 50) -> dict:
+    """Score the boundary step against the frames under date-prefixed human folders (the ground truth)."""
+    phone = Phone(conn)
+    stop = _stoplist(conn)
+    items, _ = load_items(conn, stop, phone)
+    items = [i for i in items if not i.locked]
+    labels = [i.dated[0] if i.dated else None for i in items]
+    n = len(items)
+    truth = {k for k in range(1, n) if labels[k - 1] != labels[k] and (labels[k - 1] or labels[k])}
+    folders = {lab for lab in labels if lab}
+    # a folder's edges: just before its first frame and just after its last (the interleaving of folders with
+    # other frames inside its extent is not an edge, so recall is not diluted by it)
+    first_at: dict[str, int] = {}
+    last_at: dict[str, int] = {}
+    for k, lab in enumerate(labels):
+        if lab:
+            first_at.setdefault(lab, k)
+            last_at[lab] = k
+    edges = {e for lab in folders for e in (first_at[lab], last_at[lab] + 1) if 0 < e < n}
+    results = []
+    for gap in gap_values:
+        segs = segments(items, gap, split_km)
+        starts = [a for a, _ in segs[1:]]
+        evaluable = [k for k in starts if labels[k - 1] or labels[k] or (k - 2 >= 0 and labels[k - 2])
+                     or (k + 1 < n and labels[k + 1])]
+        correct = [k for k in evaluable if any(j in truth for j in (k - 1, k, k + 1))]
+        start_set = set(starts)
+        hit = [t for t in edges if any(j in start_set for j in (t - 1, t, t + 1))]
+        raw_hit = [t for t in truth if any(j in start_set for j in (t - 1, t, t + 1))]
+        seg_of = [0] * n
+        for si, (a, b) in enumerate(segs):
+            for k in range(a, b + 1):
+                seg_of[k] = si
+        folder_segs: dict[str, set[int]] = {}
+        seg_folders: dict[int, set[str]] = {}
+        for k, lab in enumerate(labels):
+            if lab:
+                folder_segs.setdefault(lab, set()).add(seg_of[k])
+                seg_folders.setdefault(seg_of[k], set()).add(lab)
+        whole = split = merged = 0
+        for lab, ss in folder_segs.items():
+            if len(ss) > 1:
+                split += 1
+            else:
+                whole += 1
+            if any(len(seg_folders[s]) > 1 for s in ss):
+                merged += 1
+        results.append({
+            "gap_h": gap, "shoots": len(segs), "boundaries": len(starts), "evaluable": len(evaluable),
+            "correct": len(correct), "precision": round(len(correct) / len(evaluable), 3) if evaluable else None,
+            "truth_boundaries": len(edges), "recalled": len(hit),
+            "recall": round(len(hit) / len(edges), 3) if edges else None,
+            "label_changes": len(truth), "label_changes_hit": len(raw_hit),
+            "folders": len(folders), "folders_whole": whole, "folders_split": split, "folders_merged": merged,
+        })
+    return {"frames": n, "ground_truth_folders": len(folders), "split_km": split_km, "results": results}
