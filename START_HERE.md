@@ -75,8 +75,9 @@ task's commit:
 1. **[user] re-index Big Boy Old** (`uv run photovault index "/Volumes/Big Boy Old"`), then open its drive page.
    Then:
 2. **Import (spec `docs/specs/import`, D-088..D-091, D-096):** im-1..im-4 and cc-1 (safe card clear, schema V8) done; card-4 (card check skips full reads of files with no copy) done.
-   bk-3 done (`backup --card ... --follow <job>`, `backup --from-folder`; the Import dialog's Second drive is live, D-104). Next
-   agent tasks: im-7 (dry-run tree, D-102), rec-1 (target recommendations, D-103).
+   bk-3 done (`backup --card ... --follow <job>`, `backup --from-folder`; the Import dialog's Second drive is live, D-104) and
+   rec-1 done (`GET /api/cards/<id>/targets`; the dialog pre-selects the pair, actions name it, D-105). Next agent task: im-7
+   (dry-run tree, D-102).
    [user] im-5 and im-6: see "Waiting on user".
 3. **[user] idx-6:** resume the PP 1 hash with `--skip-prefix` on the damaged folder, then run `report duplicates`
    ("If a drive shows I/O errors" in `docs/user/INDEX_WORKFLOW.md`). idx-5 is done except `lrcat mark`.
@@ -118,11 +119,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-105 (agent): rec-1 recommend() returns candidates + pair; card read on WORKING, copy on the best other drive.
 - D-104 (agent): bk-3 judgement calls: skip files already on the target, 120 s planned grace, second-drive dry run.
 - D-103 (user): copy-target recommendations by connected drives, file system, speed, space and copies.
 - D-102 (user): import dry run shows every planned file as a folder tree; Show in Finder after Apply.
 - D-101 (user): bk-3 also backs up a folder from any drive (read-only) onto WORKING/MASTER; no NTFS targets.
-- D-100 (agent): rv-27 Show in Photos on file rows, `GET /api/volumes/<id>/photo`, route `#/photos?photo=&day=`.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

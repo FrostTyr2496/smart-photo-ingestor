@@ -11,12 +11,14 @@ import {
   importJobId,
   inputsKey,
   overCapacity,
+  pairMounts,
   readPlan,
   readSecond,
   tierAfterImport,
   type BatchChoice,
   type ImportPlan,
   type SecondPlan,
+  type TargetAnswer,
 } from '../lib/importPlan';
 import { useStore } from '../lib/store';
 import type { TaskDetail } from '../lib/types';
@@ -31,6 +33,7 @@ export function ImportDialog({ card, onClose }: { card: { mount: string; label: 
   const [target, setTarget] = useState('');
   const [second, setSecond] = useState('');
   const [secondPlan, setSecondPlan] = useState<SecondPlan | null>(null);
+  const [recs, setRecs] = useState<TargetAnswer | null>(null);
   const [name, setName] = useState('');
   const [choice, setChoice] = useState<BatchChoice>('100');
   const [custom, setCustom] = useState('');
@@ -46,6 +49,20 @@ export function ImportDialog({ card, onClose }: { card: { mount: string; label: 
       setTarget(firstConnected?.mount ?? '');
       setSecond('');
       setSecondPlan(null);
+      setRecs(null);
+      if (card.volume_id) {
+        // rec-1: pre-select the recommended pair (the drive that takes the import and the one that takes the trailing copy).
+        const mine = run.current + 1;
+        api<TargetAnswer>('GET', `/api/cards/${encodeURIComponent(card.volume_id)}/targets`)
+          .then((a) => {
+            if (run.current !== mine) return;
+            const m = pairMounts(a);
+            setRecs(a);
+            if (m.first) setTarget(m.first);
+            if (m.second) setSecond(m.second);
+          })
+          .catch(() => undefined);
+      }
       setName('');
       setChoice('100');
       setCustom('');
@@ -232,6 +249,18 @@ export function ImportDialog({ card, onClose }: { card: { mount: string; label: 
       <Field label="Shoot name (optional)">
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Chosen from the photo dates if empty" className={sel} />
       </Field>
+      {recs && recs.candidates.length > 0 && (
+        <div className="rounded-xl border border-line bg-raised/40 p-3 text-xs text-muted">
+          <p className="font-medium text-ink">Recommended: {recs.pair.note}</p>
+          <ul className="mt-1 flex flex-col gap-1">
+            {recs.candidates.map((c) => (
+              <li key={c.volume_id} className={c.usable ? '' : 'text-faint'}>
+                <span className="font-medium">{c.label}</span>: {c.reasons.join(' · ')}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {!hasTarget && <p className="text-xs text-maybe">No working drive is connected. Plug one in or set one up first.</p>}
 
       {phase === 'planning' && <div className="card h-24 animate-pulse" />}

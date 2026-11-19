@@ -135,3 +135,25 @@ export function readSecond(events: TaskEvent[]): { second: SecondPlan | null; er
   }
   return { second, error };
 }
+
+/** One drive in the target recommendation (`GET /api/cards/<id>/targets`, rec-1). */
+export interface TargetRec {
+  volume_id: string;
+  label: string;
+  role: string;
+  mount: string;
+  usable: boolean;
+  rank: number;
+  reasons: string[];
+}
+
+export interface TargetAnswer {
+  candidates: TargetRec[];
+  pair: { read: string | null; copy: string | null; note: string };
+}
+
+/** The mounts the dialog pre-selects: the drive that takes the import and the one that takes the trailing copy. */
+export function pairMounts(a: TargetAnswer): { first: string; second: string } {
+  const mount = (id: string | null) => a.candidates.find((c) => c.volume_id === id)?.mount ?? '';
+  return { first: mount(a.pair.read), second: mount(a.pair.copy) };
+}

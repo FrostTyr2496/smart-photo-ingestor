@@ -35,7 +35,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from PIL import Image
 
-from photovault import (actions, activity, cards, clock, metadata, naming, preview, previews, shoots, timemodel, usage,
+from photovault import (targets, actions, activity, cards, clock, metadata, naming, preview, previews, shoots, timemodel, usage,
                         volumes)
 from photovault.card_clear import cleared_at
 from photovault.catalog import db, repo
@@ -931,6 +931,12 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
             return 405, {"error": "method not allowed"}
         return 200, _card_files(app, conn, m.group(1), query)
 
+    m = re.fullmatch(r"/api/cards/([^/]+)/targets", path)
+    if m:
+        if method != "GET":
+            return 405, {"error": "method not allowed"}
+        return 200, _card_targets(app, conn, m.group(1), query)
+
     m = re.fullmatch(r"/api/assets/(\d+)/copies", path)
     if m:
         if method != "GET":
@@ -1164,6 +1170,20 @@ def _set_label(conn, volume_id: str, body: dict) -> dict:
         if not repo.set_volume_label(conn, volume_id, label):
             raise NotFound("unknown drive")
     return {"volume_id": volume_id, "label": label}
+
+
+def _card_targets(app: WebApp, conn, volume_id: str, query: dict) -> dict:
+    """``GET /api/cards/<id>/targets[?planned_bytes=N]`` (rec-1, D-103): the connected drives ranked for a copy of
+    the card, each with its reasons, and the proposed pair (read drive, trailing-copy drive). Default size: the
+    card's bytes that have no verified WORKING/MASTER copy yet."""
+    vol = repo.get_volume(conn, volume_id)
+    if vol is None or vol["role"] != "CARD":
+        raise NotFound("unknown card")
+    planned = _int_param(query, "planned_bytes", -1, -1, 2**62)
+    if planned < 0:
+        planned = targets.card_unbacked_bytes(conn, volume_id)
+    return targets.recommend(conn, app.home, _mounted_paths(app, conn), planned_bytes=planned,
+                             source_volume_id=volume_id)
 
 
 def _card_files(app: WebApp, conn, volume_id: str, query: dict) -> dict:

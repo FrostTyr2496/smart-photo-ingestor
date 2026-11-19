@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { backupArgs, batchLimit, batchLine, importArgs, importJobId, inputsKey, overCapacity, readPlan, readSecond, tierAfterImport } from './importPlan';
+import { backupArgs, batchLimit, pairMounts, batchLine, importArgs, importJobId, inputsKey, overCapacity, readPlan, readSecond, tierAfterImport } from './importPlan';
 
 const result = { event: 'result', files: 20, groups: 10, limit: 10, groups_total: 240, files_total: 480, planned_bytes: 100, planned: '100 B',
   target_free: '1 KB', target_free_bytes: 1000, folders: [{ folder: 'a', files: 20 }], sample: ['x -> y'], kinds: { raw: 10 } };
@@ -79,5 +79,16 @@ describe('trailing copy (bk-3)', () => {
   it('a second drive changes the plan key', () => {
     const base = { source: '/s', target: '/t', name: '', limit: null };
     expect(inputsKey({ ...base, second: '/b' })).not.toBe(inputsKey(base));
+  });
+});
+
+describe('pairMounts (rec-1)', () => {
+  const rec = (id: string, mount: string) => ({ volume_id: id, label: id, role: 'WORKING', mount, usable: true, rank: 1, reasons: [] });
+  it('maps the proposed pair to mounts', () => {
+    const a = { candidates: [rec('a', '/a'), rec('b', '/b')], pair: { read: 'a', copy: 'b', note: '' } };
+    expect(pairMounts(a)).toEqual({ first: '/a', second: '/b' });
+  });
+  it('gives empty strings when there is no pair', () => {
+    expect(pairMounts({ candidates: [], pair: { read: null, copy: null, note: '' } })).toEqual({ first: '', second: '' });
   });
 });

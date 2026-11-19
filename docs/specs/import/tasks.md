@@ -113,13 +113,17 @@ target are skipped (`skipped_dup`, D-036), so a batch is never copied twice.
     After Apply, each target folder has Show in Finder (existing `/reveal` endpoint with `rel_path`).
   - Verify: `uv run pytest tests/test_web_api.py -q`; `cd web && npm run typecheck && npm test && npm run build`.
 
-- [ ] 9. **[stronger]** Copy-target recommendations
+- [x] 9. **[stronger]** Copy-target recommendations
   - ID: rec-1 (D-103; after bk-3)
   - `photovault/targets.py`: `recommend(conn, home, mounted, *, planned_bytes, source_volume_id) -> list[dict]`
     ranking connected WORKING/MASTER drives by the D-103 factors, each with plain reasons ("SSD, 410 MB/s
     measured", "NTFS: not written to"), plus a proposed pair for green. The Import dialog pre-selects the pair;
     the Actions engine's card and single-copy actions name it.
   - Verify: `uv run pytest tests/test_targets.py tests/test_actions.py -q`
+  - Result (2026-11-18): `uv run pytest tests/test_targets.py tests/test_actions.py -q` -> 39 passed; web 140 passed, build done.
+    `recommend` returns `{planned_bytes, candidates, pair}` (not a bare list) and takes an extra `exclude`; `GET
+    /api/cards/<id>/targets[?planned_bytes=N]` serves it; the Import dialog pre-selects the pair and lists the reasons;
+    `card_unbacked` and `single_copy` name the pair / best drive. D-105.
 
 ## Order
 
@@ -127,5 +131,5 @@ im-1, im-3 (no drives needed) → im-2 → im-4 → im-5 [user] → im-6 [user] 
 also needs ing-13 → bk-1 → bk-3 (backup job, second WORKING allowed) → bk-2 (1 GB health gate) → bk-4 (merged into
 im-4's dialog: the second-drive tick becomes live).
 
-Next build order (2026-11-18): bk-3 (with the folder source, D-101) → im-7 → rec-1. bk-1/bk-2 (health gate,
+Build order (2026-11-18): bk-3 (done) → rec-1 (done) → im-7. bk-1/bk-2 (health gate,
 D-051) are still open: until they land, big copies run without the health check.

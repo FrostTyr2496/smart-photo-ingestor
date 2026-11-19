@@ -17,7 +17,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from photovault import previews
+from photovault import previews, targets
 from photovault.catalog import repo
 from photovault.protocol import human_bytes
 
@@ -144,6 +144,16 @@ def _working_target(vols: Mapping[str, sqlite3.Row], mounted: Mapping[str, str |
     return working[0] if working else None
 
 
+def _recommend(conn, home, mounted, nbytes: int, source_id: str | None, exclude=frozenset()) -> dict | None:
+    """The target recommendation (rec-1, D-103) when a drive is plugged in; None when it cannot be computed."""
+    if not any(mounted.values()):
+        return None
+    try:
+        return targets.recommend(conn, home, mounted, planned_bytes=nbytes, source_volume_id=source_id, exclude=exclude)
+    except sqlite3.Error:
+        return None
+
+
 def card_unbacked(conn, now, mounted, home, vols) -> list[dict]:
     rows = conn.execute(
         f"""
@@ -162,17 +172,25 @@ def card_unbacked(conn, now, mounted, home, vols) -> list[dict]:
     for r in rows:
         vol = vols[r["volume_id"]]
         label, age = vol["label"], _age_days(now, vol["last_seen_at"])
-        where = f" to {target['label']}" if target else ""
-        needs = [_need(vol, mounted)] + ([_need(target, mounted)] if target else [])
+        rec = _recommend(conn, home, mounted, r["bytes"], vol["volume_id"])
+        pair = rec["pair"] if rec else {}
+        first = vols.get(pair.get("read")) if pair.get("read") else target   # rec-1: the recommended drive, else the old pick
+        second = vols.get(pair.get("copy")) if pair.get("copy") else None
+        where = f" to {first['label']}" if first else ""
+        needs = ([_need(vol, mounted)] + ([_need(first, mounted)] if first else [])
+                 + ([_need(second, mounted)] if second else []))
         src = _mount_of(vol["volume_id"], mounted, f"/Volumes/{label}")
-        dst = _mount_of(target["volume_id"], mounted, f"/Volumes/{target['label']}") if target else "/Volumes/<working drive>"
+        dst = (_mount_of(first["volume_id"], mounted, f"/Volumes/{first['label']}") if first
+               else "/Volumes/<working drive>")
+        back_step = (f"Back it up{where}, with a trailing copy onto {second['label']} so it turns green" if second
+                     else f"Back it up{where}")
         steps = ([] if vol["volume_id"] in mounted else [f"Plug in {label}"]) + [
-            f"Back it up{where}", "Check the card shows green before formatting it in camera"]
+            back_step, "Check the card shows green before formatting it in camera"]
         out.append(_action(
             f"card-unbacked:{vol['volume_id']}", "card_unbacked", "critical",
             f"Back up {label}: {_files(r['files'])} ({human_bytes(r['bytes'])}) exist only on this card",
             [f"{_n(r['files'])} of {_n(totals.get(vol['volume_id'], r['files']))} files on {label} have no verified "
-             "copy on a working or master drive", _ago(age)],
+             "copy on a working or master drive", _ago(age)] + ([pair["note"]] if pair.get("note") else []),
             needs, steps, _ui("Back up", f"#/cards/{vol['volume_id']}"),
             f'uv run photovault ingest --source "{src}" --target "{dst}" --name "<shoot name>" --dry-run',
             files=r["files"], nbytes=r["bytes"], age=age))
@@ -234,6 +252,8 @@ def single_copy(conn, now, mounted, home, vols, singles=None) -> list[dict]:
         vol = vols[r["volume_id"]]
         hurt = vol["volume_id"] in errors
         label = vol["label"]
+        rec = _recommend(conn, home, mounted, r["bytes"], None, exclude={vol["volume_id"]})
+        best = next((c for c in rec["candidates"] if c["usable"]), None) if rec else None
         out.append(_action(
             f"single-copy:{vol['volume_id']}", "single_copy", "critical" if hurt else "high",
             f"{_files(r['files'])} ({human_bytes(r['bytes'])}) on {label} have no second copy",
@@ -241,8 +261,12 @@ def single_copy(conn, now, mounted, home, vols, singles=None) -> list[dict]:
             + ([f"{label} has recorded read errors, so a copy is urgent"] if hurt else [])
             + [_ago(_age_days(now, vol["last_seen_at"]))],
             [_need(vol, mounted)],
-            [f"Plug in {label}" if vol["volume_id"] not in mounted else f"Copy {label} to a second drive",
-             "Assign a master drive and replicate to it"], NONE, None,
+            [f"Plug in {label}" if vol["volume_id"] not in mounted else (
+                f"Copy {label} onto {best['label']} ({', '.join(best['reasons'][:2])})" if best
+                else f"Copy {label} to a second drive"),
+             "Assign a master drive and replicate to it"], NONE,
+            (f'uv run photovault backup --from-folder "{_mount_of(vol["volume_id"], mounted, "/Volumes/" + label)}/<folder>" '
+             f'--to "{best["mount"]}" --dry-run' if best and vol["volume_id"] in mounted else None),
             files=r["files"], nbytes=r["bytes"], age=_age_days(now, vol["last_seen_at"])))
     return out
 

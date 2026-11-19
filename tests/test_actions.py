@@ -93,6 +93,37 @@ def test_card_unbacked_uses_the_real_mount_when_plugged_in(conn) -> None:
     assert '--source "/Volumes/NIKON Z 6_2"' in a["cli"] and a["needs"][0]["mounted"] is True
 
 
+def test_card_unbacked_names_the_recommended_pair(conn, tmp_path: Path, monkeypatch) -> None:
+    from photovault import targets
+    monkeypatch.setattr(targets, "is_solid_state", lambda mount, run=None: True)
+    for name in ("w", "m"):
+        (tmp_path / name).mkdir()
+    vol(conn, "card", "CARD", "Card A")
+    vol(conn, "w", "WORKING", "Travel SSD")
+    vol(conn, "m", "MASTER", "Backup")
+    inst(conn, "card", asset(conn), size=500)
+    mounted = {"card": "/mnt/card", "w": str(tmp_path / "w"), "m": str(tmp_path / "m")}
+    a = only(run(conn, mounted), "card_unbacked")
+    assert any("Travel SSD" in st and "trailing copy onto Backup" in st for st in a["steps"])
+    assert [n["label"] for n in a["needs"]] == ["Card A", "Travel SSD", "Backup"]
+    assert any("card turns green" in w for w in a["why"])
+    assert f'--target "{tmp_path / "w"}"' in a["cli"]
+
+
+def test_single_copy_names_the_best_other_drive(conn, tmp_path: Path, monkeypatch) -> None:
+    from photovault import targets
+    monkeypatch.setattr(targets, "is_solid_state", lambda mount, run=None: True)
+    for name in ("old", "new"):
+        (tmp_path / name).mkdir()
+    vol(conn, "old", "WORKING", "Old SSD")
+    vol(conn, "new", "MASTER", "Big Backup")
+    inst(conn, "old", asset(conn), size=100)
+    a = only(run(conn, {"old": str(tmp_path / "old"), "new": str(tmp_path / "new")}), "single_copy")
+    assert any("Copy Old SSD onto Big Backup" in st for st in a["steps"])
+    assert a["cli"].startswith("uv run photovault backup --from-folder") and f'--to "{tmp_path / "new"}"' in a["cli"]
+    assert only(run(conn), "single_copy")["cli"] is None          # nothing plugged in: no recommendation
+
+
 def test_card_backed_up_is_quiet(conn) -> None:
     vol(conn, "card", "CARD", "Card A")
     vol(conn, "work", "WORKING", "SSD")
