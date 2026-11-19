@@ -74,9 +74,10 @@ task's commit:
    Tasks home page, the sidebar groups, drives, cards, a step's Run button (e.g. Hash) and the editor (Photos).
 1. **[user] re-index Big Boy Old** (`uv run photovault index "/Volumes/Big Boy Old"`), then open its drive page.
    Then:
-2. **Import (spec `docs/specs/import`, D-088..D-091), replaces ing-11's run:** im-1 done; next im-3 (`--limit`), im-2
-   (LEGACY → WORKING for Backup Plus), im-4 (Cards → dry-run plan → apply); then [user] im-5, im-6 with X9 Pro
-   (small batches → web dry run → full card). bk-3 adds the second drive (green in one pass).
+2. **Import (spec `docs/specs/import`, D-088..D-091, D-096):** im-1..im-4 and cc-1 (safe card clear, schema V8) done.
+   Next agent task: **bk-3** (trailing copy onto a second WORKING/MASTER drive). Until it lands nothing can turn green,
+   because a second import onto another WORKING drive skips the files as duplicates (D-036), so Clear finds nothing.
+   [user] im-5 and im-6: see "Waiting on user".
 3. **[user] idx-6:** resume the PP 1 hash with `--skip-prefix` on the damaged folder, then run `report duplicates`
    ("If a drive shows I/O errors" in `docs/user/INDEX_WORKFLOW.md`). idx-5 is done except `lrcat mark`.
 4. **Curation (spec `docs/specs/curation`, D-069):** wave 1 is approved and ready: ing-13, idx-9, idx-10, idx-14,
@@ -90,6 +91,10 @@ task's commit:
    met-2 (web view); met-4 after bk-1.
 
 ## Waiting on user
+- **[user] im-5 / im-6 (import tests, X9 Pro plugged in):** restart `serve`. CLI first:
+  `uv run photovault --json ingest --source "/Volumes/NIKON Z 6_2" --target "/Volumes/X9 Pro" --limit 10 --dry-run`, then
+  without `--dry-run`; then Cards → Import… with batch 100 (dry run, then Apply). Backup Plus → WORKING:
+  `uv run photovault --json volumes assign "/Volumes/Backup Plus" --role WORKING --change-role`. Paste back results.
 - **Index proposal (D-080):** add `CREATE INDEX capture_groups_time ON capture_groups (capture_time)` so session
   lookups don't range-scan? Not part of the V7 approval.
 - **[user] browser check (phone import done 2026-11-18):** restart `serve` and check in Photos: the "Applies to" block (rv-16), phone place names and "Near this time"
@@ -106,19 +111,18 @@ task's commit:
 - **Corpus gaps (fnd-7):** the wish list still lacks a Z6II pair, a night run, a GoPro set and an iPhone
   HEIC+AAE (`docs/private/CORPUS.md`). Copy them when you can.
 - **X9 sample:** should `testdata/x9_sample/` move into `testdata/corpus/x9/` (D-017)?
-- The exFAT answer looked cut off ("honestly considering…"). Tell us if you are weighing APFS after all.
 - **eval-1, last question:** the boundary check from memory (the other three are answered, D-069). See the review file.
-- **Curation proposals (D-069):** cu-0 (now schema V8), dd-0 (duplicate quarantine), ro-0 (shoot folder layout) each
+- **Curation proposals (D-069):** cu-0 (now schema V9), dd-0 (duplicate quarantine), ro-0 (shoot folder layout) each
   come back as a review for your approval before any code.
 - **lrcat mark:** run it on a copy of one catalog (guide step 3) or say you are skipping it for now. Keep Lightroom
   closed while you do.
 
 ## Recent decisions
+- D-097 (agent): cc-1 details: V8 rebuilds `jobs`; frames held back whole; one copy re-hashed, a mismatch stops the run.
+- D-096 (user): safe card clear; vault-rules 1 and 4 exceptions; job kind `card_clear`.
 - D-095 (agent): act-3 locations deep link `#/photos?missing=gps&day=`, shoots_review offers a plan, clock_suggested rule.
 - D-094 (agent): act-4 previews cached by a user-started task, offered as the action `previews_missing`.
 - D-093 (agent): sh-4 Apply and Undo run as tasks; apply id stored in `shoot_apply_log.job_id`.
-- D-092 (agent): sh-2 decisions stored as made; plan gains `decisions_through`.
-- D-091 (user): Import flow: Cards lists all known cards, dry-run plan then Apply in the browser.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.
