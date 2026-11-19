@@ -284,3 +284,20 @@ Rules for every task:
   - Result (2026-11-18): done. The viewer fetches `?full=1` (headers `X-Image-Width/Height/Full`; 409 body `needs`),
     rechecks every 5 s while the card is open. Raw full images are cached in `<home>/previews/full/`; JPEG/PNG
     are streamed from the drive each time (not cached). `uv run pytest -q`, `npm test` green.
+
+- [ ] 24. Expand the map into a floating window to place the pin precisely
+  - ID: rv-24 (user ask, 2026-11-18)
+  - The inspector's map (`web/src/components/MapPicker.tsx`) gets an expand button (top-right, tooltip "Expand map").
+    After **Use** on a suggestion or a place result, a small "Refine on map" link under the map opens the same thing.
+  - It opens a floating window (the existing `Modal`, or a portal like the lightbox), about 80 % of the viewport, with:
+    - the same pin and points;
+    - zoom set around the pin (street level when a pin exists, else fit the points);
+    - click to move the pin and drag to fine-tune;
+    - the coordinates shown live, as the rv-17 Maps link;
+    - a place search box (the same Nominatim-on-Enter rules);
+    - **Done**, which keeps the new pin as a pending location with source `map` (it then saves through the normal Save),
+      and **Cancel** / Esc, which leaves the pin as it was.
+  - A satellite / street toggle only if a free tile source already in use allows it. Otherwise OSM only, with no new
+    tile provider.
+  - Leaflet stays lazy-loaded; the window reuses the inspector's Leaflet instance or creates its own.
+  - Verify: `cd web && npm run typecheck && npm test`; **[user]** browser check.
