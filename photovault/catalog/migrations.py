@@ -114,4 +114,31 @@ ALTER TABLE geo_points ADD COLUMN local_offset TEXT;   -- the fix's own UTC offs
 ALTER TABLE geo_points ADD COLUMN kind TEXT;           -- 'photo' | 'video'
 """
 
-MIGRATIONS: list[str] = [V1, V2, V3, V4, V5, V6]
+V7 = """
+CREATE TABLE trips (                                   -- a run of shoots (sh-0, D-080)
+  trip_id INTEGER PRIMARY KEY, name TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+ALTER TABLE shoots ADD COLUMN trip_id INTEGER REFERENCES trips;
+ALTER TABLE shoots ADD COLUMN local_offset TEXT;       -- the place's offset, '+HH:MM'; the shoot's wall clock
+ALTER TABLE shoots ADD COLUMN name_source TEXT;        -- folder | phone | user | fallback
+CREATE TABLE shoot_plan_decisions (                    -- the user's review decisions, kept across re-plans
+  decision_id INTEGER PRIMARY KEY, proposal_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('accept','split','merge','skip','rename','reject_name','move')),
+  payload_json TEXT NOT NULL, decided_at TEXT NOT NULL
+);
+CREATE INDEX shoot_plan_decisions_proposal ON shoot_plan_decisions (proposal_id);
+CREATE TABLE shoot_apply_log (                         -- what "Undo apply" restores
+  job_id TEXT NOT NULL, group_id INTEGER NOT NULL, prev_shoot_id INTEGER, PRIMARY KEY (job_id, group_id)
+);
+CREATE TABLE body_clock (                              -- per-body clock corrections for a time range (the instant)
+  clock_id INTEGER PRIMARY KEY, body_id INTEGER NOT NULL REFERENCES bodies,
+  start_utc TEXT NOT NULL, end_utc TEXT NOT NULL, correction_s INTEGER NOT NULL,
+  source TEXT NOT NULL CHECK (source IN ('phone','gps','user')), accepted INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX body_clock_body ON body_clock (body_id, start_utc);
+ALTER TABLE capture_groups ADD COLUMN subsec TEXT;     -- EXIF SubSecTimeOriginal, so vault names match ingest
+"""
+
+MIGRATIONS: list[str] = [V1, V2, V3, V4, V5, V6, V7]

@@ -294,7 +294,27 @@ ALTER TABLE geo_points ADD COLUMN kind TEXT;          -- 'photo' | 'video'
 
 Phone fixes imported by `photovault meta phone` carry the offset the photo was taken in (for time-zone suggestions,
 sp-7) and whether it is a photo or a movie. `source` is `iphone`, `ipad` or `glasses` (D-071). Other sources leave
-both columns NULL. The cu-0 proposal becomes V7.
+both columns NULL. The cu-0 proposal becomes V8 (D-080).
+
+## 5g. Catalog schema v7 (migration 7)
+
+Approved by the user on 2026-11-18 (sh-0, D-080; review `docs/reviews/2026-11-18-sh-0-shoot-tagging.md`). The SQL is
+the `V7` string in `photovault/catalog/migrations.py`:
+- `trips` (name, start and end date) and `shoots.trip_id`: the trip → shoot level.
+- `shoots.local_offset`: the shoot's wall-clock offset.
+- `shoots.name_source`: folder | phone | user | fallback.
+- `shoot_plan_decisions`: the user's dry-run decisions, kept across re-plans. Kinds: accept, split, merge, skip,
+  rename, reject_name, move.
+- `shoot_apply_log`: each group's previous `shoot_id` per apply job, for undo.
+- `body_clock`: a correction in seconds per body over a UTC range, with source phone | gps | user, and `accepted`.
+- `capture_groups.subsec`.
+
+**Time model (sh-0 §0).** Every comparison uses the **instant**:
+`capture_time` − the camera's offset (`capture_offset`, else the `default_offset` setting) + `group_meta.time_shift_s`
++ the accepted `body_clock` correction covering it. The instant is computed, never stored. Display, shoot dates (noon
+boundary) and "Same day" use the **wall clock**: the instant in the shoot's `local_offset` when the photo is in a shoot
+that has one, else `capture_time` as the camera wrote it. A phone-derived offset reaches the wall clock only through a
+reviewed shoot (decision 2), never silently.
 
 ## 6. Naming (D-004, D-005)
 

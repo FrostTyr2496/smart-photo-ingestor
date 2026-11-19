@@ -15,6 +15,7 @@ EXPECTED_TABLES = {
     "volumes", "bodies", "shoots", "sequences", "capture_groups",
     "assets", "instances", "sidecars", "jobs", "job_items",
     "group_meta", "geo_points", "settings", "volume_usage",
+    "trips", "shoot_plan_decisions", "shoot_apply_log", "body_clock",
 }
 
 
@@ -54,7 +55,7 @@ def test_connect_creates_parent_dirs_and_pragmas(tmp_path: Path) -> None:
 
 def test_fresh_db_migrates_to_1_with_all_tables(conn: sqlite3.Connection) -> None:
     assert conn.execute("PRAGMA user_version").fetchone()[0] == 0
-    assert db.migrate(conn) == len(migrations.MIGRATIONS) == 6
+    assert db.migrate(conn) == len(migrations.MIGRATIONS) == 7
     assert _tables(conn) == EXPECTED_TABLES
 
 
