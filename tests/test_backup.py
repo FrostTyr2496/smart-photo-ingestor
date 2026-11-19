@@ -328,7 +328,7 @@ def test_apfs_target_is_allowed_and_card_source_must_be_a_card(env, capsys, monk
     assert code == 2
 
 
-# --------------------------------------------------------------------------- make green (bk-7, D-107)
+# --------------------------------------------------------------------------- make green (bk-7, D-108)
 
 
 def mounts(env) -> dict:

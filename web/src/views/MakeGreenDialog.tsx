@@ -5,7 +5,7 @@ import { fmtBytes, plural } from '../lib/format';
 import { copyable, sentence, type GreenPlan } from '../lib/makeGreen';
 import { useStore } from '../lib/store';
 
-/** Make a card's one-copy (yellow) files green (bk-7, D-107): shows the plan (a read-only dry run), Apply copies. */
+/** Make a card's one-copy (yellow) files green (bk-7, D-108): shows the plan (a read-only dry run), Apply copies. */
 export function MakeGreenDialog({ card, onClose }: { card: { volume_id: string; label: string } | null; onClose: () => void }) {
   const { startTask } = useStore();
   const [plan, setPlan] = useState<GreenPlan | null>(null);

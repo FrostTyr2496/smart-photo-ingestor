@@ -1,4 +1,4 @@
-// Pure helpers for "Make green" (bk-7, D-107): read the plan from `GET /api/cards/<id>/make-green` and say whether
+// Pure helpers for "Make green" (bk-7, D-108): read the plan from `GET /api/cards/<id>/make-green` and say whether
 // (and why not) the button is enabled.
 
 export interface GreenDrive {

@@ -8,6 +8,7 @@ import { driveName } from '../lib/labels';
 import {
   applyFields,
   clockTime,
+  copyText,
   dayLabel,
   dayLine,
   dayOf,
@@ -27,7 +28,10 @@ import {
   type PhotoDay,
   type PhotoGroup,
   type PhotoSettings,
+  vaultCopyName,
 } from '../lib/photos';
+import { openMenu } from '../lib/menu';
+import { holdCentred } from '../lib/reveal';
 import { usePref } from '../lib/prefs';
 import { useStore } from '../lib/store';
 import { ClockBanner } from './ClockBanner';
@@ -259,12 +263,17 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto }:
     selectOnReveal.current = wantPhoto;
     setReveal({ id: wantPhoto, day: wantDay });
   }, [wantPhoto, wantDay]); // eslint-disable-line react-hooks/exhaustive-deps
+  const revealGroup = useCallback(
+    (g: PhotoGroup) => {
+      clearFilters();
+      setReveal({ id: g.group_id, day: dayOf(g) });
+    },
+    [clearFilters],
+  );
   const showInAll = useCallback(() => {
     const g = firstInTime([...sel.values()]);
-    if (!g) return;
-    clearFilters();
-    setReveal({ id: g.group_id, day: dayOf(g) });
-  }, [sel, clearFilters]);
+    if (g) revealGroup(g);
+  }, [sel, revealGroup]);
   useEffect(() => {
     if (!reveal || volume || missing || shoot || days === null || daysKey !== filterKey) return;
     const entry = days.find((d) => d.day === reveal.day);
@@ -296,29 +305,22 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto }:
     }
     setScrollTo(id);
   }, [reveal, volume, missing, shoot, days, daysKey, filterKey, loaded, loadDay, toast]);
-  // Scrolling is its own effect: clearing `reveal` above re-runs that effect, whose cleanup would cancel a timer
-  // started there. Retries for a few frames while the tile (and the inspector, which narrows the grid) render.
+  // Scrolling is its own effect: clearing `reveal` above re-runs that effect, whose cleanup would cancel a hold
+  // started there. It jumps to the tile and keeps it centred while the days around it load and grow and the
+  // inspector narrows the grid (rv-27 fix 2: a single smooth scroll landed on whatever grew into its place).
   const [scrollTo, setScrollTo] = useState<number | null>(null);
   useEffect(() => {
     if (scrollTo === null) return undefined;
     const id = scrollTo;
-    let tries = 0;
-    let t = 0;
-    const attempt = () => {
-      const el = document.querySelector<HTMLElement>(`[data-gid="${id}"]`);
-      if (!el && ++tries < 40) {
-        t = window.setTimeout(attempt, 50);
-        return;
-      }
-      setScrollTo(null);
-      if (!el) return;
-      el.scrollIntoView({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' });
-      el.focus({ preventScroll: true });
-      setFlash(id);
-      window.setTimeout(() => setFlash((f) => (f === id ? null : f)), 1400);
-    };
-    t = window.setTimeout(attempt, 120);
-    return () => window.clearTimeout(t);
+    // The flash timer is left to run out on its own: it only clears its own id.
+    return holdCentred(() => document.querySelector<HTMLElement>(`[data-gid="${id}"]`), {
+      onFound: (el) => {
+        el.focus({ preventScroll: true });
+        setFlash(id);
+        window.setTimeout(() => setFlash((f) => (f === id ? null : f)), 1400);
+      },
+      onDone: () => setScrollTo((s) => (s === id ? null : s)),
+    });
   }, [scrollTo]);
 
   // The full-screen viewer (rv-20): steps through the open photo's day, as loaded, and the selection follows.
@@ -378,9 +380,45 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto }:
     setReload((r) => r + 1);
   };
 
+  // Right-click on a tile (rv-28). Like Finder and Photos: a photo outside the selection becomes the selection; one
+  // inside it keeps the selection. Built fresh on each click through a ref, so the memoised tiles keep one handler.
+  const filtered = Boolean(volume || missing || shoot);
+  const tileMenu = (g: PhotoGroup, e: MouseEvent) => {
+    if (!sel.has(g.group_id)) {
+      setSel(new Map([[g.group_id, g]]));
+      anchor.current = g.group_id;
+    }
+    const n = sel.has(g.group_id) ? sel.size : 1;
+    const day = days?.find((d) => d.day === dayOf(g));
+    const mounted = g.volume_id ? byVolume.get(g.volume_id)?.mounted ?? false : false;
+    const name = vaultCopyName(g) || `Photo ${g.group_id}`;
+    openMenu(
+      e,
+      [
+        { label: 'Open', icon: 'expand', hint: 'Space', disabled: !g.volume_id, onSelect: () => openViewer(g) },
+        { label: filtered ? 'Show in All Photos' : 'Scroll to this photo', icon: 'image', onSelect: () => revealGroup(g) },
+        'sep',
+        day && { label: `Select all of ${dayLabel(day.day)}`, icon: 'check', onSelect: () => void selectDay(day) },
+        g.shoot_id !== null && shoot !== String(g.shoot_id) && { label: `Show only ${g.shoot_name ?? 'this shoot'}`, icon: 'camera', onSelect: () => setShoot(String(g.shoot_id)) },
+        'sep',
+        { label: 'Copy name', icon: 'copy', onSelect: () => void copyText(name).then((ok) => toast(ok ? `Copied ${name}` : 'Could not copy.', ok ? 'ok' : 'err')) },
+        Boolean(g.volume_id && g.rel_path && mounted) && {
+          label: 'Show in Finder',
+          icon: 'folder',
+          onSelect: () => void api('POST', `/api/volumes/${encodeURIComponent(g.volume_id!)}/reveal`, { rel_path: g.rel_path }).catch((err: Error) => toast(err.message, 'err')),
+        },
+        'sep',
+        n > 0 && { label: n > 1 ? `Deselect ${fmtInt(n)} photos` : 'Deselect', icon: 'x', hint: 'Esc', onSelect: clear },
+      ],
+      n > 1 ? `${name} · ${fmtInt(n)} selected` : name,
+    );
+  };
+  const tileMenuRef = useRef(tileMenu);
+  tileMenuRef.current = tileMenu;
+  const onTileMenu = useCallback((g: PhotoGroup, e: MouseEvent) => tileMenuRef.current(g, e), []);
+
   const selected = useMemo(() => [...sel.values()], [sel]);
   const rail = useMemo(() => monthRail(days ?? []), [days]);
-  const filtered = Boolean(volume || missing || shoot);
   const chips = useMemo(() => {
     const d = volume ? byVolume.get(volume) : undefined;
     const sh = shoot ? shootList.find((x) => String(x.shoot_id) === shoot) : undefined;
@@ -484,6 +522,7 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto }:
                   allSelected={(loaded[d.day]?.groups.length ?? 0) >= d.groups && (loaded[d.day]?.groups ?? []).every((g) => sel.has(g.group_id))}
                   onTile={onTile}
                   onOpen={openViewer}
+                  onMenu={onTileMenu}
                   onSelectDay={() => void selectDay(d)}
                   filterNote=""
                   onClearFilters={clearFilters}
@@ -560,6 +599,7 @@ function DaySection({
   allSelected,
   onTile,
   onOpen,
+  onMenu,
   onSelectDay,
   filterNote: note,
   onClearFilters,
@@ -575,6 +615,7 @@ function DaySection({
   allSelected: boolean;
   onTile: (g: PhotoGroup, e: MouseEvent) => void;
   onOpen: (g: PhotoGroup) => void;
+  onMenu: (g: PhotoGroup, e: MouseEvent) => void;
   onSelectDay: () => void;
   filterNote: string;
   onClearFilters: () => void;
@@ -623,7 +664,7 @@ function DaySection({
       {state && groups.length > 0 ? (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(112px,1fr))] gap-1.5 pb-3">
           {groups.map((g) => (
-            <Tile key={g.group_id} g={g} on={selected.has(g.group_id)} related={related.has(g.group_id)} flash={flash === g.group_id} connected={connected(g.volume_id)} offline={fullOffline(g, connected)} onTile={onTile} onOpen={onOpen} />
+            <Tile key={g.group_id} g={g} on={selected.has(g.group_id)} related={related.has(g.group_id)} flash={flash === g.group_id} connected={connected(g.volume_id)} offline={fullOffline(g, connected)} onTile={onTile} onOpen={onOpen} onMenu={onMenu} />
           ))}
         </div>
       ) : (
@@ -654,7 +695,7 @@ function DaySection({
   );
 }
 
-const Tile = memo(function Tile({ g, on, related, flash, connected, offline, onTile, onOpen }: { g: PhotoGroup; on: boolean; related: boolean; flash: boolean; connected: boolean; offline: boolean; onTile: (g: PhotoGroup, e: MouseEvent) => void; onOpen: (g: PhotoGroup) => void }) {
+const Tile = memo(function Tile({ g, on, related, flash, connected, offline, onTile, onOpen, onMenu }: { g: PhotoGroup; on: boolean; related: boolean; flash: boolean; connected: boolean; offline: boolean; onTile: (g: PhotoGroup, e: MouseEvent) => void; onOpen: (g: PhotoGroup) => void; onMenu: (g: PhotoGroup, e: MouseEvent) => void }) {
   const [failed, setFailed] = useState(false);
   const name = g.canonical_stem || `Photo ${g.group_id}`;
   return (
@@ -665,6 +706,7 @@ const Tile = memo(function Tile({ g, on, related, flash, connected, offline, onT
       title={`${name}${g.capture_time ? ` · ${g.capture_time.replace('T', ' ')}` : ''}${g.place_name ? ` · ${g.place_name}` : ''}`}
       onClick={(e) => onTile(g, e)}
       onDoubleClick={() => onOpen(g)}
+      onContextMenu={(e) => onMenu(g, e)}
       onKeyDown={(e) => {
         if (e.key === ' ' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
           e.preventDefault(); // Space opens the viewer; it no longer toggles the selection

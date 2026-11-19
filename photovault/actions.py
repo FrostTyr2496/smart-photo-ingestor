@@ -198,7 +198,7 @@ def card_unbacked(conn, now, mounted, home, vols) -> list[dict]:
 
 
 def card_make_green(conn, now, mounted, home, vols) -> list[dict]:
-    """Yellow files (one verified copy, D-089): copy them onto a connected second drive (bk-7, D-107)."""
+    """Yellow files (one verified copy, D-089): copy them onto a connected second drive (bk-7, D-108)."""
     from photovault import backup  # local import: backup imports cards and targets
 
     out = []

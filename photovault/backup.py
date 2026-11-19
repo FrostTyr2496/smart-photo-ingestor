@@ -173,7 +173,7 @@ def plan_backup(
     """Plan a backup onto `target` (a mounted WORKING/MASTER drive); returns the job id. Does not commit.
 
     Card source: `card_volume_id` and `source` (the mount of the drive that holds the card's files: WORKING or
-    MASTER, or a read-only LEGACY drive, D-107); `follow_job` trails an import.
+    MASTER, or a read-only LEGACY drive, D-108); `follow_job` trails an import.
     Folder source: `source` is the drive's mount and `source_folder` the folder inside it (may be "").
     """
     source, target = Path(source), Path(target)
@@ -245,7 +245,7 @@ def plan_backup(
     return job_id
 
 
-# --------------------------------------------------------------------------- make green (bk-7, D-107)
+# --------------------------------------------------------------------------- make green (bk-7, D-108)
 
 
 def _vol_info(vol: sqlite3.Row, mounted: dict) -> dict:
@@ -259,7 +259,7 @@ def _list_names(names: list[str]) -> str:
 
 def plan_make_green(conn: sqlite3.Connection, cfg: Config | None, *, card_volume_id: str, mounted: dict,
                     home: Path | None, run=None) -> dict:
-    """Read-only plan to turn a card's yellow files green (bk-7, D-107): each yellow file has one verified copy
+    """Read-only plan to turn a card's yellow files green (bk-7, D-108): each yellow file has one verified copy
     (a WORKING drive, or LEGACY drives only). Files are grouped by the connected drive that holds their copy, and
     each group gets the best connected WORKING/MASTER exFAT/APFS drive that holds none of them and has room
     (`targets.recommend`). A group with no possible copy says why. Nothing is written."""
@@ -414,7 +414,7 @@ def run_backup(
 
     current: int | None = None
     waited = 0.0
-    n_follow = params.get("follow_items")      # items past this seq are the tail (D-107): never looked up upstream
+    n_follow = params.get("follow_items")      # items past this seq are the tail (D-108): never looked up upstream
     if follow and n_follow is None:
         n_follow = conn.execute("SELECT COALESCE(MAX(seq), 0) FROM job_items WHERE job_id = ?", (job_id,)).fetchone()[0]
     tail_planned = False
@@ -444,7 +444,7 @@ def run_backup(
             if not ready:
                 if not waiting:
                     if follow and not tail_planned:
-                        # D-107: files the import skipped as already on the source, but missing on this target
+                        # D-108: files the import skipped as already on the source, but missing on this target
                         tail_planned = True
                         added = _plan_tail(conn, job, params, n_follow)
                         if added:

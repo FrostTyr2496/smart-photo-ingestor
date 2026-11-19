@@ -1,5 +1,6 @@
 import { AnimatePresence, MotionConfig, motion } from 'framer-motion';
 import { AmbientGlow } from './components/AmbientGlow';
+import { ContextMenuHost } from './components/ContextMenu';
 import { DevTools } from './components/DevTools';
 import { ConfirmDialog, Toasts } from './components/Overlays';
 import { useEffect, useState } from 'react';
@@ -120,6 +121,7 @@ function Shell() {
       </div>
       <Toasts />
       <ConfirmDialog />
+      <ContextMenuHost />
       <DevTools />
     </>
   );

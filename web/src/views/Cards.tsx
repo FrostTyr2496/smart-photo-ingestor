@@ -35,7 +35,7 @@ function useChecking() {
     Boolean(mount) && tasks.some((t) => !t.final && commandKey(argvWords(t.argv)) === 'card_check' && argvWords(t.argv)[2] === mount);
 }
 
-/** "Make green…" (bk-7, D-107): shown when some files have one copy; enabled only when a connected drive can take a second one. */
+/** "Make green…" (bk-7, D-108): shown when some files have one copy; enabled only when a connected drive can take a second one. */
 function MakeGreenButton({ c, onGreen }: { c: Card; onGreen: (c: Card) => void }) {
   const { epoch } = useStore();
   const [plan, setPlan] = useState<GreenPlan | null>(null);
@@ -382,7 +382,7 @@ function CardDetail({ id, onImport, onClear, onGreen }: { id: string; onImport: 
           shown={data.total}
           total={c.files}
         />
-        <FileTable rows={data.files} columns={columns} volumeId={c.volume_id ?? ''} loading={loading} summarize={summarizeCardFiles} />
+        <FileTable rows={data.files} columns={columns} volumeId={c.volume_id ?? ''} mounted={c.mounted && Boolean(c.volume_id)} loading={loading} summarize={summarizeCardFiles} />
         <Pager offset={filter.offset} count={data.files.length} total={data.total} page={CARD_PAGE} onPage={(offset) => setFilter((f) => ({ ...f, offset }))} />
       </section>
     </div>

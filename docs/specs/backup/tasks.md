@@ -147,7 +147,7 @@ for a tick per warning). A dry run is never gated; it reports what the gate woul
     relink with the vn-3 method, confirm the photos open. Paste back what happened.
 
 - [x] 11. **[stronger]** Make green: copy a card's one-copy (yellow) files onto a connected second drive
-  - ID: bk-7 (D-107; after bk-3, rec-1)
+  - ID: bk-7 (D-108; after bk-3, rec-1)
   - `backup.plan_make_green(conn, cfg, *, card_volume_id, mounted, home)` (read-only) groups the card's yellow files by
     the drive holding their one copy and picks a target per group with `targets.recommend(exclude=<holders>)`, or says why
     not. Card-mode backup accepts a source of any role (LEGACY read-only). CLI `backup --card <id> --make-green

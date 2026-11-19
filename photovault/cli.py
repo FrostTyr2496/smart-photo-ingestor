@@ -162,7 +162,7 @@ def _run_backup(conn, cfg, job_id, emit) -> int:
 
 
 def _backup_make_green(conn, cfg, args, emit) -> int:
-    """`backup --card <id> --make-green [--dry-run]` (bk-7, D-107): copy the card's one-copy (yellow) files onto a
+    """`backup --card <id> --make-green [--dry-run]` (bk-7, D-108): copy the card's one-copy (yellow) files onto a
     second connected drive, one job per source drive."""
     if not args.card or args.to or args.source or args.from_folder or args.follow is not None:
         emit.emit("error", code="usage", message="--make-green takes only --card <volume_id> (and --dry-run)")
@@ -628,7 +628,7 @@ def build_parser() -> argparse.ArgumentParser:
     bk.add_argument("--from-folder", dest="from_folder", help="a folder on any registered drive: <mount>/<folder>")
     bk.add_argument("--to", help="WORKING or MASTER drive mount (exFAT or APFS)")
     bk.add_argument("--make-green", dest="make_green", action="store_true",
-                    help="with --card: copy the card's one-copy (yellow) files onto a connected second drive (D-107)")
+                    help="with --card: copy the card's one-copy (yellow) files onto a connected second drive (D-108)")
     bk.add_argument("--root", help=argparse.SUPPRESS)
     bk.add_argument("--follow", type=int, default=None, metavar="JOB",
                     help="trail this import job, copying each file once it is committed")
