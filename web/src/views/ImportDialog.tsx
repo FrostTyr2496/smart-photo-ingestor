@@ -24,12 +24,13 @@ import {
 import { fmtBytes, fmtInt } from '../lib/format';
 import { planFolders } from '../lib/planTree';
 import { useStore } from '../lib/store';
+import type { DialogStatus } from '../lib/notify';
 import type { TaskDetail } from '../lib/types';
 
 type Phase = 'idle' | 'planning' | 'planned' | 'failed' | 'applied';
 
 /** Import a card onto a working drive (ing-*, im-4). The card is only read. A dry run shows the plan; Apply runs the same inputs. */
-export function ImportDialog({ card, onClose }: { card: { mount: string; label: string; volume_id?: string | null; test_card?: { hidden: string[] } | null } | null; onClose: () => void }) {
+export function ImportDialog({ card, minimized, onClose, onMinimize, onStatus }: { card: { mount: string | null; label: string; volume_id?: string | null; test_card?: { hidden: string[] } | null } | null; minimized?: boolean; onClose: () => void; onMinimize?: () => void; onStatus?: (s: DialogStatus) => void }) {
   const { drives, startTask, ask, toast } = useStore();
   // D-111: a test card's hidden drives are never offered (copying there would duplicate files already on them).
   const hidden = card?.test_card?.hidden ?? [];
@@ -85,7 +86,7 @@ export function ImportDialog({ card, onClose }: { card: { mount: string; label: 
   // The trailing copy needs the card's volume id and a connected working or master drive other than the first.
   const seconds = drives.filter((t) => (roleKey(t.role) === 'working' || roleKey(t.role) === 'master') && !t.ignored && t.mounted && t.mount !== target && !hidden.includes(t.label ?? ''));
   const secondOk = Boolean(second) && Boolean(card?.volume_id) && second !== target;
-  const inputs = card && target && limit !== undefined ? { source: card.mount, target, name, limit, second: secondOk ? second : '' } : null;
+  const inputs = card?.mount && target && limit !== undefined ? { source: card.mount, target, name, limit, second: secondOk ? second : '' } : null;
   const key = inputs ? inputsKey(inputs) : '';
   const targetDrive = drives.find((t) => t.mount === target);
   const applyReady = phase === 'planned' && Boolean(plan) && plannedKey === key && Boolean(plan && plan.files > 0);
@@ -190,14 +191,24 @@ export function ImportDialog({ card, onClose }: { card: { mount: string; label: 
     }
   };
 
+  // rv-32: what the dock pill shows while the dialog is minimized.
+  const status = useRef(onStatus);
+  status.current = onStatus;
+  useEffect(() => {
+    const line =
+      phase === 'planning' ? `Dry run… ${progress}`.trim() : phase === 'planned' ? 'Dry run done: review the plan' : phase === 'failed' ? 'Dry run failed' : phase === 'applied' ? 'Import started' : 'Waiting for you';
+    status.current?.({ line, value: null });
+  }, [phase, progress]);
+
   const hasTarget = working.some((t) => t.mounted);
   const sel = 'h-9';
   return (
     <Modal
       wide
-      open={Boolean(card)}
+      open={Boolean(card) && !minimized}
       title="Import from card"
       onClose={onClose}
+      onMinimize={onMinimize}
       footer={
         <>
           {phase === 'applied' ? (

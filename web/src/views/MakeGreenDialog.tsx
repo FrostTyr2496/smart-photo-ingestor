@@ -4,9 +4,10 @@ import { api } from '../lib/api';
 import { fmtBytes, plural } from '../lib/format';
 import { copyable, sentence, type GreenPlan } from '../lib/makeGreen';
 import { useStore } from '../lib/store';
+import type { DialogStatus } from '../lib/notify';
 
 /** Make a card's one-copy (yellow) files green (bk-7, D-108): shows the plan (a read-only dry run), Apply copies. */
-export function MakeGreenDialog({ card, onClose }: { card: { volume_id: string; label: string } | null; onClose: () => void }) {
+export function MakeGreenDialog({ card, minimized, onClose, onMinimize, onStatus }: { card: { volume_id: string | null; label: string } | null; minimized?: boolean; onClose: () => void; onMinimize?: () => void; onStatus?: (s: DialogStatus) => void }) {
   const { startTask } = useStore();
   const [plan, setPlan] = useState<GreenPlan | null>(null);
   const [error, setError] = useState('');
@@ -17,7 +18,7 @@ export function MakeGreenDialog({ card, onClose }: { card: { volume_id: string; 
     const mine = ++run.current;
     setPlan(null);
     setError('');
-    api<GreenPlan>('GET', `/api/cards/${encodeURIComponent(card.volume_id)}/make-green`)
+    api<GreenPlan>('GET', `/api/cards/${encodeURIComponent(card.volume_id ?? '')}/make-green`)
       .then((p) => run.current === mine && setPlan(p))
       .catch((err: Error) => run.current === mine && setError(err.message));
     return () => {
@@ -25,19 +26,26 @@ export function MakeGreenDialog({ card, onClose }: { card: { volume_id: string; 
     };
   }, [card]);
 
+  const status = useRef(onStatus);
+  status.current = onStatus;
+  useEffect(() => {
+    status.current?.({ line: error ? 'Could not plan' : !plan ? 'Planning…' : plan.possible ? `Plan ready: ${plural(copyable(plan).files, 'file')} to copy` : 'Nothing to copy', value: plan ? 1 : null });
+  }, [plan, error]);
+
   const todo = plan ? copyable(plan) : { files: 0, bytes: 0 };
   const go = async () => {
     if (!card || !plan || !plan.possible) return;
     onClose();
-    await startTask('backup', { card: card.volume_id, make_green: true });
+    await startTask('backup', { card: card.volume_id ?? '', make_green: true });
   };
 
   return (
     <Modal
       wide
-      open={Boolean(card)}
+      open={Boolean(card) && !minimized}
       title="Make green"
       onClose={onClose}
+      onMinimize={onMinimize}
       footer={
         <>
           <button type="button" className="btn-ghost" onClick={onClose}>

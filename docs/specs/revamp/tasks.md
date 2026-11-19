@@ -419,3 +419,15 @@ Rules for every task:
   - Verify: `cd web && npm run typecheck && npm test && npm run build`.
   - Result (2026-11-19): typecheck clean; 176 web tests pass (17 files); build committed. Not seen in a browser.
 
+
+- [x] 32. Minimize long-running dialogs; notify when long tasks finish
+  - ID: rv-32 (user ask, 2026-11-19; D-115)
+  - Clear card, Import and Make green get a Minimize button (a click outside minimizes too; Esc still closes). Their
+    state moved from `Cards` to `DialogsProvider` (`web/src/lib/dialogs.tsx`) with one `DialogHost` in `App.tsx`, so a
+    minimized dialog stays mounted (polling and dry run continue) across pages. A dock of pills at the bottom right
+    shows each one's live status line and bar; a click restores. When a task that ran 20 s or more ends, a popup
+    (Open / Dismiss; failures stay) shows, plus a browser notification when the tab is hidden, if allowed. A dry run
+    under a visible dialog gets no popup. Settings has the on/off switch (per browser). Pure rules in
+    `web/src/lib/notify.ts`.
+  - Verify: `cd web && npm run typecheck && npm test && npm run build`.
+  - Result (2026-11-19): typecheck clean; 189 web tests pass (18 files, 8 new in `notify.test.ts`); build committed. Not seen in a browser.

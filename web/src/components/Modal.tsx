@@ -2,9 +2,10 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { springs } from '../lib/motion';
+import { Icon } from './bits';
 
-/** A centred dialog that springs in. Esc and a click outside close it. */
-export function Modal({ open, title, onClose, children, footer, wide }: { wide?: boolean; open: boolean; title: string; onClose: () => void; children: ReactNode; footer: ReactNode }) {
+/** A centred dialog that springs in. Esc closes it. A click outside closes it, or minimizes it when `onMinimize` is set (rv-32). */
+export function Modal({ open, title, onClose, onMinimize, children, footer, wide }: { onMinimize?: () => void; wide?: boolean; open: boolean; title: string; onClose: () => void; children: ReactNode; footer: ReactNode }) {
   const box = useRef<HTMLDivElement>(null);
   // Callers pass a new onClose each render; keep it in a ref so a re-render (e.g. the drive list polling) does not
   // re-run the effect and pull focus back to the first field.
@@ -30,7 +31,7 @@ export function Modal({ open, title, onClose, children, footer, wide }: { wide?:
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          onClick={onClose}
+          onClick={onMinimize ?? onClose}
         >
           <motion.div
             ref={box}
@@ -44,7 +45,14 @@ export function Modal({ open, title, onClose, children, footer, wide }: { wide?:
             onClick={(e) => e.stopPropagation()}
             className={`w-full ${wide ? 'max-w-xl' : 'max-w-md'} rounded-2xl border border-line-strong bg-raised shadow-2xl shadow-black/60`}
           >
-            <h2 className="border-b border-line px-5 py-4 text-lg font-semibold">{title}</h2>
+            <div className="flex items-center gap-2 border-b border-line px-5 py-4">
+              <h2 className="flex-1 text-lg font-semibold">{title}</h2>
+              {onMinimize && (
+                <button type="button" onClick={onMinimize} title="Minimize: it keeps running, find it at the bottom right" aria-label="Minimize" className="btn-ghost h-7 gap-1 px-2 text-xs">
+                  <Icon name="minus" size={12} /> Minimize
+                </button>
+              )}
+            </div>
             <div className="flex flex-col gap-4 px-5 py-4">{children}</div>
             <div className="flex items-center justify-end gap-2 border-t border-line px-5 py-3">{footer}</div>
           </motion.div>
