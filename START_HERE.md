@@ -80,7 +80,7 @@ task's commit:
    ("If a drive shows I/O errors" in `docs/user/INDEX_WORKFLOW.md`). idx-5 is done except `lrcat mark`.
 4. **Curation (spec `docs/specs/curation`, D-069):** wave 1 is approved and ready: ing-13, idx-9, idx-10, idx-14,
    seq-1b (then seq-2), rv-11; then lr-0, set-1; cu-0 / dd-0 / ro-0 are proposals first. **Phone + related
-   (D-070..D-076):** rv-16, sp-2, sp-3, sp-7, sp-8, rv-10, rv-17..rv-20 done; rv-21 (headers) in progress by an agent;
+   (D-070..D-078):** rv-16, sp-2, sp-3, sp-7, sp-7b, sp-8, rv-10, rv-17..rv-23 done;
    next sp-6, then the sh-0 plan once approved; dv-0 is a proposal.
 5. **Card backup (spec `docs/specs/backup`, D-050..D-052):** bk-1 drive health, bk-3 backup job (after ing-13),
    vn-1 volume name on hover, then bk-2, bk-4, vn-2, vn-3. bk-5 [user]: plug in and assign the 12 TB. Metrics:
@@ -91,8 +91,9 @@ task's commit:
   zone per shoot, names, schema V7, apply scope). No code until approved. Also: store sub-second in V7 so
   Copy name matches the imported name exactly (D-076)?
 - **[user] browser check (phone import done 2026-11-18):** restart `serve` and check in Photos: the "Applies to" block (rv-16), phone place names and "Near this time"
-  (sp-3), Copy name (rv-18), the clock banner (sp-7), Maps links (rv-17), the farther suggestions (sp-8),
-  Show in All Photos (rv-19) and the full-screen viewer (rv-20).
+  (sp-3), Copy name (rv-18), Maps links (rv-17), the farther suggestions (sp-8), Show in All Photos (rv-19), the
+  full-screen viewer (rv-20), the condensed headers and filter chips (rv-21), hiding the sidebar with `[` (rv-22),
+  full size vs "plug in PP 1" plus the grid's unplugged icon (rv-23). No clock banners should show now (sp-7b).
 - **Push the archive branch?** Run `git push -u origin archive/v0-cli-2026-11-11` if you want it on GitHub.
   (`main` is pushed.)
 - **Corpus gaps (fnd-7):** the wish list still lacks a Z6II pair, a night run, a GoPro set and an iPhone
@@ -106,11 +107,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-078 (agent): rv-21..rv-23 and sp-7b judgement calls; 0 clock banners on the real catalog; full previews cached in the home.
+- D-077 (user): false clock banners → sp-7b; a suggested town was right; rv-22 sidebar; rv-23 full size + plug-in prompt.
 - D-076 (agent): sp-8 tiers on real data; Copy name uses ing-12's code, `-00` subsec until stored; rv-21 asked.
 - D-075 (user): ±12 h reach with graded confidence; time-zone independent time model (sh-0 §0).
 - D-074 (user): spot check → sp-8; rv-18 Copy name, rv-19 Show in All Photos, rv-20 full-screen viewer.
-- D-073 (agent, sp-3/sp-7): `/api/groups/<id>/places`; Nominatim addressdetails; clock runner-up ignores ±1 h; rv-17 Maps links.
-- D-072 (agent, sp-2/rv-16): skip order and `bad_date`; Same day = local capture date; Auto ignores Same day; clock shift by `body_id`.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.
