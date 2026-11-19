@@ -904,7 +904,10 @@ def test_activity_lists_outside_runs_and_stale_jobs(srv: Client, monkeypatch: py
     assert status == 200
     assert [(a["pid"], a["words"], a["job"]["job_id"]) for a in body["activity"]] == [
         (4242, ["index", "/Volumes/Big Drive"], live)]
-    assert [j["job_id"] for j in body["stale_jobs"]] == [stale]
+    assert body["stale_jobs"] == []  # idx-9: the ownerless job was paused instead
+    conn = db.connect(load_config().catalog_path)
+    assert repo.get_job(conn, stale)["state"] == "paused" and repo.get_job(conn, live)["state"] == "running"
+    conn.close()
 
 
 # --------------------------------------------------------------------------- keep the Mac awake (ui-12)
