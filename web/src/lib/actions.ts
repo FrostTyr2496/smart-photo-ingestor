@@ -1,4 +1,3 @@
-import fixture from './__fixtures__/actions.json';
 import { api } from './api';
 
 export type Severity = 'critical' | 'high' | 'normal' | 'low';
@@ -36,17 +35,9 @@ export interface ActionsPayload {
   actions: ActionItem[];
 }
 
-/**
- * TODO(act-1): drop the fixture fallback once GET /api/actions ships.
- * Until then a 404 (or any failure to reach the endpoint) reads the fixture in the contract format.
- */
+/** The live actions (act-1). No fixture fallback: a fixture "run" button must never reach a real job endpoint. */
 export async function loadActions(): Promise<ActionsPayload> {
-  try {
-    return await api<ActionsPayload>('GET', '/api/actions');
-  } catch (err) {
-    if (/HTTP 404/.test((err as Error).message)) return fixture as unknown as ActionsPayload;
-    throw err;
-  }
+  return api<ActionsPayload>('GET', '/api/actions');
 }
 
 const RANK: Record<Severity, number> = { critical: 0, high: 1, normal: 2, low: 3 };
