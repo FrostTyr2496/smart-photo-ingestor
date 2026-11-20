@@ -7,7 +7,7 @@ import { DoneNotifier } from './components/DoneNotifier';
 import { ConfirmDialog, Toasts } from './components/Overlays';
 import { DialogsProvider } from './lib/dialogs';
 import { DriveActivityProvider } from './lib/driveActivity';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { isTypingTarget, modalOpen } from './lib/keys';
 import { usePref } from './lib/prefs';
 import { routeKey, useRoute } from './lib/route';
@@ -44,6 +44,16 @@ function Shell() {
   const review = route.view === 'review';
   const hidden = savedHidden || review;
   const wide = useWide();
+  // Photos wants the width: entering it hides the sidebar; entering Tasks or Cards shows it again. Only on a change of
+  // mode, so [ and the Drives tab still toggle it freely within a page.
+  const lastView = useRef(route.view);
+  useEffect(() => {
+    const prev = lastView.current;
+    lastView.current = route.view;
+    if (prev === route.view) return;
+    if (route.view === 'photos') setHidden(true);
+    else if (route.view === 'home' || route.view === 'cards') setHidden(false);
+  }, [route.view, setHidden]);
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
       if (e.key !== '[' || e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
