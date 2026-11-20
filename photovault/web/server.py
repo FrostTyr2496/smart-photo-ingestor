@@ -42,6 +42,7 @@ from photovault.catalog import db, repo
 from photovault.config import ConfigError, load_config
 from photovault.drives import DEFAULT_MAC_FOLDER, VOLUMES_ROOT, scan_mounts
 from photovault.geo import group_utc, offset_tz, places_near, suggest, utc_text
+from photovault.phone import SOURCES as PHONE_SOURCES
 from photovault.protocol import EXIT_PAUSED, human_bytes
 
 logger = logging.getLogger(__name__)
@@ -1050,6 +1051,7 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
         ("GET", "/api/clock-suggestions"): lambda: {"suggestions": clock.suggest_offsets(conn)},
         ("GET", "/api/body-clock"): lambda: {"rows": [dict(r) for r in repo.list_body_clock(conn)]},
         ("POST", "/api/body-clock"): lambda: _post_body_clock(conn, body),
+        ("GET", "/api/library/checklist"): lambda: _library_checklist(app, conn),
         ("GET", "/api/settings"): lambda: {"settings": _settings(conn)},
         ("POST", "/api/settings"): lambda: _post_settings(conn, body),
         ("POST", "/api/settings/review-thumbs/reveal"): lambda: _reveal_review_thumbs(conn),
@@ -1122,21 +1124,93 @@ def _shoots_plan(app: WebApp) -> dict:
     """``GET /api/shoots/plan`` (sh-3): the newest ``<home>/plans/shoots-*.json``, read-only. ``PHOTOVAULT_DEV_PLAN=<path>``
     serves that file instead (development and the fixture). 404 when there is none; ``POST`` (or `shoots plan`)
     makes one."""
-    override = os.environ.get("PHOTOVAULT_DEV_PLAN")
-    if override:
-        path = Path(override)
-    else:
-        plans = app.home / "plans"
-        found = sorted(plans.glob("shoots-*.json")) if plans.is_dir() else []
-        if not found:
-            raise NotFound("no plan yet")
-        path = found[-1]
+    path = _plan_path(app)
+    if path is None:
+        raise NotFound("no plan yet")
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise NotFound("no plan yet") from exc
     except (OSError, ValueError) as exc:
         raise BadRequest(f"the plan file could not be read: {exc}") from exc
+
+
+def _plan_path(app: WebApp) -> Path | None:
+    """The plan `GET /api/shoots/plan` serves: the dev override, else the newest ``<home>/plans/shoots-*.json``."""
+    override = os.environ.get("PHOTOVAULT_DEV_PLAN")
+    if override:
+        return Path(override)
+    plans = app.home / "plans"
+    found = sorted(plans.glob("shoots-*.json")) if plans.is_dir() else []
+    return found[-1] if found else None
+
+
+# --------------------------------------------------------------------------- library checklist (ob-1)
+
+def _library_checklist(app: WebApp, conn) -> dict:
+    """``GET /api/library/checklist`` (ob-1, review sh-8 §3): what the library has so far. Read-only: one row per known
+    drive that is not ignored (indexed, hashed files, review thumbs), then the phone import, the metadata scan and the
+    newest shoots plan. Review thumbs come from one listing of the folder, never per-file stats."""
+    ignored = set(_ignored_drives(conn))
+    connected = {r["volume_id"] for r in _drive_list(conn, app.volumes_root) if r.get("mounted") and r.get("volume_id")}
+    cfg = previews.review_config(conn)
+    thumb_ids: set[int] = set()
+    thumb_error = None
+    try:
+        thumb_ids = previews.review_ids(previews.review_folder(cfg["folder"], VOLUMES_ROOT))
+    except ValueError as exc:
+        thumb_error = str(exc)
+
+    drives = []
+    for v in repo.list_volumes(conn):
+        vid = v["volume_id"]
+        if vid in ignored:
+            continue
+        files = conn.execute(
+            "SELECT COUNT(*) AS total, COALESCE(SUM(asset_id IS NOT NULL), 0) AS hashed FROM instances "
+            "WHERE volume_id = ? AND state IN ('indexed', 'verified')", (vid,)).fetchone()
+        indexed_job = conn.execute(
+            "SELECT 1 FROM jobs WHERE source_volume_id = ? AND kind = 'index_volume' AND state = 'done' LIMIT 1",
+            (vid,)).fetchone()
+        groups = {r["group_id"] for r in conn.execute(
+            "SELECT DISTINCT a.group_id FROM instances i JOIN assets a ON a.asset_id = i.asset_id "
+            "AND a.group_role = 'primary' WHERE i.volume_id = ? AND i.state IN ('indexed', 'verified') "
+            "AND a.group_id IS NOT NULL", (vid,))}
+        drives.append({
+            "volume_id": vid, "label": v["label"], "role": v["role"], "connected": vid in connected,
+            "indexed": bool(indexed_job) or int(files["total"]) > 0,
+            "hashed_files": int(files["hashed"]), "total_files": int(files["total"]),
+            "thumbs": {"have": len(groups & thumb_ids), "groups": len(groups)},
+        })
+
+    phone_ids = tuple(PHONE_SOURCES)
+    marks = ",".join("?" * len(phone_ids))
+    phone = conn.execute(
+        f"SELECT COUNT(*) AS points, COALESCE(SUM(a.point_id IS NOT NULL), 0) AS analysed FROM geo_points g "
+        f"LEFT JOIN phone_analysis a ON a.point_id = g.point_id WHERE g.source IN ({marks})", phone_ids).fetchone()
+    meta = conn.execute(
+        "SELECT (SELECT COUNT(*) FROM capture_groups) AS groups, (SELECT COUNT(*) FROM group_meta m "
+        "JOIN capture_groups c ON c.group_id = m.group_id) AS scanned").fetchone()
+
+    plan = None
+    path = _plan_path(app)
+    if path is not None:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            shoots_list = data.get("shoots") or []
+            # A locked shoot is one already applied (sh-1); the rest still need confirming.
+            plan = {"plan_id": data.get("plan_id"), "created_at": data.get("created_at"),
+                    "shoots": len(shoots_list),
+                    "unconfirmed": sum(1 for s in shoots_list if not s.get("locked"))}
+        except (OSError, ValueError, AttributeError):
+            plan = None
+    return {
+        "drives": drives,
+        "thumbs_enabled": bool(cfg["enabled"]), "thumbs_error": thumb_error,
+        "phone": {"points": int(phone["points"]), "analysed": int(phone["analysed"])},
+        "meta_scanned": {"groups": int(meta["scanned"]), "total": int(meta["groups"])},
+        "plan": plan,
+    }
 
 
 # With PHOTOVAULT_DEV_PLAN the review runs on a fixture whose ids mean nothing in the catalog, and a rejected name

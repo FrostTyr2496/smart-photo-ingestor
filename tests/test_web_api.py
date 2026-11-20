@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from photovault import activity, cli, metadata, preview, volumes
+from photovault import activity, cli, metadata, preview, previews, volumes
 from photovault.catalog import db, repo
 from photovault.config import load_config
 from photovault.geo import utc_text
@@ -556,6 +556,53 @@ def test_settings_defaults_and_updates(srv: Client) -> None:
     assert srv.call("POST", "/api/settings", {"match_reach_s": "soon"})[0] == 400
     assert srv.call("POST", "/api/settings", {"default_offset": "nowhere"})[0] == 400
     assert srv.call("POST", "/api/settings", {})[0] == 400
+
+
+# --------------------------------------------------------------------------- library checklist (ob-1)
+
+def test_library_checklist_counts_what_is_done(srv: Client) -> None:
+    conn = db.connect(srv.app.catalog_path)
+    # group a is hashed on WORK, with a second unhashed file there; group c is hashed on the old drive
+    repo.upsert_instance(conn, volume_id="vol-work", rel_path="Photos/DSC_0002.JPG", size=10, mtime_ns=1,
+                         kind="photo", state="indexed", asset_id=None)
+    conn.execute("INSERT INTO group_meta (group_id, updated_at) VALUES (?, ?)", (srv.ids["a"], "2026-11-10T21:00:00"))
+    repo.upsert_geo_point(conn, utc_time=utc_text(datetime(2026, 11, 10, 21, 6, tzinfo=UTC)), lat=51.6, lon=-0.2,
+                          alt=None, source="iphone", source_ref="p2")
+    point = conn.execute("SELECT point_id FROM geo_points WHERE source_ref = 'p2'").fetchone()[0]
+    conn.execute("INSERT INTO phone_analysis (point_id, caption, labels_json, persons_json, hints_json) "
+                 "VALUES (?, 'Test caption', '[]', '[]', '{}')", (point,))
+    thumbs = srv.home / "thumbs"
+    thumbs.mkdir(parents=True)
+    (thumbs / f"{srv.ids['a']}.jpg").write_bytes(b"\xff\xd8\xff\xd9")
+    repo.set_setting(conn, previews.REVIEW_SETTING, json.dumps({"enabled": True, "folder": str(thumbs)}))
+    conn.commit()
+    conn.close()
+
+    status, data = srv.call("GET", "/api/library/checklist")
+    assert status == 200
+    drives = {d["volume_id"]: d for d in data["drives"]}
+    assert drives["vol-work"] == {"volume_id": "vol-work", "label": "WORK", "role": "WORKING", "connected": True,
+                                  "indexed": True, "hashed_files": 1, "total_files": 2,
+                                  "thumbs": {"have": 1, "groups": 1}}
+    assert drives["vol-leg"]["connected"] is False and drives["vol-leg"]["hashed_files"] == 1
+    assert drives["vol-leg"]["thumbs"] == {"have": 0, "groups": 1}
+    assert data["thumbs_enabled"] is True and data["thumbs_error"] is None
+    assert data["phone"] == {"points": 1, "analysed": 1}
+    assert data["meta_scanned"] == {"groups": 1, "total": 3}
+    assert data["plan"] is None  # no plan written yet
+
+    plans = srv.home / "plans"
+    plans.mkdir(parents=True)
+    (plans / "shoots-20261119-100000.json").write_text(json.dumps({
+        "plan_id": "shoots-20261119-100000", "created_at": "2026-11-19T10:00:00",
+        "shoots": [{"locked": True}, {"locked": False}, {"locked": False}]}), encoding="utf-8")
+    status, data = srv.call("GET", "/api/library/checklist")
+    assert data["plan"] == {"plan_id": "shoots-20261119-100000", "created_at": "2026-11-19T10:00:00",
+                            "shoots": 3, "unconfirmed": 2}
+
+    assert srv.call("POST", "/api/drives/ignore", {"key": "vol-leg", "ignored": True})[0] == 200
+    _, data = srv.call("GET", "/api/library/checklist")
+    assert [d["volume_id"] for d in data["drives"]] == ["vol-work"]
 
 
 # --------------------------------------------------------------------------- thumbnails

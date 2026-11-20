@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { useEffect, useState } from 'react';
 import { Disclosure, RolePill } from '../components/bits';
+import { LibraryCard } from './LibraryCard';
 import { extVM, FinishedRow, RunningCard, taskVM, type TaskVM } from '../components/TaskCard';
 import { plural, relTime } from '../lib/format';
 import {
@@ -242,6 +243,8 @@ export function Home({ task }: { task?: string }) {
               : 'Loading…'}
         </p>
       </div>
+
+      <LibraryCard />
 
       {urgent > 0 && (
         <a href="#/actions" className="-mt-3 text-sm font-medium text-maybe hover:underline">
