@@ -292,3 +292,48 @@ def test_thumb_route_falls_back_to_review_folder_and_settings_validate(srv: Clie
     assert srv.call("GET", "/api/groups/4243/thumb") == (200, JPEG)
     status, _ = srv.call("POST", "/api/settings", {"review_thumbs": {"enabled": True, "folder": "/Volumes/X/t"}})
     assert status == 400
+
+
+def _fake_exiftool(tmp_path, body: str):
+    exe = tmp_path / "fake-exiftool"
+    exe.write_text("#!/bin/sh\n" + body + "\n")
+    exe.chmod(0o755)
+    return str(exe)
+
+
+def test_stay_open_exiftool_raises_when_exiftool_dies(tmp_path) -> None:
+    """PyExifTool spun forever on a dead ExifTool (a hash hung for hours); ours raises at once."""
+    et = previews.StayOpenExifTool(_fake_exiftool(tmp_path, "exit 0"), timeout_s=5)
+    with pytest.raises(previews.ExifToolDied):
+        et.execute("-b", "-PreviewImage", "/nonexistent.nef")
+    et.close()
+
+
+def test_stay_open_exiftool_times_out_when_stalled(tmp_path) -> None:
+    et = previews.StayOpenExifTool(_fake_exiftool(tmp_path, "sleep 30"), timeout_s=0.5)
+    with pytest.raises(previews.ExifToolDied):
+        et.execute("-b", "-PreviewImage", "/nonexistent.nef")
+    et.close()
+
+
+def test_preview_reader_restarts_and_skips_a_file_when_exiftool_dies(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(previews, "_find_exiftool", lambda: _fake_exiftool(tmp_path, "exit 0"))
+    with previews.PreviewReader() as rd:
+        assert rd.read(tmp_path / "a.nef") is None and rd.restarts == 1
+        assert rd.read(tmp_path / "b.nef") is None and rd.restarts == 2
+
+
+def test_stay_open_exiftool_reads_a_real_preview(tmp_path) -> None:
+    from photovault.metadata import _find_exiftool
+    exe = _find_exiftool()
+    if exe is None:
+        pytest.skip("exiftool not installed")
+    from PIL import Image
+    src = tmp_path / "p.jpg"
+    Image.new("RGB", (64, 48), (200, 50, 50)).save(src)
+    et = previews.StayOpenExifTool(exe)
+    try:
+        assert et.execute("-b", "-PreviewImage", str(src)) == b""          # no embedded preview: empty, not a hang
+        assert b"64" in et.execute("-ImageWidth", str(src))                # the next command still answers
+    finally:
+        et.close()

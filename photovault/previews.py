@@ -12,11 +12,13 @@ import io
 import json
 import logging
 import os
+import select
 import sqlite3
+import subprocess
+import time
 from collections.abc import Callable
 from pathlib import Path
 
-from exiftool import ExifTool
 from PIL import Image
 
 from photovault import preview
@@ -214,30 +216,95 @@ def volume_primaries(conn: sqlite3.Connection, volume_id: str) -> list[tuple[int
     return sorted(seen.items())
 
 
+class ExifToolDied(RuntimeError):
+    """The persistent ExifTool exited, or gave no answer within the timeout."""
+
+
+class StayOpenExifTool:
+    """One `exiftool -stay_open` process, read with a timeout and EOF detection.
+
+    PyExifTool's reader loops forever on an empty read when ExifTool exits mid-run (it appends b"" without end and
+    grows memory), which hung a hash for hours (2026-11-19). Here an exit raises `ExifToolDied` at once, and a stall
+    raises it after `timeout_s`, so the caller can restart and skip one file."""
+
+    def __init__(self, exe: str, timeout_s: float = preview.EXIFTOOL_TIMEOUT_S) -> None:
+        self.timeout_s = timeout_s
+        self._n = 0
+        self._proc = subprocess.Popen([exe, "-stay_open", "True", "-@", "-"], stdin=subprocess.PIPE,
+                                      stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+
+    def execute(self, *args: str) -> bytes:
+        """Run one command; its stdout, without the ready marker. Raises `ExifToolDied`."""
+        proc = self._proc
+        if proc.poll() is not None or proc.stdin is None or proc.stdout is None:
+            raise ExifToolDied("exiftool is not running")
+        self._n += 1
+        end = f"{{ready{self._n}}}".encode()
+        try:
+            proc.stdin.write(("\n".join(args) + f"\n-execute{self._n}\n").encode())
+            proc.stdin.flush()
+        except OSError as exc:
+            raise ExifToolDied(f"exiftool stdin closed: {exc}") from exc
+        fd = proc.stdout.fileno()
+        buf = bytearray()
+        deadline = time.monotonic() + self.timeout_s
+        while not bytes(buf[-(len(end) + 8):]).rstrip().endswith(end):
+            left = deadline - time.monotonic()
+            ready = select.select([fd], [], [], max(left, 0))[0] if left > 0 else []
+            if not ready:
+                raise ExifToolDied(f"exiftool gave no answer in {self.timeout_s:.0f} s")
+            chunk = os.read(fd, 1 << 16)
+            if not chunk:
+                raise ExifToolDied("exiftool exited")
+            buf += chunk
+        data = bytes(buf)
+        return data[:data.rfind(end)]
+
+    def close(self) -> None:
+        proc = self._proc
+        try:
+            if proc.poll() is None and proc.stdin is not None:
+                proc.stdin.write(b"-stay_open\nFalse\n")
+                proc.stdin.flush()
+                proc.wait(timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+
 class PreviewReader:
-    """One persistent ExifTool for many files. `read` gives the first JPEG among `tags`, or None. Without a working
-    ExifTool it falls back to `preview.extract_preview` (one process per file)."""
+    """One persistent ExifTool for many files. `read` gives the first JPEG among `tags`, or None. A dead or stalled
+    ExifTool is restarted and that file skipped; after `MAX_RESTARTS` it falls back to `preview.extract_preview` (one
+    process per file, with its own timeout)."""
+
+    MAX_RESTARTS = 20
 
     def __init__(self) -> None:
-        self._et: ExifTool | None = None
+        self._et: StayOpenExifTool | None = None
+        self._exe: str | None = None
+        self.restarts = 0
+
+    def _start(self) -> None:
+        self._et = None
+        if self._exe is None or self.restarts > self.MAX_RESTARTS:
+            return
+        try:
+            self._et = StayOpenExifTool(self._exe)
+        except OSError as exc:
+            logger.warning("persistent exiftool did not start (%s); reading previews one file at a time", exc)
 
     def __enter__(self) -> PreviewReader:
         exe = _find_exiftool()
-        if exe is not None:
-            try:
-                self._et = ExifTool(executable=exe)
-                self._et.run()
-            except Exception as exc:  # noqa: BLE001  (any start failure: fall back to one process per file)
-                logger.warning("persistent exiftool did not start (%s); reading previews one file at a time", exc)
-                self._et = None
+        self._exe = str(exe) if exe is not None else None
+        self._start()
         return self
 
     def __exit__(self, *exc: object) -> None:
         if self._et is not None:
-            try:
-                self._et.terminate()
-            except Exception:  # noqa: BLE001
-                pass
+            self._et.close()
+            self._et = None
 
     def read(self, path: Path, tags: tuple[str, ...] = preview.PREVIEW_TAGS) -> bytes | None:
         target = str(Path(path).resolve())  # absolute, so a name can never be read as an option
@@ -245,11 +312,14 @@ class PreviewReader:
             return preview.extract_preview(Path(target), tags)
         for tag in tags:
             try:
-                data = self._et.execute("-b", f"-{tag}", target, raw_bytes=True)
-            except Exception as exc:  # noqa: BLE001  (a bad file must not stop the run)
-                logger.debug("exiftool -%s failed for %s: %s", tag, target, exc)
-                continue
-            if isinstance(data, bytes) and data.startswith(preview.JPEG_MAGIC):
+                data = self._et.execute("-b", f"-{tag}", target)
+            except ExifToolDied as exc:
+                logger.warning("exiftool stopped on %s (%s); restarting and skipping this file", target, exc)
+                self._et.close()
+                self.restarts += 1
+                self._start()
+                return None
+            if data.startswith(preview.JPEG_MAGIC):
                 return data
         return None
 
