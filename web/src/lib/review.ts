@@ -20,6 +20,58 @@ export interface Gap {
   after_group_id: number;
   gap_s: number;
 }
+/** sh-8 plan data: a session is [first_group_id, last_group_id]. */
+export type Session = [number, number];
+export interface DetailChoice {
+  value: string;
+  source: string;
+  confidence: number;
+  evidence?: number;
+  /** D-128 beta: below the cut-off a full run would apply. */
+  beyond_cutoff?: boolean;
+}
+export interface Detail {
+  value: string | null;
+  source: string | null;
+  confidence: number;
+  evidence: number;
+  alternatives: DetailChoice[];
+  /** Subject only. */
+  top_terms?: string[];
+  example_caption?: { value: string; confidence: number; beyond_cutoff: boolean } | null;
+}
+export interface PeopleDetail {
+  value: string[];
+  source: string | null;
+  confidence: number;
+  evidence: number;
+  /** One chip per name, with its own confidence. */
+  names: DetailChoice[];
+  alternatives: DetailChoice[];
+}
+export interface ShootDetails {
+  place: Detail;
+  subject: Detail;
+  people: PeopleDetail;
+}
+export interface Candidate {
+  session: Session;
+  score: number;
+  band: 'likely' | 'maybe' | 'beyond_cutoff';
+  reasons: { term: string; text: string }[];
+  home_proposal: string | null;
+  frames: number;
+  start_instant: string;
+  end_instant: string;
+  bodies: Record<string, number>;
+  beyond_cutoff?: boolean;
+}
+export interface UnassignedSession {
+  session: Session;
+  frames: number;
+  start_instant: string;
+  end_instant: string;
+}
 export interface PlanShoot {
   proposal_id: string;
   trip_id: string | null;
@@ -41,6 +93,12 @@ export interface PlanShoot {
   state?: 'accepted' | 'skipped';
   /** The drives holding the frames, most frames first (sh-1). Older plans lack it. */
   volumes?: PlanVolume[];
+  /** sh-8: absent in older plans and on locked shoots. */
+  members?: { core_sessions: Session[] };
+  candidates?: Candidate[];
+  details?: ShootDetails;
+  /** Accepted through a stack (sh-10). */
+  confirmed?: boolean;
 }
 export interface PlanVolume {
   volume_id: string;
@@ -62,10 +120,11 @@ export interface Plan {
   created_at: string;
   /** The newest stored decision already folded into this plan (sh-2); absent in older plans and the fixture. */
   decisions_through?: number;
-  params: Record<string, number | string | null>;
+  params: Record<string, number | string | boolean | null>;
   summary: { frames: number; shoots: number; trips: number; unassigned: number; locked: number; flagged: number };
   trips: PlanTrip[];
   shoots: PlanShoot[];
+  unassigned_sessions?: UnassignedSession[];
 }
 
 /** `rows`: the stored decision ids behind this one (sh-2); several for "Accept trip" and "Accept all unflagged". */
@@ -79,7 +138,15 @@ export type Decision = { seq: number; rows?: number[] } & (
   | { kind: 'move'; id: string; trip_id: string | null }
   | { kind: 'accept_trip'; id: string }
   | { kind: 'accept_all_unflagged' }
+  /** sh-9: "Accept all high-confidence" (stored as one `accept` per shoot, like the older one). */
+  | { kind: 'accept_high' }
+  /** sh-10: the stack was reviewed; stored as `accept` with `{confirmed: true}`. */
+  | { kind: 'confirm'; id: string }
+  | { kind: 'include'; id: string; session: Session }
+  | { kind: 'exclude'; id: string; session: Session }
+  | { kind: 'detail'; id: string; field: DetailField; value: string | string[]; source?: string }
 );
+export type DetailField = 'place' | 'subject' | 'people';
 /** A decision before it gets its sequence number. */
 export type NewDecision = Decision extends infer D ? (D extends unknown ? Omit<D, 'seq' | 'rows'> : never) : never;
 
@@ -91,6 +158,9 @@ export interface EffShoot extends Omit<PlanShoot, 'state'> {
   derived: boolean;
   /** Names the user rejected for this shoot (they join the stoplist on Apply). */
   rejected: string[];
+  /** sh-10: core sessions sent back to the pool, and candidate sessions pulled in. */
+  excluded: Session[];
+  included: Session[];
 }
 export interface EffTrip extends Omit<PlanTrip, 'shoot_ids'> {
   shoot_ids: string[];
@@ -120,7 +190,7 @@ const share = (total: number, left: number, all: number): [number, number] => {
 };
 
 export function fromPlanShoot(s: PlanShoot): EffShoot {
-  return { ...s, state: s.state ?? 'undecided', renamed: s.name.source === 'user', derived: false, rejected: [] };
+  return { ...s, state: s.state ?? 'undecided', renamed: s.name.source === 'user', derived: false, rejected: [], excluded: [], included: [], confirmed: s.confirmed ?? false };
 }
 
 // ---- proposal ids: the planner's `_sha("s:", first, last)` (photovault/shoots.py) ----
@@ -227,6 +297,9 @@ export function mergeShoots(a: EffShoot, b: EffShoot): EffShoot {
     derived: true,
     renamed: a.renamed,
     rejected: [...new Set([...a.rejected, ...b.rejected])],
+    excluded: [...a.excluded, ...b.excluded],
+    included: [...a.included, ...b.included],
+    confirmed: false,
     locked: false,
   };
 }
@@ -334,7 +407,46 @@ export function applyDecision(p: EffPlan, d: Decision): EffPlan {
     }
     case 'accept_all_unflagged':
       return { ...p, shoots: p.shoots.map((s) => (!s.locked && s.state === 'undecided' && s.flags.length === 0 ? { ...s, state: 'accepted' } : s)) };
+    case 'accept_high':
+      return { ...p, shoots: p.shoots.map((s) => (isHighConfidence(s) && s.state === 'undecided' ? { ...s, state: 'accepted' } : s)) };
+    case 'confirm':
+      return patch(p, d.id, (s) => ({ ...s, state: 'accepted', confirmed: true }));
+    case 'include':
+      return patch(p, d.id, (s) => ({ ...s, excluded: dropSession(s.excluded, d.session), included: addSession(s.included, d.session) }));
+    case 'exclude':
+      return patch(p, d.id, (s) => ({ ...s, included: dropSession(s.included, d.session), excluded: addSession(s.excluded, d.session) }));
+    case 'detail':
+      return patch(p, d.id, (s) => (s.details ? { ...s, details: withDetail(s.details, d.field, d.value, d.source ?? 'user') } : s));
   }
+}
+
+const sameSession = (a: Session, b: Session): boolean => a[0] === b[0] && a[1] === b[1];
+const dropSession = (list: Session[], x: Session): Session[] => list.filter((y) => !sameSession(y, x));
+const addSession = (list: Session[], x: Session): Session[] => [...dropSession(list, x), x];
+export { sameSession };
+
+/** A user decision on a detail: the field takes the value at confidence 1, the old value becomes an alternative. */
+export function withDetail(det: ShootDetails, field: DetailField, value: string | string[], source: string): ShootDetails {
+  if (field === 'people') {
+    const names = Array.isArray(value) ? value : [value];
+    const have = new Map([...det.people.names, ...det.people.alternatives].map((n) => [n.value, n]));
+    return { ...det, people: { ...det.people, value: names, source, confidence: 1, names: names.map((n) => (have.get(n) as DetailChoice | undefined) ?? { value: n, source, confidence: 1 }) } };
+  }
+  const cur = det[field];
+  const v = String(value);
+  const alts = cur.value && cur.value !== v ? [{ value: cur.value, source: cur.source ?? 'user', confidence: cur.confidence, evidence: cur.evidence }, ...cur.alternatives] : cur.alternatives;
+  return { ...det, [field]: { ...cur, value: v, source, confidence: 1, alternatives: alts.filter((a) => a.value !== v) } };
+}
+
+/** Confidence at or above which a proposed detail counts as high (D-127 calibration: 87 of 174 subjects reach it). */
+export const HIGH_CONFIDENCE = 0.6;
+
+/** A shoot "Accept all high-confidence" takes: unlocked, no flags, and a place and subject at high confidence.
+ *  Plans from before sh-8 carry no details; for those it falls back to "no flags". */
+export function isHighConfidence(s: EffShoot): boolean {
+  if (s.locked || s.flags.length > 0) return false;
+  if (!s.details) return true;
+  return (s.details.place.value !== null && s.details.place.confidence >= HIGH_CONFIDENCE) && (s.details.subject.value !== null && s.details.subject.confidence >= HIGH_CONFIDENCE);
 }
 
 /** The effective plan after every decision, in order. */
@@ -357,7 +469,7 @@ export function undoDecision(decisions: Decision[], seq: number): Decision[] {
 export interface StoredDecision {
   decision_id: number;
   proposal_id: string;
-  kind: 'accept' | 'split' | 'merge' | 'skip' | 'rename' | 'reject_name' | 'move';
+  kind: 'accept' | 'split' | 'merge' | 'skip' | 'rename' | 'reject_name' | 'move' | 'include' | 'exclude' | 'detail';
   payload: Record<string, unknown>;
   decided_at?: string;
 }
@@ -370,6 +482,17 @@ export function toServerRows(d: NewDecision, p: EffPlan, batch: string): Decisio
     case 'accept':
     case 'skip':
       return [{ proposal_id: d.id, kind: d.kind, payload: {} }];
+    case 'confirm':
+      return [{ proposal_id: d.id, kind: 'accept', payload: { confirmed: true } }];
+    case 'include':
+    case 'exclude':
+      return [{ proposal_id: d.id, kind: d.kind, payload: { session: d.session } }];
+    case 'detail':
+      return [{ proposal_id: d.id, kind: 'detail', payload: { field: d.field, value: d.value, ...(d.source ? { source: d.source } : {}) } }];
+    case 'accept_high':
+      return p.shoots
+        .filter((s) => isHighConfidence(s) && s.state === 'undecided')
+        .map((s) => ({ proposal_id: s.proposal_id, kind: 'accept', payload: { batch, ui: 'accept_high' } }));
     case 'rename':
       return [{ proposal_id: d.id, kind: 'rename', payload: { value: d.value, ...(d.source ? { source: d.source } : {}) } }];
     case 'reject_name':
@@ -406,6 +529,10 @@ export function fromServerRows(rows: StoredDecision[]): Decision[] {
     let d: Decision;
     if (batch && p.ui === 'accept_trip' && typeof p.trip === 'string') d = { ...base, kind: 'accept_trip', id: p.trip };
     else if (batch && p.ui === 'accept_all_unflagged') d = { ...base, kind: 'accept_all_unflagged' };
+    else if (batch && p.ui === 'accept_high') d = { ...base, kind: 'accept_high' };
+    else if (r.kind === 'accept' && p.confirmed === true) d = { ...base, kind: 'confirm', id: r.proposal_id };
+    else if (r.kind === 'include' || r.kind === 'exclude') d = { ...base, kind: r.kind, id: r.proposal_id, session: (Array.isArray(p.session) ? p.session.map(Number) : [0, 0]) as Session };
+    else if (r.kind === 'detail') d = { ...base, kind: 'detail', id: r.proposal_id, field: (p.field as DetailField) ?? 'place', value: Array.isArray(p.value) ? p.value.map(String) : String(p.value ?? ''), ...(typeof p.source === 'string' ? { source: p.source } : {}) };
     else if (r.kind === 'rename') d = { ...base, kind: 'rename', id: r.proposal_id, value: String(p.value ?? ''), ...(typeof p.source === 'string' ? { source: p.source } : {}) };
     else if (r.kind === 'reject_name') d = { ...base, kind: 'reject_name', id: r.proposal_id, value: String(p.value ?? '') };
     else if (r.kind === 'split') d = { ...base, kind: 'split', id: r.proposal_id, after_group_id: Number(p.after_group_id) };
@@ -436,6 +563,11 @@ export function describeAll(plan: Plan, decisions: Decision[]): { seq: number; t
       case 'move': text = `Move ${nm} ${d.trip_id ? `to ${nameOf(cur, d.trip_id)}` : 'out of its trip'}`; break;
       case 'accept_trip': text = `Accept trip ${nm}`; break;
       case 'accept_all_unflagged': text = 'Accept all unflagged'; break;
+      case 'accept_high': text = 'Accept all high-confidence'; break;
+      case 'confirm': text = `Confirm ${nm}`; break;
+      case 'include': text = `Add photos ${d.session[0]}–${d.session[1]} to ${nm}`; break;
+      case 'exclude': text = `Take photos ${d.session[0]}–${d.session[1]} out of ${nm}`; break;
+      case 'detail': text = `Set ${d.field} of ${nm} to "${Array.isArray(d.value) ? d.value.join(', ') : d.value}"`; break;
     }
     cur = applyDecision(cur, d);
     return { seq: d.seq, text };

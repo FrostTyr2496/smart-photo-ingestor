@@ -264,7 +264,7 @@ Order: sp-9 and pv-1 (independent) → sh-8 → sh-9 → sh-10; ob-1 any time; s
     evidence. Details in `docs/private/2026-11-19-sh8-calibration.md`. Tests: `tests/test_shoot_members.py`,
     `tests/test_shoots_apply_details.py`.
 
-- [ ] 11. The queue: Shoots to confirm
+- [x] 11. The queue: Shoots to confirm
   - ID: sh-9 (after sh-8). _Design:_ review §4.
   - `#/review/shoots` becomes the queue:
     - progress ("N of M confirmed · K frames unassigned");
@@ -273,6 +273,14 @@ Order: sp-9 and pv-1 (independent) → sh-8 → sh-9 → sh-10; ob-1 any time; s
     - collapsed stacks read `date · place · subject` with a confidence marker;
     - "Accept all high-confidence" replaces "Accept all unflagged", and accepts core members and details only.
   - Verify: `cd web && npm run typecheck && npm test`; **[user]** browser check.
+  - Result (2026-11-19): `#/review/shoots` is the queue: progress bar and "N of M confirmed · K frames unassigned", sort
+    (Easiest first default, Biggest, Newest, Connected first with the trip headers), five filter chips (AND), collapsed
+    rows `date · place · subject` with confidence dots (opacity follows confidence, D-128), "N in question" and counts,
+    and "Accept all high-confidence" (no flags, place and subject at confidence >= 0.6; one `accept` per shoot, batch
+    `accept_high`; candidates and low-confidence details stay open). The plan's `params` gain `pretick_min`, `show_min`
+    and `beta`. Pure logic in `web/src/lib/stacks.ts` and the reducer in `review.ts` (new decision kinds `include`,
+    `exclude`, `detail`, `confirm`), tests in `web/src/lib/stacks.test.ts`; the fixture plan has invented sh-8 fields.
+    Opening a row shows the sh-3 card until sh-10 replaces it. **[user]** browser check.
 
 - [ ] 12. The stack: details, members, in question
   - ID: sh-10 (after sh-9). _Design:_ review §5.

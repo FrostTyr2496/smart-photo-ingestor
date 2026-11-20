@@ -7,7 +7,9 @@ import {
   effectivePlan,
   fromServerRows,
   matchesFilter,
+  isHighConfidence,
   reviewSections,
+  type EffShoot,
   tally,
   toServerRows,
   type Decision,
@@ -18,6 +20,7 @@ import {
   type ReviewFilter,
 } from '../../lib/review';
 import { ShootCard } from './ShootCard';
+import { QUEUE_FILTERS, SORTS, fade, matchesQueueFilter, minConfidence, openCandidates, queueProgress, sortShoots, stackTitle, type QueueFilter, type SortMode } from '../../lib/stacks';
 
 /** The hatched frame in the warning hue that marks review as another mode. Rendered by App, outside any transform. */
 export function ReviewFrame() {
@@ -251,11 +254,31 @@ function Review({ plan, replan }: { plan: Plan; replan: Replan }) {
       await api('POST', '/api/shoots/decisions/delete', { decision_ids: d.rows ?? [d.seq] });
       commit(decRef.current.filter((x) => x.seq !== seq));
     });
-  const [connectedFirst, setConnectedFirst] = usePref<boolean>('review.shoots.connectedFirst', true);
+  const [sort, setSort] = usePref<SortMode>('review.shoots.sort', 'easiest');
+  const [chips, setChips] = useState<QueueFilter[]>([]);
+  const [openId, setOpenId] = useState<string | null>(null);
   const { drives } = useStore();
   const mountedKey = drives.filter((d) => d.mounted && d.volume_id).map((d) => d.volume_id).sort().join('|');
   const mounted = useMemo(() => new Set(mountedKey ? mountedKey.split('|') : []), [mountedKey]);
-  const sections = useMemo(() => reviewSections(eff, mounted, connectedFirst), [eff, mounted, connectedFirst]);
+  const pretick = typeof plan.params.pretick_min === 'number' ? plan.params.pretick_min : 0.5;
+  const beta = plan.params.beta !== false;
+  const visible = (s: EffShoot) => matchesFilter(s, filter) && chips.every((c) => matchesQueueFilter(s, c, mounted));
+  const flat = sortShoots(eff.shoots.filter((s) => !s.locked && visible(s)), sort, mounted);
+  const sections = useMemo(() => (sort === 'connected' ? reviewSections(eff, mounted, true) : []), [eff, mounted, sort]);
+  const locked = eff.shoots.filter((s) => s.locked);
+  const prog = queueProgress(eff.shoots, (plan.unassigned_sessions ?? []).reduce((n, x) => n + x.frames, 0));
+  const highCount = eff.shoots.filter((s) => isHighConfidence(s) && s.state === 'undecided').length;
+  const opened = openId ? (eff.shoots.find((s) => s.proposal_id === openId) ?? null) : null;
+
+  const _unused = pretick;
+  void _unused;
+  const confirm = (s: EffShoot, ds: NewDecision[]) => {
+    const i = flat.findIndex((x) => x.proposal_id === s.proposal_id);
+    const nxt = flat.slice(i + 1).find((x) => x.state === 'undecided') ?? flat.find((x) => x.state === 'undecided' && x.proposal_id !== s.proposal_id) ?? null;
+    ds.forEach(decide);
+    setOpenId(nxt ? nxt.proposal_id : null);
+  };
+  const row = (s: EffShoot) => <QueueRow key={s.proposal_id} s={s} onOpen={() => setOpenId(s.proposal_id)} mounted={mounted} />;
 
   return (
     <div className="flex flex-col gap-4">
@@ -263,49 +286,84 @@ function Review({ plan, replan }: { plan: Plan; replan: Replan }) {
       {loadErr && <p className="text-sm text-err">The saved decisions could not be loaded: {loadErr}</p>}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Review shoots</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Shoots to confirm</h1>
           <p className="mt-1 text-sm text-muted">
-            {counts.accepted} accepted · {counts.skipped} skipped · {counts.undecided} undecided
+            {prog.done} of {prog.total} confirmed · {prog.unassigned.toLocaleString()} frames unassigned · {counts.skipped} skipped
           </p>
+          <div className="mt-2 h-1.5 w-64 max-w-full overflow-hidden rounded-full bg-ink/10" role="progressbar" aria-valuemin={0} aria-valuemax={prog.total} aria-valuenow={prog.done}>
+            <div className="h-full bg-go" style={{ width: `${prog.total ? (100 * prog.done) / prog.total : 0}%` }} />
+          </div>
         </div>
-        <button type="button" className={primary} onClick={() => decide({ kind: 'accept_all_unflagged' })} title="Accept every undecided shoot that has no flags">
-          Accept all unflagged
+        <button type="button" className={primary} disabled={highCount === 0} onClick={() => decide({ kind: 'accept_high' })} title="Accept every undecided shoot with no flags whose place and subject are proposed at high confidence. Frames in question and low-confidence details stay open.">
+          Accept all high-confidence ({highCount})
         </button>
       </div>
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="flex min-w-0 flex-col gap-6">
-          {sections.map((sec) => {
-            const list = sec.shoots.filter((s) => matchesFilter(s, filter));
-            if (list.length === 0) return null;
-            return sec.trip ? (
-              <TripSection key={sec.trip.proposal_id} trip={sec.trip} shoots={list} eff={eff} decide={decide} mounted={mounted} />
-            ) : (
-              <section key="no-trip" className="flex flex-col gap-3">
-                <h2 className="text-lg font-semibold">Not in a trip</h2>
-                {list.map((s) => (
-                  <ShootCard key={s.proposal_id} s={s} plan={eff} onDecide={decide} mounted={mounted} />
-                ))}
-              </section>
-            );
-          })}
-          {eff.shoots.every((s) => !matchesFilter(s, filter)) && <p className="text-sm text-muted">Nothing matches this filter.</p>}
+        <div className="flex min-w-0 flex-col gap-4">
+          {opened ? (
+            <div className="flex flex-col gap-2">
+              <button type="button" className={btn} onClick={() => setOpenId(null)}>Back to the queue</button>
+              <ShootCard s={opened} plan={eff} onDecide={decide} mounted={mounted} />
+            </div>
+          ) : (
+            <>
+              {beta && <p className="text-2xs text-faint">Beta: nothing is hidden. Faint items are low confidence (opacity follows confidence; hover for the number); items below the dashed line are ones a full run would drop.</p>}
+              {sort === 'connected'
+                ? sections.map((sec) => {
+                    const list = sec.shoots.filter((s) => !s.locked && visible(s));
+                    if (list.length === 0) return null;
+                    return sec.trip ? (
+                      <TripSection key={sec.trip.proposal_id} trip={sec.trip} shoots={list} eff={eff} decide={decide} renderShoot={row} />
+                    ) : (
+                      <section key="no-trip" className="flex flex-col gap-2">
+                        <h2 className="text-lg font-semibold">Not in a trip</h2>
+                        {list.map(row)}
+                      </section>
+                    );
+                  })
+                : flat.map(row)}
+              {flat.length === 0 && <p className="text-sm text-muted">Nothing matches these filters.</p>}
+              {locked.length > 0 && (
+                <details className="text-sm text-muted">
+                  <summary className="cursor-pointer">{locked.length} applied earlier (read-only)</summary>
+                  <div className="mt-2 flex flex-col gap-3">
+                    {locked.map((s) => (
+                      <ShootCard key={s.proposal_id} s={s} plan={eff} onDecide={decide} mounted={mounted} />
+                    ))}
+                  </div>
+                </details>
+              )}
+            </>
+          )}
         </div>
         <aside className="flex flex-col gap-4 rounded-2xl border border-maybe/30 bg-surface/70 p-4 lg:sticky lg:top-32" aria-label="Decisions">
-          <div className="flex flex-wrap gap-1" role="group" aria-label="Filter shoots">
+          <div>
+            <label className="text-2xs text-faint" htmlFor="queue-sort">Sort</label>
+            <select id="queue-sort" value={sort} onChange={(e) => setSort(e.target.value as SortMode)} className="mt-1 h-7 w-full rounded-full text-xs">
+              {SORTS.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}
+            </select>
+          </div>
+          <div className="flex flex-wrap gap-1" role="group" aria-label="Filter stacks">
+            {QUEUE_FILTERS.map((f) => {
+              const on = chips.includes(f.key);
+              return (
+                <button key={f.key} type="button" aria-pressed={on} onClick={() => setChips(on ? chips.filter((c) => c !== f.key) : [...chips, f.key])} className={`h-7 rounded-full border px-2.5 text-xs ${on ? 'border-maybe bg-maybe/20 text-maybe' : 'border-line text-muted hover:text-ink'}`}>
+                  {f.label}
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex flex-wrap gap-1" role="group" aria-label="Filter by state">
             {FILTERS.map((f) => (
               <button key={f.key} type="button" aria-pressed={filter === f.key} onClick={() => setFilter(f.key)} className={`h-7 rounded-full px-3 text-xs ${filter === f.key ? 'bg-maybe/20 text-maybe' : 'text-muted hover:text-ink'}`}>
                 {f.label}
               </button>
             ))}
           </div>
-          <label className="flex items-center gap-2 text-xs text-muted" title="Shoots whose photos sit on a connected drive can show previews">
-            <input type="checkbox" checked={connectedFirst} onChange={(e) => setConnectedFirst(e.target.checked)} />
-            Connected drives first{mounted.size === 0 ? ' (none connected)' : ''}
-          </label>
           <div>
             <h2 className="text-sm font-semibold">Pending decisions ({decisions.length})</h2>
             {lines.length === 0 ? (
-              <p className="mt-1 text-xs text-muted">None yet. Each action below is recorded here and can be undone.</p>
+              <p className="mt-1 text-xs text-muted">None yet. Each action is recorded here and can be undone.</p>
             ) : (
               <ol className="mt-2 flex max-h-[50vh] flex-col gap-1 overflow-y-auto">
                 {lines.map((l, i) => (
@@ -328,6 +386,34 @@ function Review({ plan, replan }: { plan: Plan; replan: Replan }) {
         </aside>
       </div>
     </div>
+  );
+}
+
+const DOTS = (c: number): string => '●'.repeat(Math.round(c * 4)).padEnd(4, '○');
+
+/** A collapsed stack: `date · place · subject`, a confidence marker and the counts. */
+function QueueRow({ s, onOpen, mounted }: { s: EffShoot; onOpen: () => void; mounted: ReadonlySet<string> }) {
+  const t = stackTitle(s);
+  const conf = minConfidence(s);
+  const q = openCandidates(s).length;
+  const online = (s.volumes ?? []).some((v) => mounted.has(v.volume_id));
+  const state = s.state === 'accepted' ? (s.confirmed ? '✓ confirmed' : '✓ accepted') : s.state === 'skipped' ? 'skipped' : '';
+  return (
+    <button type="button" onClick={onOpen} className={`flex w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border px-3 py-2.5 text-left hover:border-line-strong ${s.state === 'accepted' ? 'border-go/40' : 'border-line'} ${s.state === 'skipped' ? 'opacity-60' : ''}`}>
+      <span className="text-faint">▸</span>
+      <span className="min-w-0 flex-1 text-sm">
+        <span className="text-muted">{t.date}</span> · <span style={{ opacity: fade(s.details?.place.confidence ?? 1) }}>{t.place ?? <em className="text-faint">no place</em>}</span> ·{' '}
+        <span style={{ opacity: fade(s.details?.subject.confidence ?? 1) }}>{t.subject ?? <em className="text-faint">no subject</em>}</span>
+      </span>
+      <span className="text-xs text-muted" title={`Lowest confidence of place and subject: ${Math.round(conf * 100)}%`} aria-label={`confidence ${Math.round(conf * 100)} percent`}>
+        {DOTS(conf)}
+      </span>
+      <span className="text-xs text-muted">{s.counts.frames.toLocaleString()} frames</span>
+      {q > 0 && <span className="rounded-full border border-maybe/40 bg-maybe/10 px-2 py-0.5 text-xs text-maybe">{q} in question</span>}
+      {s.flags.includes('tz_change') && <span className="text-xs text-maybe" title="time zone change">⚑ tz</span>}
+      {!online && <span className="text-2xs text-faint" title="No drive holding these photos is connected">no previews</span>}
+      {state && <span className="text-xs text-go">{state}</span>}
+    </button>
   );
 }
 
@@ -367,7 +453,7 @@ function Applied({ replan }: { replan: Replan }) {
   );
 }
 
-function TripSection({ trip, shoots, eff, decide, mounted }: { trip: EffTrip; shoots: ReturnType<typeof effectivePlan>['shoots']; eff: ReturnType<typeof effectivePlan>; decide: (d: NewDecision) => void; mounted: ReadonlySet<string> }) {
+function TripSection({ trip, shoots, eff, decide, renderShoot }: { trip: EffTrip; shoots: ReturnType<typeof effectivePlan>['shoots']; eff: ReturnType<typeof effectivePlan>; decide: (d: NewDecision) => void; renderShoot: (s: EffShoot) => React.ReactNode }) {
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(trip.name.value);
   const all = eff.shoots.filter((s) => s.trip_id === trip.proposal_id);
@@ -418,9 +504,7 @@ function TripSection({ trip, shoots, eff, decide, mounted }: { trip: EffTrip; sh
           <button type="button" className={primary} disabled={accepted} onClick={() => decide({ kind: 'accept_trip', id: trip.proposal_id })}>Accept trip</button>
         </div>
       </header>
-      {shoots.map((s) => (
-        <ShootCard key={s.proposal_id} s={s} plan={eff} onDecide={decide} mounted={mounted} />
-      ))}
+      {shoots.map(renderShoot)}
     </section>
   );
 }
