@@ -25,7 +25,7 @@ from typing import Any
 
 from . import naming
 from .catalog import repo
-from . import shoot_scoring
+from . import shoot_density, shoot_places, shoot_scoring
 from .timemodel import BodyClocks, instant_info, offset_tz
 
 PHONE_SOURCES = ("iphone", "ipad", "glasses")
@@ -750,6 +750,7 @@ def plan(conn: sqlite3.Connection, *, gap_h: float = 8, split_km: float = 50, me
         if dupes()[key] > 1 and count[key] > 1:
             s["name"]["value"] += f" {count[key]}"
 
+    shoot_density.annotate(shoots, phone, cfg, haversine_km)
     shoots += _locked_shoots(conn, locked_items)
     _add_volumes(conn, shoots)
     shoots.sort(key=lambda s: (s["_t0"], s["proposal_id"]))
@@ -803,6 +804,9 @@ def plan(conn: sqlite3.Connection, *, gap_h: float = 8, split_km: float = 50, me
             t["end_date"] = max(m["shoot_date"] for m in members)
     trips = sorted((t for t in trips if t["shoot_ids"]), key=lambda t: (t["start_date"], t["proposal_id"]))
 
+    pcfg = shoot_places.load_config(conn, cfg)
+    places = shoot_places.build(shoots, phone, pcfg, haversine_km, shoot_scoring._off_seconds)
+    shoot_density.place_density(places["spots"], {s["proposal_id"]: s for s in shoots})
     for s in shoots:
         for k in [k for k in s if k.startswith("_")]:
             del s[k]
@@ -818,7 +822,7 @@ def plan(conn: sqlite3.Connection, *, gap_h: float = 8, split_km: float = 50, me
                    "pretick_min": cfg.pretick, "show_min": cfg.show, "beta": cfg.beta},
         "summary": {"frames": total_frames, "shoots": len(shoots), "trips": len(trips), "unassigned": unassigned,
                     "locked": sum(1 for s in shoots if s["locked"]), "flagged": flagged},
-        "trips": trips, "shoots": shoots, "unassigned_sessions": unassigned_sessions,
+        "trips": trips, "shoots": shoots, "unassigned_sessions": unassigned_sessions, "places": places,
     }
 
 

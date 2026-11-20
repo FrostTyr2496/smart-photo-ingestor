@@ -331,7 +331,7 @@ Order: sp-9 and pv-1 (independent) → sh-8 → sh-9 → sh-10; ob-1 any time; s
 
 ## Place collections (D-138, review `docs/reviews/2026-11-19-pl-0-place-collections.md`)
 
-- [ ] 15. **[stronger]** Planner: place collections
+- [x] 15. **[stronger]** Planner: place collections
   - ID: pl-1. _Design:_ review §2 and §4.
   - `shoots.plan` adds a top-level `places` list. Each spot is
     `{key, kind: "spot", name: {value, source, confidence, count, alternatives}, centroid, radius_km, area_key,
@@ -351,8 +351,9 @@ Order: sp-9 and pv-1 (independent) → sh-8 → sh-9 → sh-10; ob-1 any time; s
   - Verify: `uv run pytest tests/test_shoot_places.py tests/test_shoots.py -q`, with synthetic coordinates: a spot of 3
     visits over 2 years; a coastline chain cut at 5 km; a shoot with no GPS joined by a confirmed name; a folder join;
     home flagged. Then a read-only run on the real catalog, with the counts (aggregates only) in the Result.
+  - Result (2026-11-19): `photovault/shoot_places.py` (`build`, called from `shoots.plan`; `places: {spots, areas}` in the plan). Settings `place_spot_km` 1.5, `place_spot_max_km` 5, `place_area_km` 25, `place_min_shoots` 2 (a spot of one shoot is not listed, except home). Single-link with the diameter guard; a no-GPS shoot joins only when exactly one spot matches its confirmed name or shared human folder (a name or folder shared by several spots joins nothing). Member confidence = (1 - 0.5 x centre distance / radius) x the shoot's place confidence (0.5 when it has no place name, 0.8 near-factor for word joins). Home: `phone_analysis.hints_json` holds no `home` flag (0 of 18,995 rows), so the fallback is used: the spot with most phone points between 22:00 and 06:00 local (at least 10). Real catalog, read-only: plan 2.2 s, 193 shoots, 15 spots (10 of 2 shoots, 2 of 3, 1 of 4, 1 of 7, 1 of 9) holding 46 member rows (43 by coordinates, 3 by folder, 0 by name, 0 beyond cut-off), 14 areas (1 holds 2 spots), home detected (7 members), spot names: 9 phone place, 4 phone venue, 1 metadata, 1 unnamed. Tests: `tests/test_shoot_places.py`.
 
-- [ ] 16. Review: Group by Time · Trip · Place
+- [x] 16. Review: Group by Time · Trip · Place
   - ID: pl-2 (after pl-1). _Design:_ review §3–4.
   - A "Group by" switch beside Sort in `#/review/shoots`, kept per browser. Time is today's flat queue; Trip groups
     the queue rows by trip; Place lists the collections, biggest first, with areas as headers.
@@ -367,8 +368,9 @@ Order: sp-9 and pv-1 (independent) → sh-8 → sh-9 → sh-10; ob-1 any time; s
   - Home is collapsed under "Home (hidden)" until expanded.
   - Verify: `cd web && npm run typecheck && npm test && npm run build`; `uv run pytest tests/test_shoots_api.py -q`;
     **[user]** browser check.
+  - Result (2026-11-19): a Group by switch (Time, Trip, Place; kept per browser as `review.shoots.group`) beside Sort in `#/review/shoots`. Trip shows the queue under the existing trip headers (`reviewSections`, time order); Place is `views/review/PlacesPane.tsx`: areas as headers when they hold 2+ spots, each spot with its name, source and count, alternative-name chips (click to fill the name box), years and frames, a lazy `MiniMap` with member pins, members as compact rows (ticked at `pretick_min` and above; applied, faint and word-joined-below-cut-off ones start unticked; opacity `0.25 + 0.75 x confidence`; faint ones under a dashed "beyond cut-off (beta)" divider), and Name this place for N shoots. That is a new review decision `name_place` stored as one `detail` (field `place`, source `user`) per ticked shoot with one `batch` id (`ui: name_place`), so the pending panel lists and undoes it as one line; it reloads from the stored rows as one action. Home spots sit in a collapsed "Home (hidden)". Fixture `shoots-fixture.json` gains invented `places`. No server change: `check_decision` already accepts `batch`/`ui` on `detail`. **[user]** browser check.
 
-- [ ] 17. **[stronger]** Phone-density split suggestions
+- [x] 17. **[stronger]** Phone-density split suggestions
   - ID: sh-11 (after pl-1; user ask 2026-11-19, D-141). Idea: where iPhone photos are dense, the user was active and
     likely made several separate outings, so a large camera shoot there may really be several shoots. The planner
     **suggests** split points and never splits by itself (a split stays the user's `split` decision).
@@ -400,3 +402,4 @@ Order: sp-9 and pv-1 (independent) → sh-8 → sh-9 → sh-10; ob-1 any time; s
     venues and one quiet day with one; a coastline shoot whose phone points jump 5 km; a sparse shoot with no phone
     data that gets no suggestion); `cd web && npm run typecheck && npm test && npm run build`; a read-only real-catalog
     run, with aggregate counts in the Result.
+  - Result (2026-11-19): `photovault/shoot_density.py` (called from `shoots.plan` before the places build). Shoots gain `phone_density {points, per_hour, ratio_to_median}` (phone points in the span +- 1 h per hour, against the median of shoots that have any) and place spots gain the same per visit-hour. Every gap of at least `shoot_split_min_gap_s` (1200) is scored: place term (phone, else camera, centres 1 km apart = 0 up to 5 km = 1; a different venue = 0.6), subject term (Jaccard of phone labels + activities within 1 h each side, label stoplist applied), gap term, weights `SPLIT_WEIGHTS` 0.40/0.25/0.35 in `shoot_scoring` (setting `shoot_split_weights`), unknown terms drop out, a gap with neither place nor subject evidence gets no suggestion; density above the median eases the score by up to +50 % (0.1 per ratio point). At most 5 per shoot, 1-3 reasons each; `may_split` flag at score >= `shoot_pretick_min`; beta keeps faint ones with `beyond_cutoff`. Review: queue chip "May be several shoots", "N possible splits" on the row, a split marker between session tiles in the Members step (opacity `0.25 + 0.75 x score`, reasons on hover, click records the existing `split` decision), "iPhone: N photos . Nx usual" on place spots. Tests: `tests/test_shoot_density.py`, `StackPane.test.tsx`. Real catalog, read-only: 174 unlocked shoots, 76 with phone points in range, 38 above the median density; 29 shoots carry 58 suggestions (8 beyond cut-off), 17 are flagged `may_split`; 7 of 15 place spots are denser than the median. **[user]** browser check.

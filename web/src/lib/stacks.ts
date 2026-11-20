@@ -1,7 +1,7 @@
 // sh-9 / sh-10: the queue of "shoots to confirm" (sort, filters, collapsed rows) and the draft of one stack.
 // Pure helpers only; the views are in views/review/.
 
-import { HIGH_CONFIDENCE, connectedFrames, sameSession, type Candidate, type Detail, type EffShoot, type NewDecision, type Session, type ShootDetails } from './review';
+import { HIGH_CONFIDENCE, connectedFrames, sameSession, type Candidate, type Detail, type EffShoot, type NewDecision, type Session, type ShootDetails, type SplitSuggestion } from './review';
 
 // ---- beta display (D-128) ----
 
@@ -40,10 +40,11 @@ export const SORTS: { key: SortMode; label: string }[] = [
   { key: 'connected', label: 'Connected first' },
 ];
 
-export type QueueFilter = 'needs_subject' | 'in_question' | 'tz_change' | 'bodies' | 'no_previews';
+export type QueueFilter = 'needs_subject' | 'in_question' | 'may_split' | 'tz_change' | 'bodies' | 'no_previews';
 export const QUEUE_FILTERS: { key: QueueFilter; label: string }[] = [
   { key: 'needs_subject', label: 'Needs subject' },
   { key: 'in_question', label: 'Frames in question' },
+  { key: 'may_split', label: 'May be several shoots' },
   { key: 'tz_change', label: 'Time zone change' },
   { key: 'bodies', label: 'Bodies disagree' },
   { key: 'no_previews', label: 'No previews' },
@@ -51,6 +52,9 @@ export const QUEUE_FILTERS: { key: QueueFilter; label: string }[] = [
 
 /** Candidates still open for a shoot: not already pulled in, and not below the cut-off. */
 export const openCandidates = (s: EffShoot): Candidate[] => (s.candidates ?? []).filter((c) => !c.beyond_cutoff && !s.included.some((i) => sameSession(i, c.session)));
+
+/** Suggested splits above the cut-off (sh-11), best first. */
+export const possibleSplits = (s: Pick<EffShoot, 'split_suggestions'>): SplitSuggestion[] => (s.split_suggestions ?? []).filter((x) => !x.beyond_cutoff);
 
 /** The lowest confidence among a shoot's place and subject (0 when either is missing). Plans without details: 1. */
 export function minConfidence(s: Pick<EffShoot, 'details'>): number {
@@ -65,6 +69,7 @@ export function matchesQueueFilter(s: EffShoot, f: QueueFilter, mounted: Readonl
   switch (f) {
     case 'needs_subject': return needsSubject(s);
     case 'in_question': return openCandidates(s).length > 0;
+    case 'may_split': return s.flags.includes('may_split');
     case 'tz_change': return s.flags.includes('tz_change');
     case 'bodies': return s.flags.includes('body_clock_mismatch');
     case 'no_previews': return connectedFrames(s, mounted) === 0;

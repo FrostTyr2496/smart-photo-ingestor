@@ -38,6 +38,12 @@ SPOT_MAX_S = 3600                # beyond this a location hints at the area only
 REACH_S = 24 * 3600              # phone points looked at around the core (beta shows the ones beyond the limits)
 STRENGTH_K = 1.6                 # strength of weighted evidence W: 1 - exp(-K W)
 MAX_CANDIDATES = 40
+# sh-11 split suggestions: terms 0..1 combined like WEIGHTS (an unknown term drops out); the gap term is always known.
+SPLIT_WEIGHTS = {"place": 0.40, "subject": 0.25, "gap": 0.35}
+SPLIT_MIN_GAP_S = 20 * 60        # setting shoot_split_min_gap_s
+SPLIT_WINDOW_S = 3600            # phone and camera evidence on each side of a gap
+SPLIT_MOVE_KM = (1.0, 5.0)       # place term: 0 at the first distance, 1 at the second
+MAX_SPLIT_SUGGESTIONS = 5
 MAX_ALTERNATIVES = 8
 FOLDER_DATED_CONF, FOLDER_HUMAN_CONF = 0.9, 0.5
 DEFAULT_LABEL_STOPLIST = ["sky", "outdoor", "outdoors", "indoor", "plant", "tree", "grass", "building", "cloud",
@@ -53,6 +59,8 @@ class Config:
     stoplist: set[str] = field(default_factory=lambda: set(DEFAULT_LABEL_STOPLIST))
     weights: dict = field(default_factory=lambda: dict(WEIGHTS))
     decay: dict = field(default_factory=lambda: dict(DECAY))
+    split_min_gap_s: float = SPLIT_MIN_GAP_S
+    split_weights: dict = field(default_factory=lambda: dict(SPLIT_WEIGHTS))
 
 
 def _float(conn, key: str, default: float) -> float:
@@ -74,6 +82,10 @@ def load_config(conn) -> Config:
     """Settings with defaults: ``shoot_pretick_min``, ``shoot_show_min``, ``shoot_review_beta``,
     ``shoot_label_stoplist`` (JSON list), ``shoot_score_weights`` and ``shoot_phone_decay`` (JSON objects)."""
     cfg = Config(pretick=_float(conn, "shoot_pretick_min", 0.5), show=_float(conn, "shoot_show_min", 0.1))
+    cfg.split_min_gap_s = _float(conn, "shoot_split_min_gap_s", SPLIT_MIN_GAP_S)
+    sw = _json(conn, "shoot_split_weights")
+    if isinstance(sw, dict):
+        cfg.split_weights.update({k: float(v) for k, v in sw.items() if k in SPLIT_WEIGHTS and isinstance(v, (int, float))})
     beta = repo.get_setting(conn, "shoot_review_beta", "true")
     cfg.beta = str(beta).strip().lower() not in _FALSE
     stop = _json(conn, "shoot_label_stoplist")
