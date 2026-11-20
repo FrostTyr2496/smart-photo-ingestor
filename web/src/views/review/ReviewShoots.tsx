@@ -21,7 +21,8 @@ import {
 } from '../../lib/review';
 import { ShootCard } from './ShootCard';
 import { StackPane } from './StackPane';
-import { QUEUE_FILTERS, SORTS, fade, matchesQueueFilter, minConfidence, openCandidates, queueProgress, sortShoots, stackTitle, type QueueFilter, type SortMode } from '../../lib/stacks';
+import { QUEUE_FILTERS, SORTS, fade, matchesQueueFilter, minConfidence, openCandidates, planIsStale, queueProgress, sortShoots, stackTitle, type QueueFilter, type SortMode } from '../../lib/stacks';
+import { Thumbs, datesLine } from './ShootCard';
 
 /** The hatched frame in the warning hue that marks review as another mode. Rendered by App, outside any transform. */
 export function ReviewFrame() {
@@ -278,12 +279,22 @@ function Review({ plan, replan }: { plan: Plan; replan: Replan }) {
     ds.forEach(decide);
     setOpenId(nxt ? nxt.proposal_id : null);
   };
-  const row = (s: EffShoot) => <QueueRow key={s.proposal_id} s={s} onOpen={() => setOpenId(s.proposal_id)} mounted={mounted} />;
+  const tripName = (s: EffShoot) => eff.trips.find((t) => t.proposal_id === s.trip_id)?.name.value ?? null;
+  const row = (s: EffShoot) => <QueueRow key={s.proposal_id} s={s} trip={tripName(s)} onOpen={() => setOpenId(s.proposal_id)} mounted={mounted} />;
 
   return (
     <div className="flex flex-col gap-4">
       <ModeBar plan={plan} pending={decisions.length} counts={counts} replan={replan} dev={dev} />
       {loadErr && <p className="text-sm text-err">The saved decisions could not be loaded: {loadErr}</p>}
+      {planIsStale(eff.shoots) && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-maybe/50 bg-maybe/10 px-4 py-3 text-sm" role="note">
+          <span className="min-w-0 flex-1">
+            This plan ({plan.plan_id}) was made before place, subject and frame scoring, so it has no suggestions to confirm.
+            Re-plan to fill them in; your saved decisions are kept.
+          </span>
+          <button type="button" className={primary} disabled={replan.busy} onClick={replan.run}>{replan.busy ? 'Planning…' : 'Re-plan now'}</button>
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Shoots to confirm</h1>
@@ -405,28 +416,49 @@ function Review({ plan, replan }: { plan: Plan; replan: Replan }) {
 
 const DOTS = (c: number): string => '●'.repeat(Math.round(c * 4)).padEnd(4, '○');
 
-/** A collapsed stack: `date · place · subject`, a confidence marker and the counts. */
-function QueueRow({ s, onOpen, mounted }: { s: EffShoot; onOpen: () => void; mounted: ReadonlySet<string> }) {
+/** A collapsed stack: `date · place · subject` (or the planner's name when the plan has no details), a confidence marker,
+ * the counts and flags, and a strip of sample thumbnails so the shoot is recognisable without opening it. */
+function QueueRow({ s, trip, onOpen, mounted }: { s: EffShoot; trip: string | null; onOpen: () => void; mounted: ReadonlySet<string> }) {
   const t = stackTitle(s);
   const conf = minConfidence(s);
   const q = openCandidates(s).length;
   const online = (s.volumes ?? []).some((v) => mounted.has(v.volume_id));
   const state = s.state === 'accepted' ? (s.confirmed ? '✓ confirmed' : '✓ accepted') : s.state === 'skipped' ? 'skipped' : '';
+  const bodies = Object.entries(s.counts.by_body).map(([b, n]) => `${b} ${n.toLocaleString()}`).join(' · ');
+  const drives = (s.volumes ?? []).map((v) => v.label).join(', ');
   return (
-    <button type="button" onClick={onOpen} className={`flex w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border px-3 py-2.5 text-left hover:border-line-strong ${s.state === 'accepted' ? 'border-go/40' : 'border-line'} ${s.state === 'skipped' ? 'opacity-60' : ''}`}>
-      <span className="text-faint">▸</span>
-      <span className="min-w-0 flex-1 text-sm">
-        <span className="text-muted">{t.date}</span> · <span style={{ opacity: fade(s.details?.place.confidence ?? 1) }}>{t.place ?? <em className="text-faint">no place</em>}</span> ·{' '}
-        <span style={{ opacity: fade(s.details?.subject.confidence ?? 1) }}>{t.subject ?? <em className="text-faint">no subject</em>}</span>
+    <button type="button" onClick={onOpen} className={`flex w-full flex-col gap-2 rounded-xl border px-3 py-2.5 text-left hover:border-line-strong ${s.state === 'accepted' ? 'border-go/40' : 'border-line'} ${s.state === 'skipped' ? 'opacity-60' : ''}`}>
+      <span className="flex w-full flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="text-faint">▸</span>
+        <span className="min-w-0 flex-1 text-sm">
+          <span className="text-muted">{t.date}</span> ·{' '}
+          {s.details ? (
+            <>
+              <span style={{ opacity: fade(s.details.place.confidence) }}>{t.place ?? <em className="text-faint">no place</em>}</span> ·{' '}
+              <span style={{ opacity: fade(s.details.subject.confidence) }}>{t.subject ?? <em className="text-faint">no subject</em>}</span>
+              <span className="ml-2 text-xs text-faint">{t.name}</span>
+            </>
+          ) : (
+            <span>{t.name} <span className="text-xs text-faint">({s.name.source})</span></span>
+          )}
+        </span>
+        {s.details && (
+          <span className="text-xs text-muted" title={`Lowest confidence of place and subject: ${Math.round(conf * 100)}%`} aria-label={`confidence ${Math.round(conf * 100)} percent`}>
+            {DOTS(conf)}
+          </span>
+        )}
+        <span className="text-xs text-muted">{s.counts.frames.toLocaleString()} frames</span>
+        {q > 0 && <span className="rounded-full border border-maybe/40 bg-maybe/10 px-2 py-0.5 text-xs text-maybe">{q} in question</span>}
+        {s.flags.map((f) => <span key={f} className="text-xs text-maybe">⚑ {f.replace(/_/g, ' ')}</span>)}
+        {state && <span className="text-xs text-go">{state}</span>}
       </span>
-      <span className="text-xs text-muted" title={`Lowest confidence of place and subject: ${Math.round(conf * 100)}%`} aria-label={`confidence ${Math.round(conf * 100)} percent`}>
-        {DOTS(conf)}
+      <span className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 pl-5 text-xs text-faint">
+        <span>{datesLine(s)}</span>
+        {trip && <span>trip: {trip}</span>}
+        {bodies && <span>{bodies}</span>}
+        {drives && <span title={online ? 'A drive holding these photos is connected' : 'No drive holding these photos is connected; thumbnails show only if cached'}>{online ? '● ' : '○ '}{drives}</span>}
       </span>
-      <span className="text-xs text-muted">{s.counts.frames.toLocaleString()} frames</span>
-      {q > 0 && <span className="rounded-full border border-maybe/40 bg-maybe/10 px-2 py-0.5 text-xs text-maybe">{q} in question</span>}
-      {s.flags.includes('tz_change') && <span className="text-xs text-maybe" title="time zone change">⚑ tz</span>}
-      {!online && <span className="text-2xs text-faint" title="No drive holding these photos is connected">no previews</span>}
-      {state && <span className="text-xs text-go">{state}</span>}
+      {s.sample_group_ids.length > 0 && <span className="pl-5"><Thumbs ids={s.sample_group_ids.slice(0, 8)} /></span>}
     </button>
   );
 }

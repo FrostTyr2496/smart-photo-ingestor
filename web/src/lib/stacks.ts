@@ -94,10 +94,15 @@ export function queueProgress(shoots: EffShoot[], unassignedFrames: number): { d
   return { done: open.filter((s) => s.state === 'accepted').length, total: open.length, unassigned: unassignedFrames };
 }
 
-/** The collapsed row's title parts: `date · place · subject`. */
-export function stackTitle(s: EffShoot): { date: string; place: string | null; subject: string | null } {
-  return { date: s.shoot_date, place: s.details?.place.value ?? null, subject: s.details?.subject.value ?? null };
+/** The collapsed row's title parts: `date · place · subject`. `name` is the planner's shoot name, shown as the title when
+ * the plan has no place or subject (a plan made before sh-8) and beside them otherwise. */
+export function stackTitle(s: EffShoot): { date: string; place: string | null; subject: string | null; name: string } {
+  return { date: s.shoot_date, place: s.details?.place.value ?? null, subject: s.details?.subject.value ?? null, name: s.name.value };
 }
+
+/** True when the plan predates sh-8 (no unlocked shoot carries details), so it needs a Re-plan to show suggestions. */
+export const planIsStale = (shoots: Pick<EffShoot, 'locked' | 'details'>[]): boolean =>
+  shoots.some((s) => !s.locked) && shoots.every((s) => s.locked || !s.details);
 
 // ---- one stack's draft (sh-10) ----
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { effectivePlan, fromServerRows, isHighConfidence, toServerRows, type Decision, type Detail, type EffShoot, type Plan, type PlanShoot, type ShootDetails } from './review';
-import { composeName, confirmDecisions, fade, initialDraft, matchesQueueFilter, minConfidence, queueProgress, sortShoots } from './stacks';
+import { composeName, confirmDecisions, fade, initialDraft, matchesQueueFilter, minConfidence, planIsStale, queueProgress, sortShoots } from './stacks';
 
 const det = (value: string | null, conf: number, alts: Detail['alternatives'] = []): Detail => ({ value, source: value ? 'phone_venue' : null, confidence: conf, evidence: 2, alternatives: alts });
 const details = (place: [string | null, number], subject: [string | null, number]): ShootDetails => ({
@@ -173,5 +173,13 @@ describe('stack decisions', () => {
     expect(s.confirmed).toBe(true);
     // an included candidate is no longer "in question"
     expect(matchesQueueFilter(s, 'in_question', mounted)).toBe(true); // 600-601 is still open
+  });
+});
+
+describe('planIsStale', () => {
+  it('is stale when no unlocked shoot has details', () => {
+    expect(planIsStale([{ locked: false, details: undefined }, { locked: true, details: undefined }])).toBe(true);
+    expect(planIsStale([{ locked: false, details: undefined }, { locked: false, details: {} as never }])).toBe(false);
+    expect(planIsStale([{ locked: true, details: undefined }])).toBe(false);
   });
 });
