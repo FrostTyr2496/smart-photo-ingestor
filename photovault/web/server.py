@@ -729,6 +729,11 @@ def _thumb(app: WebApp, conn, group_id: int, *, large: bool = False) -> Raw:
     cached = previews.read_cached(app.home, group_id, large=large)
     if cached is not None:
         return Raw(200, "image/jpeg", cached)
+    if not large:
+        folder = previews.review_folder_if_enabled(conn)
+        review = previews.read_review(folder, group_id) if folder is not None else None
+        if review is not None:
+            return Raw(200, "image/jpeg", review)
     src = _thumb_source(conn, group_id)
     if src is None:
         raise NotFound("drive not mounted or no file for this group")
@@ -825,7 +830,54 @@ def _settings(conn) -> dict:
     for key, default in SETTING_DEFAULTS.items():
         value = repo.get_setting(conn, key, default)
         out[key] = int(value) if key in ("match_window_s", "match_reach_s") else value
+    out["review_thumbs"] = _review_thumbs_info(conn)
     return out
+
+
+def _review_thumbs_info(conn) -> dict:
+    """The review-thumbs setting plus what the Settings section shows: frames in the catalog, thumbs on disk, and
+    whether the folder is acceptable (pv-1)."""
+    cfg = previews.review_config(conn)
+    error = None
+    count = 0
+    try:
+        count = len(previews.review_ids(previews.review_folder(cfg["folder"], VOLUMES_ROOT)))
+    except ValueError as exc:
+        error = str(exc)
+    frames = conn.execute("SELECT COUNT(*) FROM capture_groups").fetchone()[0]
+    return {**cfg, "frames": int(frames), "count": count, "bytes_each": previews.REVIEW_TARGET_BYTES,
+            "error": error}
+
+
+def _post_review_thumbs(conn, value: Any) -> str:
+    if not isinstance(value, dict) or set(value) - {"enabled", "folder"}:
+        raise BadRequest("review_thumbs must be {enabled, folder}")
+    cur = previews.review_config(conn)
+    enabled = value.get("enabled", cur["enabled"])
+    folder = value.get("folder", cur["folder"])
+    if not isinstance(enabled, bool):
+        raise BadRequest("review_thumbs.enabled must be true or false")
+    if not isinstance(folder, str) or not folder.strip():
+        raise BadRequest("review_thumbs.folder must be a folder path such as ~/Sandbox/PhotoVault Thumbs")
+    try:
+        previews.review_folder(folder.strip(), VOLUMES_ROOT)
+    except ValueError as exc:
+        raise BadRequest(str(exc)) from exc
+    return json.dumps({"enabled": enabled, "folder": folder.strip()})
+
+
+def _reveal_review_thumbs(conn) -> dict:
+    if sys.platform != "darwin":
+        raise BadRequest("Show in Finder works on macOS only")
+    try:
+        folder = previews.review_folder(previews.review_config(conn)["folder"], VOLUMES_ROOT)
+    except ValueError as exc:
+        raise BadRequest(str(exc)) from exc
+    folder.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(["open", str(folder)], capture_output=True, text=True, timeout=10, check=False)
+    if result.returncode != 0:
+        raise Conflict(result.stderr.strip() or "Finder did not open")
+    return {"opened": str(folder)}
 
 
 def _check_meta_fields(fields: Any) -> dict:
@@ -1000,6 +1052,7 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
         ("POST", "/api/body-clock"): lambda: _post_body_clock(conn, body),
         ("GET", "/api/settings"): lambda: {"settings": _settings(conn)},
         ("POST", "/api/settings"): lambda: _post_settings(conn, body),
+        ("POST", "/api/settings/review-thumbs/reveal"): lambda: _reveal_review_thumbs(conn),
     }
     handler = routes.get((method, path))
     if handler is not None:
@@ -1615,7 +1668,7 @@ def _post_body_clock(conn, body: Any) -> dict:
 
 def _post_settings(conn, body: Any) -> dict:
     body = _body_dict(body)
-    unknown = set(body) - set(SETTING_DEFAULTS)
+    unknown = set(body) - set(SETTING_DEFAULTS) - {"review_thumbs"}
     if unknown:
         raise BadRequest(f"unknown setting(s): {', '.join(sorted(unknown))}")
     if not body:
@@ -1634,6 +1687,8 @@ def _post_settings(conn, body: Any) -> dict:
             except ValueError as exc:
                 raise BadRequest(str(exc)) from exc
             values[key] = value.strip()
+        elif key == "review_thumbs":
+            values[key] = _post_review_thumbs(conn, value)
         elif key == "mac_folder":
             if not isinstance(value, str) or not value.strip():
                 raise BadRequest("mac_folder must be a folder path such as ~/Sandbox")

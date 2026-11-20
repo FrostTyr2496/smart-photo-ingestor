@@ -17,6 +17,24 @@ interface Settings {
 
 const KEYS: Array<keyof Settings> = ['creator', 'copyright', 'default_offset', 'match_window_s', 'match_reach_s', 'mac_folder'];
 
+interface ReviewThumbs {
+  enabled: boolean;
+  folder: string;
+  frames: number;
+  count: number;
+  bytes_each: number;
+  error: string | null;
+}
+
+export function estimateThumbBytes(frames: number, bytesEach: number): number {
+  return frames * bytesEach;
+}
+
+function formatMb(bytes: number): string {
+  const mb = bytes / 1e6;
+  return mb >= 1000 ? `${(mb / 1000).toFixed(1)} GB` : `${Math.round(mb)} MB`;
+}
+
 /** Defaults for photo metadata and the Mac photo folder (rv-5). */
 export function Settings() {
   const { toast } = useStore();
@@ -24,6 +42,8 @@ export function Settings() {
   const [form, setForm] = useState<Settings | null>(null);
   const [saving, setSaving] = useState(false);
   const [refsOpen, setRefsOpen] = useState(false);
+  const [rt, setRt] = useState<ReviewThumbs | null>(null);
+  const [rtFolder, setRtFolder] = useState('');
   const [notify, setNotify] = usePref(NOTIFY_PREF, true);
   const perm = typeof Notification === 'undefined' ? 'unsupported' : Notification.permission;
   const onNotify = (on: boolean) => {
@@ -36,12 +56,16 @@ export function Settings() {
 
   useEffect(() => {
     let alive = true;
-    api<{ settings: Settings }>('GET', '/api/settings')
+    api<{ settings: Settings & { review_thumbs?: ReviewThumbs } }>('GET', '/api/settings')
       .then((d) => {
         if (!alive) return;
         const s = pick(d.settings);
         setSaved(s);
         setForm(s);
+        if (d.settings.review_thumbs) {
+          setRt(d.settings.review_thumbs);
+          setRtFolder(d.settings.review_thumbs.folder);
+        }
       })
       .catch((err: Error) => alive && toast(err.message, 'err'));
     return () => {
@@ -65,6 +89,24 @@ export function Settings() {
       toast((err as Error).message, 'err');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const saveRt = async (patch: { enabled?: boolean; folder?: string }) => {
+    try {
+      const d = await api<{ settings: { review_thumbs: ReviewThumbs } }>('POST', '/api/settings', { review_thumbs: patch });
+      setRt(d.settings.review_thumbs);
+      setRtFolder(d.settings.review_thumbs.folder);
+      toast('Review thumbs saved.');
+    } catch (err) {
+      toast((err as Error).message, 'err');
+    }
+  };
+  const revealRt = async () => {
+    try {
+      await api('POST', '/api/settings/review-thumbs/reveal', {});
+    } catch (err) {
+      toast((err as Error).message, 'err');
     }
   };
 
@@ -121,6 +163,40 @@ export function Settings() {
           </span>
         </label>
       </section>
+
+      {rt && (
+        <section className="card flex flex-col gap-3 p-5" aria-label="Review thumbs">
+          <div>
+            <h2 className="text-base font-semibold">Review thumbs</h2>
+            <p className="mt-1 text-sm text-muted">
+              Small previews (384 px) made while a drive is hashed, so the shoot review can show photos without any drive plugged in.
+              They are kept in a folder on this Mac, never on a drive.
+            </p>
+          </div>
+          <label className="flex items-start gap-2 text-sm">
+            <input type="checkbox" role="switch" className="mt-1" checked={rt.enabled} onChange={(e) => void saveRt({ enabled: e.target.checked })} />
+            <span>
+              <span className="font-medium">Make review thumbs during hash</span>
+              <span className="mt-0.5 block text-xs text-muted">
+                About {formatMb(estimateThumbBytes(rt.frames, rt.bytes_each))} for {rt.frames.toLocaleString()} frames (about {Math.round(rt.bytes_each / 1000)} KB each). Off by default.
+              </span>
+            </span>
+          </label>
+          <Field label="Folder on this Mac">
+            <input value={rtFolder} onChange={(e) => setRtFolder(e.target.value)} placeholder="~/Sandbox/PhotoVault Thumbs" className="h-9" />
+          </Field>
+          {rt.error && <p className="text-xs text-red-500">{rt.error}</p>}
+          <p className="text-xs text-faint">{rt.count.toLocaleString()} thumbs in this folder now.</p>
+          <div className="flex justify-end gap-2">
+            <button type="button" className="btn" onClick={() => void revealRt()}>
+              Show in Finder
+            </button>
+            <button type="button" className="btn-primary" disabled={rtFolder.trim() === rt.folder} onClick={() => void saveRt({ folder: rtFolder.trim() })}>
+              Save folder
+            </button>
+          </div>
+        </section>
+      )}
 
       <section className="card flex flex-col gap-3 p-5">
         <div>
