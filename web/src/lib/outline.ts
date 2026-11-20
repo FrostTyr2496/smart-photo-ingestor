@@ -131,6 +131,8 @@ export interface RailEntry {
   key: string;
   label: string;
   state: OutlineState;
+  /** Shown when the rail is expanded on hover: dates and photo count. */
+  sub: string;
 }
 export interface RailYear {
   year: string;
@@ -155,8 +157,8 @@ export function railOf(items: OutlineItem[]): { years: RailYear[]; undated: stri
       y = { year, first: it.key, entries: [] };
       years.push(y);
     }
-    if (it.kind === 'trip') y.entries.push({ key: it.key, label: it.name, state: it.state });
-    else if (it.kind === 'shoot') y.entries.push({ key: it.key, label: it.title, state: it.state });
+    if (it.kind === 'trip') y.entries.push({ key: it.key, label: it.name, state: it.state, sub: [dateRange(it.start_date, it.end_date), plural(it.groups, 'photo')].filter(Boolean).join(' · ') });
+    else if (it.kind === 'shoot') y.entries.push({ key: it.key, label: it.title, state: it.state, sub: [it.shoot_date ?? '', plural(it.groups, 'photo')].filter(Boolean).join(' · ') });
   }
   return { years, undated };
 }

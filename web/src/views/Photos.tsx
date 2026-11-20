@@ -584,7 +584,7 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto, s
       </div>
 
       <div className={`grid items-start gap-4 ${sel.size ? 'xl:grid-cols-[minmax(0,1fr)_360px]' : ''}`}>
-        <div className="grid min-w-0 items-start gap-3 md:grid-cols-[56px_minmax(0,1fr)]">
+        <div className={`grid min-w-0 items-start gap-3 ${view === 'trips' ? 'md:grid-cols-[168px_minmax(0,1fr)]' : 'md:grid-cols-[56px_minmax(0,1fr)]'}`}>
           {view === 'trips' ? <TripsRail items={items ?? []} /> : <MonthRail rail={rail} undated={days?.some((d) => d.day === UNDATED) ?? false} />}
           <div className="flex min-w-0 flex-col gap-1">
             {!ready ? (

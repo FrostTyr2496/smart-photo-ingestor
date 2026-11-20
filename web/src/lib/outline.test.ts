@@ -47,7 +47,8 @@ describe('outline helpers (rv-47)', () => {
   it('builds the rail: years, then trips and lone shoots', () => {
     const r = railOf(items);
     expect(r.years.map((y) => y.year)).toEqual(['2024', '2023', '2022']);
-    expect(r.years[1]!.entries).toEqual([{ key: 't1', label: 'Coast week', state: 'accepted' }]);
+    expect(r.years[1]!.entries).toMatchObject([{ key: 't1', label: 'Coast week', state: 'accepted' }]);
+    expect(r.years[1]!.entries[0]!.sub).toMatch(/photo/);
     expect(r.years[2]!.entries[0]).toMatchObject({ key: 's:3', label: 'Title s:3', state: 'proposed' });
     expect(r.undated).toBe('loose:undated');
   });
