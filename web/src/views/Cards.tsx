@@ -204,10 +204,30 @@ function CardTile({ c, onImport, onClear, onGreen }: { c: Card; onImport: (c: Ca
       ? `Checked ${relTime(c.checked_at)}`
       : 'Never checked'
     : `Not connected${c.last_seen_at ? ` · last seen ${relTime(c.last_seen_at)}` : ''} · as last checked`;
+  const href = c.volume_id ? hrefFor({ view: 'cards', id: c.volume_id }) : null;
   return (
-    <motion.article whileHover={{ y: -2 }} transition={springs.snappy} className={`card flex flex-col gap-2.5 p-4 ${c.mounted ? '' : 'opacity-70'}`}>
+    <motion.article
+      whileHover={{ y: -2 }}
+      transition={springs.snappy}
+      // The whole tile opens the card's page (rv-45); its own buttons and links keep their click.
+      onClick={
+        href
+          ? (e) => {
+              if ((e.target as HTMLElement).closest('button, a, select, input, [role="button"]')) return;
+              window.location.hash = href;
+            }
+          : undefined
+      }
+      className={`card flex flex-col gap-2.5 p-4 ${c.mounted ? '' : 'opacity-70'} ${href ? 'cursor-pointer transition-colors hover:border-line-strong hover:bg-raised/40' : ''}`}
+    >
       <div className="flex items-center gap-2">
-        <h3 className="min-w-0 flex-1 truncate font-semibold">{displayLabel(c.label)}</h3>
+        {href ? (
+          <a href={href} className="min-w-0 flex-1 truncate font-semibold hover:underline" title={`Open ${displayLabel(c.label)}`}>
+            {displayLabel(c.label)}
+          </a>
+        ) : (
+          <h3 className="min-w-0 flex-1 truncate font-semibold">{displayLabel(c.label)}</h3>
+        )}
         {c.test_card && <TestBadge c={c} />}
         {!c.mounted && <NotConnected />}
         {kind ? <LivePill kind={kind} /> : <TierPill tier={c.tier} />}

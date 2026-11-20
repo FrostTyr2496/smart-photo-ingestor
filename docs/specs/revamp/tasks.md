@@ -576,3 +576,11 @@ Rules for every task:
   - Verify: `uv run pytest tests/test_web_api.py -q -k "eject or uses_mount"`; `cd web && npm run typecheck && npm test && npm run build`.
   - Result (2026-11-19): 2 server tests pass (both new); 235 web tests pass (1 new); build committed. Needs a
     `serve` restart for the endpoint. Not tried on a real drive (agents never act on mounts).
+
+- [x] 45. A card tile on Cards opens the card's page
+  - ID: rv-45 (user report, 2026-11-19)
+  - Clicking anywhere on a card's tile on the Cards list opens its page (its buttons and links keep their own click);
+    the card's name is a real link (keyboard, new tab), and the tile shows a hover border. A card never set up (no
+    volume id) has no page and stays as it was.
+  - Verify: `cd web && npm run typecheck && npm test && npm run build`.
+  - Result (2026-11-19): typecheck clean; 261 web tests pass; build committed. Not seen in a browser.
