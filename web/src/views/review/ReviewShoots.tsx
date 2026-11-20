@@ -21,6 +21,7 @@ import {
 } from '../../lib/review';
 import { ShootCard } from './ShootCard';
 import { StackPane } from './StackPane';
+import { PlacesPane } from './PlacesPane';
 import { QUEUE_FILTERS, SORTS, fade, matchesQueueFilter, minConfidence, openCandidates, planIsStale, queueProgress, sortShoots, stackTitle, type QueueFilter, type SortMode } from '../../lib/stacks';
 import { Thumbs, datesLine } from './ShootCard';
 
@@ -34,6 +35,13 @@ const FILTERS: { key: ReviewFilter; label: string }[] = [
   { key: 'flagged', label: 'Flagged' },
   { key: 'undecided', label: 'Undecided' },
   { key: 'accepted', label: 'Accepted' },
+];
+
+type GroupMode = 'time' | 'trip' | 'place';
+const GROUPS: { key: GroupMode; label: string; tip: string }[] = [
+  { key: 'time', label: 'Time', tip: 'One queue, sorted as below' },
+  { key: 'trip', label: 'Trip', tip: 'The queue under trip headers' },
+  { key: 'place', label: 'Place', tip: 'Shoots grouped by where, across years' },
 ];
 
 const btn = 'inline-flex h-7 items-center rounded-full border border-line px-2.5 text-xs text-muted hover:border-line-strong hover:text-ink disabled:opacity-40';
@@ -258,6 +266,7 @@ function Review({ plan, replan }: { plan: Plan; replan: Replan }) {
     });
   const [sort, setSort] = usePref<SortMode>('review.shoots.sort', 'easiest');
   const [reverse, setReverse] = usePref<boolean>('review.shoots.sortReverse', false);
+  const [group, setGroup] = usePref<GroupMode>('review.shoots.group', 'time');
   const [chips, setChips] = useState<QueueFilter[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
   const { drives } = useStore();
@@ -267,7 +276,8 @@ function Review({ plan, replan }: { plan: Plan; replan: Replan }) {
   const beta = plan.params.beta !== false;
   const visible = (s: EffShoot) => matchesFilter(s, filter) && chips.every((c) => matchesQueueFilter(s, c, mounted));
   const flat = sortShoots(eff.shoots.filter((s) => !s.locked && visible(s)), sort, mounted, reverse);
-  const sections = useMemo(() => (sort === 'connected' ? reviewSections(eff, mounted, true) : []), [eff, mounted, sort]);
+  const byTrip = group === 'trip' || (group === 'time' && sort === 'connected');
+  const sections = useMemo(() => (byTrip ? reviewSections(eff, mounted, group === 'time') : []), [eff, mounted, byTrip, group]);
   const locked = eff.shoots.filter((s) => s.locked);
   const prog = queueProgress(eff.shoots, (plan.unassigned_sessions ?? []).reduce((n, x) => n + x.frames, 0));
   const highCount = eff.shoots.filter((s) => isHighConfidence(s) && s.state === 'undecided').length;
@@ -326,7 +336,9 @@ function Review({ plan, replan }: { plan: Plan; replan: Replan }) {
           ) : (
             <>
               {beta && <p className="text-2xs text-faint">Beta: nothing is hidden. Faint items are low confidence (opacity follows confidence; hover for the number); items below the dashed line are ones a full run would drop.</p>}
-              {sort === 'connected'
+              {group === 'place' ? (
+                <PlacesPane plan={plan} eff={eff} pretick={pretick} beta={beta} decide={decide} onOpen={setOpenId} />
+              ) : byTrip
                 ? sections.map((sec) => {
                     const list = sec.shoots.filter((s) => !s.locked && visible(s));
                     if (list.length === 0) return null;
@@ -340,7 +352,7 @@ function Review({ plan, replan }: { plan: Plan; replan: Replan }) {
                     );
                   })
                 : flat.map(row)}
-              {flat.length === 0 && <p className="text-sm text-muted">Nothing matches these filters.</p>}
+              {group !== 'place' && flat.length === 0 && <p className="text-sm text-muted">Nothing matches these filters.</p>}
               {locked.length > 0 && (
                 <details className="text-sm text-muted">
                   <summary className="cursor-pointer">{locked.length} applied earlier (read-only)</summary>
@@ -355,6 +367,17 @@ function Review({ plan, replan }: { plan: Plan; replan: Replan }) {
           )}
         </div>
         <aside className="flex flex-col gap-4 rounded-2xl border border-maybe/30 bg-surface/70 p-4 lg:sticky lg:top-32" aria-label="Decisions">
+          <div role="group" aria-label="Group by">
+            <span className="text-2xs text-faint">Group by</span>
+            <div className="mt-1 flex gap-1">
+              {GROUPS.map((g) => (
+                <button key={g.key} type="button" aria-pressed={group === g.key} onClick={() => setGroup(g.key)} title={g.tip}
+                  className={`h-7 flex-1 rounded-full border px-2.5 text-xs ${group === g.key ? 'border-maybe bg-maybe/20 text-maybe' : 'border-line text-muted hover:text-ink'}`}>
+                  {g.label}
+                </button>
+              ))}
+            </div>
+          </div>
           <div>
             <label className="text-2xs text-faint" htmlFor="queue-sort">Sort</label>
             <div className="mt-1 flex gap-1">

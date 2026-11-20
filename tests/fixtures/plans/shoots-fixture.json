@@ -24,7 +24,7 @@
   {
    "proposal_id": "t:b2be26c544e9",
    "name": {
-    "value": "Northland \u00b7 9\u201312 Mar",
+    "value": "Northland · 9–12 Mar",
     "source": "phone",
     "alternatives": [
      {
@@ -46,7 +46,7 @@
   {
    "proposal_id": "t:1975e2d4fa61",
    "name": {
-    "value": "Old Quarter \u00b7 2\u20133 Jul",
+    "value": "Old Quarter · 2–3 Jul",
     "source": "phone",
     "alternatives": [
      {
@@ -1363,5 +1363,119 @@
    "start_instant": "2026-03-12T05:00:00+00:00",
    "end_instant": "2026-03-12T05:30:00+00:00"
   }
- ]
+ ],
+ "places": {
+  "spots": [
+   {
+    "key": "p:fixture00001",
+    "kind": "spot",
+    "name": {
+     "value": "Dune Lookout",
+     "source": "phone_venue",
+     "confidence": 0.67,
+     "count": 2,
+     "alternatives": [
+      {
+       "value": "Harbourton",
+       "source": "phone_area",
+       "count": 2
+      }
+     ]
+    },
+    "centroid": {
+     "lat": 0.22,
+     "lon": 0.31
+    },
+    "radius_km": 0.4,
+    "area_key": "a:fixture00001",
+    "members": [
+     {
+      "proposal_id": "s:6c953c302f1f",
+      "confidence": 0.82,
+      "via": "coords"
+     },
+     {
+      "proposal_id": "s:c55a245a8a59",
+      "confidence": 0.55,
+      "via": "coords"
+     },
+     {
+      "proposal_id": "s:ccb87fd54398",
+      "confidence": 0.06,
+      "via": "name",
+      "beyond_cutoff": true
+     }
+    ],
+    "first_date": "2026-03-09",
+    "last_date": "2026-03-11",
+    "home": false,
+    "frames": 1272
+   },
+   {
+    "key": "p:fixture00002",
+    "kind": "spot",
+    "name": {
+     "value": "Old Pier",
+     "source": "phone_place",
+     "confidence": 1.0,
+     "count": 2,
+     "alternatives": []
+    },
+    "centroid": {
+     "lat": 0.4,
+     "lon": 0.8
+    },
+    "radius_km": 0.3,
+    "area_key": "a:fixture00002",
+    "members": [
+     {
+      "proposal_id": "s:37c223666b3d",
+      "confidence": 0.7,
+      "via": "coords"
+     },
+     {
+      "proposal_id": "s:8d6be35b569d",
+      "confidence": 0.6,
+      "via": "coords"
+     }
+    ],
+    "first_date": "2026-07-02",
+    "last_date": "2026-09-01",
+    "home": true,
+    "frames": 330
+   }
+  ],
+  "areas": [
+   {
+    "key": "a:fixture00001",
+    "kind": "area",
+    "name": {
+     "value": "Harbourton",
+     "source": "phone_area",
+     "confidence": 1,
+     "count": 3,
+     "alternatives": []
+    },
+    "spot_keys": [
+     "p:fixture00001"
+    ],
+    "members": []
+   },
+   {
+    "key": "a:fixture00002",
+    "kind": "area",
+    "name": {
+     "value": "Old Pier",
+     "source": "phone_place",
+     "confidence": 1,
+     "count": 2,
+     "alternatives": []
+    },
+    "spot_keys": [
+     "p:fixture00002"
+    ],
+    "members": []
+   }
+  ]
+ }
 }

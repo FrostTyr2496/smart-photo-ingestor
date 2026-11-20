@@ -115,6 +115,40 @@ export interface PlanTrip {
   /** An applied trip (sh-4), shown read-only with its locked shoots. */
   locked?: boolean;
 }
+/** pl-1: place collections. A spot is a repeated place; an area groups spots. */
+export interface PlaceName {
+  value: string | null;
+  source: string | null;
+  confidence: number;
+  count: number;
+  alternatives: { value: string; source: string; count: number }[];
+}
+export interface PlaceMember {
+  proposal_id: string;
+  confidence: number;
+  via?: 'coords' | 'name' | 'folder';
+  beyond_cutoff?: boolean;
+}
+export interface PlaceSpot {
+  key: string;
+  kind: 'spot';
+  name: PlaceName;
+  centroid: { lat: number; lon: number };
+  radius_km: number;
+  area_key: string | null;
+  members: PlaceMember[];
+  frames: number;
+  first_date: string;
+  last_date: string;
+  home: boolean;
+}
+export interface PlaceArea {
+  key: string;
+  kind: 'area';
+  name: PlaceName;
+  spot_keys: string[];
+  members: { proposal_id: string; confidence: number }[];
+}
 export interface Plan {
   plan_id: string;
   created_at: string;
@@ -125,6 +159,8 @@ export interface Plan {
   trips: PlanTrip[];
   shoots: PlanShoot[];
   unassigned_sessions?: UnassignedSession[];
+  /** pl-1; absent in older plans. */
+  places?: { spots: PlaceSpot[]; areas: PlaceArea[] };
 }
 
 /** `rows`: the stored decision ids behind this one (sh-2); several for "Accept trip" and "Accept all unflagged". */
@@ -145,6 +181,8 @@ export type Decision = { seq: number; rows?: number[] } & (
   | { kind: 'include'; id: string; session: Session }
   | { kind: 'exclude'; id: string; session: Session }
   | { kind: 'detail'; id: string; field: DetailField; value: string | string[]; source?: string }
+  /** pl-2: one place name for every ticked shoot of a place collection; stored as one `detail` per shoot in one batch. */
+  | { kind: 'name_place'; ids: string[]; value: string }
 );
 export type DetailField = 'place' | 'subject' | 'people';
 /** A decision before it gets its sequence number. */
@@ -415,6 +453,10 @@ export function applyDecision(p: EffPlan, d: Decision): EffPlan {
       return patch(p, d.id, (s) => ({ ...s, excluded: dropSession(s.excluded, d.session), included: addSession(s.included, d.session) }));
     case 'exclude':
       return patch(p, d.id, (s) => ({ ...s, included: dropSession(s.included, d.session), excluded: addSession(s.excluded, d.session) }));
+    case 'name_place': {
+      const ids = new Set(d.ids);
+      return { ...p, shoots: p.shoots.map((s) => (ids.has(s.proposal_id) && !s.locked && s.details ? { ...s, details: withDetail(s.details, 'place', d.value, 'user') } : s)) };
+    }
     case 'detail':
       return patch(p, d.id, (s) => (s.details ? { ...s, details: withDetail(s.details, d.field, d.value, d.source ?? 'user') } : s));
   }
@@ -489,6 +531,8 @@ export function toServerRows(d: NewDecision, p: EffPlan, batch: string): Decisio
       return [{ proposal_id: d.id, kind: d.kind, payload: { session: d.session } }];
     case 'detail':
       return [{ proposal_id: d.id, kind: 'detail', payload: { field: d.field, value: d.value, ...(d.source ? { source: d.source } : {}) } }];
+    case 'name_place':
+      return d.ids.map((id) => ({ proposal_id: id, kind: 'detail' as const, payload: { field: 'place', value: d.value, source: 'user', batch, ui: 'name_place' } }));
     case 'accept_high':
       return p.shoots
         .filter((s) => isHighConfidence(s) && s.state === 'undecided')
@@ -522,13 +566,16 @@ export function fromServerRows(rows: StoredDecision[]): Decision[] {
     const p = r.payload;
     const batch = typeof p.batch === 'string' ? p.batch : null;
     if (batch && batches.has(batch)) {
-      batches.get(batch)!.rows!.push(r.decision_id);
+      const b = batches.get(batch)!;
+      b.rows!.push(r.decision_id);
+      if (b.kind === 'name_place') b.ids.push(r.proposal_id);
       continue;
     }
     const base = { seq: r.decision_id, rows: [r.decision_id] };
     let d: Decision;
     if (batch && p.ui === 'accept_trip' && typeof p.trip === 'string') d = { ...base, kind: 'accept_trip', id: p.trip };
     else if (batch && p.ui === 'accept_all_unflagged') d = { ...base, kind: 'accept_all_unflagged' };
+    else if (batch && p.ui === 'name_place') d = { ...base, kind: 'name_place', ids: [r.proposal_id], value: String(p.value ?? '') };
     else if (batch && p.ui === 'accept_high') d = { ...base, kind: 'accept_high' };
     else if (r.kind === 'accept' && p.confirmed === true) d = { ...base, kind: 'confirm', id: r.proposal_id };
     else if (r.kind === 'include' || r.kind === 'exclude') d = { ...base, kind: r.kind, id: r.proposal_id, session: (Array.isArray(p.session) ? p.session.map(Number) : [0, 0]) as Session };
@@ -567,6 +614,7 @@ export function describeAll(plan: Plan, decisions: Decision[]): { seq: number; t
       case 'confirm': text = `Confirm ${nm}`; break;
       case 'include': text = `Add photos ${d.session[0]}–${d.session[1]} to ${nm}`; break;
       case 'exclude': text = `Take photos ${d.session[0]}–${d.session[1]} out of ${nm}`; break;
+      case 'name_place': text = `Name the place "${d.value}" for ${d.ids.length} ${d.ids.length === 1 ? 'shoot' : 'shoots'}`; break;
       case 'detail': text = `Set ${d.field} of ${nm} to "${Array.isArray(d.value) ? d.value.join(', ') : d.value}"`; break;
     }
     cur = applyDecision(cur, d);
