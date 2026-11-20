@@ -244,8 +244,6 @@ export function Home({ task }: { task?: string }) {
         </p>
       </div>
 
-      <LibraryCard />
-
       {urgent > 0 && (
         <a href="#/actions" className="-mt-3 text-sm font-medium text-maybe hover:underline">
           {urgent === 1 ? '1 action needs' : `${urgent} actions need`} attention →
@@ -319,6 +317,9 @@ export function Home({ task }: { task?: string }) {
           </div>
         </section>
       )}
+
+      {/* ob-1: the setup checklist, kept below the drives so it does not push the running tasks down. */}
+      <LibraryCard />
 
       {staleLeft.length > 0 && (
         <Disclosure summary={`Marked running, but stopped (${staleLeft.length})`} open={staleOpen} onToggle={setStaleOpen}>
