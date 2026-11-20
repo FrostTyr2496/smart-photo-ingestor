@@ -6,7 +6,7 @@ export type Route =
   | { view: 'drive'; id: string }
   | { view: 'cards'; id: string | null }
   | { view: 'setup'; key: string }
-  | { view: 'photos'; missing?: 'gps' | 'creator' | 'keywords' | 'any'; day?: string; photo?: number }
+  | { view: 'photos'; missing?: 'gps' | 'creator' | 'keywords' | 'any'; day?: string; photo?: number; shoot?: string }
   | { view: 'actions' }
   | { view: 'review' }
   | { view: 'settings' };
@@ -19,6 +19,12 @@ function photosRoute(query: string): Route {
   const r: Route = { view: 'photos' };
   const missing = MISSING_KEYS.find((k) => k === p.get('missing'));
   if (missing) r.missing = missing;
+  const shoot = p.get('shoot');
+  // `#/photos?shoot=<key>` (rv-47): the Trips view scrolled to that shoot (`s7` or a proposal id).
+  if (shoot && /^[\w:.-]{1,80}$/.test(shoot)) {
+    r.shoot = shoot;
+    return r;
+  }
   const day = p.get('day');
   const photo = p.get('photo');
   // `#/photos?photo=<group id>&day=<day>` (rv-27): Show in Photos from a file list; the day may be "undated".
@@ -64,6 +70,7 @@ export function hrefFor(r: Route): string {
     case 'photos': {
       const p = new URLSearchParams();
       if (r.missing) p.set('missing', r.missing);
+      if (r.shoot) p.set('shoot', r.shoot);
       if (r.photo) p.set('photo', String(r.photo));
       if (r.day) p.set('day', r.day);
       const q = p.toString();

@@ -619,7 +619,7 @@ in (Re-plan does that); say so in the legend's tooltip.
     `volume_id` each entry also has `files`/`bytes` and the result has `other` (for rv-48). Real catalog (read-only,
     68k frames, newest plan): 0.17 s overall, 0.11-0.2 s per drive. Not done: unhashed files do not match a `shoot_key`.
 
-- [ ] 47. Photos by trip
+- [x] 47. Photos by trip
   - ID: rv-47 (after rv-46).
   - A view switch in Photos' header, **Trips | Days** (default Trips, kept per browser); Days is today's timeline,
     unchanged.
@@ -637,6 +637,9 @@ in (Re-plan does that); say so in the legend's tooltip.
   - Deep links: `#/photos?shoot=<key>` scrolls to that shoot. Show in Photos (rv-27) keeps working (lands on the photo
     in whichever view is active).
   - Verify: `cd web && npm run typecheck && npm test && npm run build`; **[user]** browser check.
+  - Result (2026-11-19): typecheck, `npm test` (268 passed) and `npm run build` pass (D-136). `Tile` moved to
+    `views/PhotoTile.tsx`; trips UI in `views/PhotosTrips.tsx`; helpers in `lib/outline.ts`. Not seen in a browser.
+    Left out: the month rail is replaced by years + trip names in Trips; loose days are not in the rail.
 
 - [ ] 48. Files by trip
   - ID: rv-48 (after rv-46).
