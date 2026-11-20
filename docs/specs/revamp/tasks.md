@@ -674,3 +674,5 @@ in (Re-plan does that); say so in the legend's tooltip.
     **[user]** browser check.
   - Result (2026-11-20): activity tests 29 passed; `npm test` 277 passed; build done; `uv run pytest -q` 860 passed,
     4 skipped. Not seen in a browser.
+  - Follow-up (2026-11-20, user ask after seeing it): the stat tiles show files / min instead of a zero failure count
+    (a non-zero count still shows, in red), and elapsed time moved under the bar. Seen working in a browser.

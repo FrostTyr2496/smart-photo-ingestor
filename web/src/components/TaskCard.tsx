@@ -188,8 +188,9 @@ function StatTiles({ vm }: { vm: TaskVM }) {
   else if (p.current) tiles.push({ value: fmtInt(p.current), label: vm.unit, warn: false });
   const fromMsg = statTiles(vm.stats);
   const prose = fromMsg.filter((t) => !t.value);
-  tiles.push(...fromMsg.filter((t) => t.value));
-  if (p.elapsedS) tiles.push({ value: fmtElapsed(p.elapsedS), label: 'elapsed', warn: false });
+  // A zero failure count is noise; the pace is more useful there. Elapsed time sits under the bar.
+  tiles.push(...fromMsg.filter((t) => t.value && !(t.label === 'failed' && !t.warn)));
+  if (p.perMin !== null) tiles.push({ value: fmtInt(p.perMin), label: 'files / min', warn: false });
   if (!tiles.length && !prose.length) return null;
   return (
     <>
@@ -319,7 +320,10 @@ export function RunningCard({
       <ProgressBar value={p.fraction} live tone="accent" size="sm" label={vm.title} className="mt-2.5" />
       <div className="mt-2 flex items-baseline justify-between gap-2 font-mono text-2xs text-muted">
         <span className="tabular">{shortLine(p)}</span>
-        {p.perMin !== null && <span className="tabular text-faint">{fmtInt(p.perMin)}/min</span>}
+        <span className="tabular text-faint">
+          {compact && p.perMin !== null && `${fmtInt(p.perMin)}/min · `}
+          {p.elapsedS > 0 && `${fmtElapsed(p.elapsedS)} elapsed`}
+        </span>
       </div>
       {compact ? (
         <>
