@@ -70,7 +70,7 @@ export function LibraryCard() {
   const plan = data?.plan ?? null;
 
   return (
-    <section className="card" aria-label="Library checklist">
+    <section className="card" aria-label="To do">
       <div className="flex items-center gap-2 px-4 py-3">
         <button
           type="button"
@@ -81,7 +81,7 @@ export function LibraryCard() {
           <motion.span animate={{ rotate: open ? 90 : 0 }} transition={springs.snappy} className="inline-flex text-muted">
             <Icon name="chevron" size={12} />
           </motion.span>
-          <h2 className="font-semibold">Library</h2>
+          <h2 className="font-semibold">To do</h2>
           {summary && (
             <span className="truncate text-xs text-muted">
               {summary.done} of {summary.total} steps done
@@ -97,8 +97,8 @@ export function LibraryCard() {
 
       {open && (
         <div className="border-t border-line px-4 pb-2">
-          {error && <p className="py-3 text-xs text-err">Could not read the library: {error}</p>}
-          {!error && !data && <p className="py-3 text-xs text-muted">Reading the library…</p>}
+          {error && <p className="py-3 text-xs text-err">Could not read the to-do list: {error}</p>}
+          {!error && !data && <p className="py-3 text-xs text-muted">Reading the to-do list…</p>}
           {data && (
             <>
               <p className="label pt-3">Drives</p>
@@ -116,7 +116,7 @@ export function LibraryCard() {
                 })}
               </ul>
               {data.thumbs_error && <p className="pb-1 text-xs text-err">Review thumbs: {data.thumbs_error}</p>}
-              <p className="label pt-3">Library</p>
+              <p className="label pt-3">Photos</p>
               <ul className="divide-y divide-line">
                 <Row name="Phone import (with analysis)">
                   <StepText step={phoneStep(data.phone)} />

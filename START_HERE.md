@@ -82,7 +82,7 @@ task's commit:
    [user] im-5 and im-6: see "Waiting on user".
 3. **[user] idx-6:** resume the PP 1 hash with `--skip-prefix` on the damaged folder, then run `report duplicates`
    ("If a drive shows I/O errors" in `docs/user/INDEX_WORKFLOW.md`). idx-5 is done except `lrcat mark`.
-4. **Shoots to confirm (D-127..D-133, spec `docs/specs/shoots` tasks 8–14):** sp-9, pv-1, sh-8, sh-9, sh-10, ob-1 done (`#/review/shoots` = queue + stack, beta fades low confidence; Library card on Tasks). Done 2026-11-19: rv-46..48 (Photos/Files by trip, D-134..D-137), pl-1/pl-2 (place collections, D-138..D-140), sh-11 (phone-density split suggestions, D-141/D-142). Next: sh-7 (model subjects) starts with a proposal; sh-5 still open.
+4. **Shoots to confirm (D-127..D-133, spec `docs/specs/shoots` tasks 8–14):** sp-9, pv-1, sh-8, sh-9, sh-10, ob-1 done (`#/review/shoots` = queue + stack, beta fades low confidence; "To do" card at the bottom of Tasks). Done 2026-11-19: rv-46..48 (Photos/Files by trip, D-134..D-137), pl-1/pl-2 (place collections, D-138..D-140), sh-11 (phone-density split suggestions, D-141/D-142). Next: sh-7 (model subjects) starts with a proposal; sh-5 still open.
    **Curation (spec `docs/specs/curation`, D-069):** wave 1 is approved and ready: ing-13, idx-9, idx-10, idx-14,
    seq-1b (then seq-2), rv-11; then lr-0, set-1; cu-0 / dd-0 / ro-0 are proposals first. **Phone + related
    (D-070..D-079):** rv-16, sp-2, sp-3, sp-7, sp-7b, sp-8, rv-10, rv-17..rv-24 done. **Shoots (spec
@@ -95,7 +95,7 @@ task's commit:
 
 ## Waiting on user
 - **[user] Trips, places, density (browser):** restart `serve`, Re-plan. Photos → Trips (rail wraps; hover expands it), drive/card Files → Trips; Review → Group by Place (Name this place for N shoots, one undo; Home hidden), chip "May be several shoots", ✂ markers in a stack's Members. Stop the hung Backup Plus hash (exiftool died 20:05; fixed in `5b4f3d7`) and re-run it.
-- **[user] Shoots to confirm (browser):** restart `serve`. Re-hash X9 Pro (thumbs on: it now fills thumbs for already-hashed photos), check `~/Sandbox/PhotoVault Thumbs`. Re-plan in `#/review/shoots`: queue sort (Oldest/Newest, ⇅ Reverse), filter chips, open a stack (Details → Members → In question; Enter, Tab, J/K, X, S), faded beyond-cut-off items; the Library card on Tasks.
+- **[user] Shoots to confirm (browser):** restart `serve`. Re-hash X9 Pro (thumbs on: it now fills thumbs for already-hashed photos), check `~/Sandbox/PhotoVault Thumbs`. Re-plan in `#/review/shoots`: queue sort (Oldest/Newest, ⇅ Reverse), filter chips, open a stack (Details → Members → In question; Enter, Tab, J/K, X, S), faded beyond-cut-off items; the "To do" card at the bottom of Tasks; a drive page shows the Unreadable tile only when it has unreadable files.
 - **[user] test card (tc-1, D-111):** after the copy, mark the card, restart `serve`, then import and watch it turn
   yellow then green: `uv run photovault --json test-card mark "<card mount>" --hide "<drive>"` (repeat `--hide`),
   `test-card show`, `test-card clear` (see `docs/user/CARD_WORKFLOW.md`). Not seen in a browser yet.

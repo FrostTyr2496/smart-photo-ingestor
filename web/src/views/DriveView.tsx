@@ -438,6 +438,8 @@ export function DriveView({ id }: { id: string }) {
   }
 
   const s = summary;
+  // Unreadable shows only when the drive has unreadable files (or the list is filtered to them).
+  const stateTiles = TILES.filter((t) => t.key !== 'mismatch' || s.states.mismatch.files > 0 || filter.state === 'mismatch');
   const steps = workflowSteps(drive);
   const hashed = Object.values(s.states).reduce((n, x) => n + x.hashed, 0);
   const frac = s.files ? hashed / s.files : 0;
@@ -609,8 +611,8 @@ export function DriveView({ id }: { id: string }) {
             ))}
           </div>
         </div>
-        <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {TILES.map((t) => {
+        <div className={`mt-5 grid grid-cols-2 gap-3 ${stateTiles.length === 4 ? 'lg:grid-cols-4' : 'lg:grid-cols-3'}`}>
+          {stateTiles.map((t) => {
             const x = s.states[t.key];
             return (
               <Tile
@@ -684,7 +686,7 @@ export function DriveView({ id }: { id: string }) {
         <FilterBar
           show={{
             value: filter.state,
-            options: [{ value: '', text: 'All files' }, ...TILES.map((t) => ({ value: t.key, text: t.label }))],
+            options: [{ value: '', text: 'All files' }, ...stateTiles.map((t) => ({ value: t.key, text: t.label }))],
             onChange: (state) => patchFilter({ state }),
           }}
           copies={{
