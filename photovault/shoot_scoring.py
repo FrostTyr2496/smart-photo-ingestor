@@ -31,6 +31,7 @@ CONTINUITY = {"sequence": 1.0, "folder": 1.0, "human_folder": 0.8, "same_body": 
 CLOCK = {"gps": 1.0, "aligned": 1.0, "exif_offset": 0.8, "assumed_offset": 0.5, "assumed_other_body": 0.2}
 TIME_SCALE_MIN_S = 2 * 3600      # time term = 1 / (1 + (gap / scale)^2), scale = max(largest internal gap, this)
 WINDOW_MIN_S = 6 * 3600          # candidates lie within max(3 x largest internal gap, this) of the core
+BETA_WINDOW_MIN_S = 24 * 3600    # beta (D-128) looks wider, so faint neighbours show faded instead of not at all
 # attribute: (full weight within s, half-life s, dropped beyond s) of the time distance to the core span
 DECAY = {"area": (3600, 10800, 43200), "spot": (1800, 3600, 10800), "subject": (900, 1800, 7200)}
 SPOT_MAX_S = 3600                # beyond this a location hints at the area only, never a spot
@@ -219,7 +220,7 @@ def _candidates(ctxs: list[dict], allsess: list[Session], cfg: Config, split_km:
     maxspan = max((s.t1 - s.t0 for s in allsess), default=0.0)
     by_idx = {c["idx"]: c for c in ctxs}
     for ctx in ctxs:
-        window = max(3 * ctx["largest_gap"], WINDOW_MIN_S)
+        window = max(3 * ctx["largest_gap"], BETA_WINDOW_MIN_S if cfg.beta else WINDOW_MIN_S)
         lo = bisect_left(t0s, ctx["t0"] - window - maxspan)
         hi = bisect_right(t0s, ctx["t1"] + window)
         found = []
