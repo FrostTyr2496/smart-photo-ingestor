@@ -1,13 +1,12 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { createPortal } from 'react-dom';
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { CountUp, Icon } from '../components/bits';
 import { api } from '../lib/api';
 import { fmtInt, plural } from '../lib/format';
 import { driveName } from '../lib/labels';
 import {
   applyFields,
-  clockTime,
   copyText,
   dayLabel,
   dayLine,
@@ -20,7 +19,6 @@ import {
   MONTHS,
   rangeIds,
   fullOffline,
-  offlineTitle,
   wrapIndex,
   UNDATED,
   type Missing,
@@ -31,12 +29,15 @@ import {
   vaultCopyName,
 } from '../lib/photos';
 import { openMenu } from '../lib/menu';
+import { onlyShoot, sectionsOf, type Outline, type Section } from '../lib/outline';
 import { holdCentred } from '../lib/reveal';
 import { usePref } from '../lib/prefs';
 import { useStore } from '../lib/store';
 import { ClockBanner } from './ClockBanner';
 import { Lightbox } from './Lightbox';
 import { PhotoInspector } from './PhotoInspector';
+import { goToSection, TripsRail, TripsView, type TripsShared } from './PhotosTrips';
+import { PAGE, Tile, type DayState } from './PhotoTile';
 
 const reducedMotion = (): boolean => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 
@@ -47,14 +48,7 @@ interface ShootRow {
   groups: number;
 }
 
-const PAGE = 300; // photos fetched per request within a day
 const ALL_PAGE = 1000; // the server's largest page, for "Select day"
-
-interface DayState {
-  groups: PhotoGroup[];
-  loading: boolean;
-  error: string;
-}
 
 const qs = (o: Record<string, string | number>): string =>
   new URLSearchParams(Object.entries(o).filter(([, v]) => v !== '' && v !== undefined).map(([k, v]) => [k, String(v)])).toString();
@@ -64,12 +58,16 @@ const qs = (o: Record<string, string | number>): string =>
  * A day's photos load when it scrolls near; select with click, ⌘-click, ⇧-click or "Select day", and edit the
  * selection in the inspector. Thumbnails are the files' embedded previews, read while their drive is connected.
  */
-export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto }: { missing?: Missing; day?: string; photo?: number } = {}) {
+export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto, shoot: wantShoot }: { missing?: Missing; day?: string; photo?: number; shoot?: string } = {}) {
   const { drives, toast, epoch } = useStore();
   const [volume, setVolume] = usePref<string>('photos.drive', '');
   const [missing, setMissing] = usePref<Missing>('photos.missing', '');
   const [shoot, setShoot] = usePref<string>('photos.shoot', '');
   const [shootList, setShootList] = useState<ShootRow[]>([]);
+  // Trips (rv-47, D-134) groups the timeline as trip -> shoot; Days is the plain timeline of days.
+  const [view, setView] = usePref<'trips' | 'days'>('photos.view', 'trips');
+  const [outline, setOutline] = useState<Outline | null>(null);
+  const [outlineKey, setOutlineKey] = useState('');
   const [days, setDays] = useState<PhotoDay[] | null>(null);
   // The filter the current `days` were fetched for, so a reveal never reads a list from before the filters cleared.
   const [daysKey, setDaysKey] = useState('');
@@ -83,8 +81,10 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto }:
   const [relatedIds, setRelatedIds] = useState<Set<number>>(() => new Set());
   const anchor = useRef<number | null>(null);
   const filterKey = `${volume}|${missing}|${shoot}`;
-  const filterRef = useRef(filterKey);
-  filterRef.current = filterKey;
+  // Loaded sections are keyed by day (Days) or by shoot key (Trips), so they reset with the view too.
+  const sectionKey = `${view}|${filterKey}`;
+  const filterRef = useRef(sectionKey);
+  filterRef.current = sectionKey;
   const loadedRef = useRef(loaded);
   loadedRef.current = loaded;
 
@@ -121,8 +121,26 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto }:
   // A new filter starts from scratch; a reload (after a save or a finished run) keeps what is on screen.
   useEffect(() => {
     setLoaded({});
+  }, [sectionKey]);
+  useEffect(() => {
     setDays(null);
+    setOutline(null);
   }, [filterKey]);
+  useEffect(() => {
+    if (view !== 'trips') return undefined;
+    let alive = true;
+    const key = filterKey;
+    api<Outline>('GET', `/api/outline?${qs({ volume_id: volume, missing })}`)
+      .then((d) => {
+        if (!alive) return;
+        setOutline(d);
+        setOutlineKey(key);
+      })
+      .catch((err: Error) => alive && toast(err.message, 'err'));
+    return () => {
+      alive = false;
+    };
+  }, [view, filterKey, reload, epoch]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     let alive = true;
     const key = filterKey;
@@ -139,12 +157,14 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto }:
     };
   }, [filterKey, reload, epoch]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // A section is a day (Days) or a shoot / loose day by its outline key (Trips).
   const fetchDay = useCallback(
-    async (day: string, offset: number, limit: number): Promise<PhotoGroup[]> => {
-      const d = await api<{ groups: PhotoGroup[] }>('GET', `/api/groups?${qs({ day, volume_id: volume, missing, shoot_id: shoot, limit, offset })}`);
+    async (key: string, offset: number, limit: number): Promise<PhotoGroup[]> => {
+      const which: Record<string, string> = view === 'trips' ? { shoot_key: key } : { day: key };
+      const d = await api<{ groups: PhotoGroup[] }>('GET', `/api/groups?${qs({ ...which, volume_id: volume, missing, shoot_id: shoot, limit, offset })}`);
       return d.groups;
     },
-    [volume, missing, shoot],
+    [view, volume, missing, shoot],
   );
 
   /** Load the first page of a day, or the next one with `more`. */
@@ -168,7 +188,14 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto }:
   );
 
   // Every loaded photo, in display order: shift-click ranges and nearby-photo suggestions use it.
-  const pool = useMemo(() => (days ?? []).flatMap((d) => loaded[d.day]?.groups ?? []), [days, loaded]);
+  const items = useMemo(() => (outline ? (shoot ? onlyShoot(outline.items, Number(shoot)) : outline.items) : null), [outline, shoot]);
+  const flat = useMemo<Section[]>(
+    () => (view === 'trips' ? (items ? sectionsOf(items) : []) : (days ?? []).map((d) => ({ key: d.day, groups: d.groups, days: [d.day] }))),
+    [view, items, days],
+  );
+  // The list for the active view is in and was fetched for the current filters.
+  const ready = view === 'trips' ? outline !== null && outlineKey === filterKey : days !== null;
+  const pool = useMemo(() => flat.flatMap((s) => loaded[s.key]?.groups ?? []), [flat, loaded]);
   const order = useMemo(() => pool.map((g) => g.group_id), [pool]);
 
   const onTile = useCallback(
@@ -199,12 +226,12 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto }:
     [pool, order],
   );
 
-  const selectDay = async (d: PhotoDay) => {
+  const selectDay = async (d: { key: string; groups: number }) => {
     const key = filterRef.current;
-    let rows = loadedRef.current[d.day]?.groups ?? [];
+    let rows = loadedRef.current[d.key]?.groups ?? [];
     try {
       while (rows.length < d.groups) {
-        const more = await fetchDay(d.day, rows.length, ALL_PAGE);
+        const more = await fetchDay(d.key, rows.length, ALL_PAGE);
         if (!more.length) break;
         rows = [...rows, ...more];
       }
@@ -213,7 +240,7 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto }:
       return;
     }
     if (filterRef.current !== key) return;
-    setLoaded((l) => ({ ...l, [d.day]: { groups: rows, loading: false, error: '' } }));
+    setLoaded((l) => ({ ...l, [d.key]: { groups: rows, loading: false, error: '' } }));
     const allIn = rows.length > 0 && rows.every((g) => sel.has(g.group_id));
     setSel((prev) => {
       const next = new Map(prev);
@@ -238,12 +265,31 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto }:
     setWantScroll(wantDay ?? null);
   }, [wantMissing, wantDay]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (!wantScroll || days === null || (wantMissing && missing !== wantMissing)) return;
+    if (!wantScroll || !ready || (wantMissing && missing !== wantMissing)) return;
     setWantScroll(null);
-    if (!days.some((d) => d.day === wantScroll)) return;
-    const t = window.setTimeout(() => document.getElementById(`day-${wantScroll}`)?.scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' }), 120);
+    const sec = flat.find((s) => s.days.includes(wantScroll));
+    if (!sec) return;
+    const id = view === 'trips' ? `sec-${sec.key}` : `day-${wantScroll}`;
+    const t = window.setTimeout(() => document.getElementById(id)?.scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' }), 120);
     return () => window.clearTimeout(t);
-  }, [wantScroll, days, missing, wantMissing]);
+  }, [wantScroll, ready, flat, view, missing, wantMissing]);
+
+  // `#/photos?shoot=<key>` (rv-47): the Trips view, filters dropped, scrolled to that shoot once the outline is in.
+  const [wantSection, setWantSection] = useState<string | null>(null);
+  useEffect(() => {
+    if (!wantShoot) return;
+    setView('trips');
+    setVolume('');
+    setMissing('');
+    setShoot('');
+    setWantSection(wantShoot);
+  }, [wantShoot]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!wantSection || view !== 'trips' || outline === null || outlineKey !== filterKey || volume || missing || shoot) return;
+    setWantSection(null);
+    const t = window.setTimeout(() => goToSection(wantSection, !reducedMotion()), 120);
+    return () => window.clearTimeout(t);
+  }, [wantSection, view, outline, outlineKey, filterKey, volume, missing, shoot]);
 
   // Show in All Photos (rv-19): drop the filters, load the photo's day (and further pages of it), centre the tile and
   // flash its ring once.
@@ -275,22 +321,29 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto }:
     if (g) revealGroup(g);
   }, [sel, revealGroup]);
   useEffect(() => {
-    if (!reveal || volume || missing || shoot || days === null || daysKey !== filterKey) return;
-    const entry = days.find((d) => d.day === reveal.day);
-    if (!entry) {
+    if (!reveal || volume || missing || shoot || !ready || (view === 'days' && daysKey !== filterKey)) return;
+    // The sections that could hold the photo: its day (Days), or every shoot / loose day spanning that day (Trips).
+    const cands = flat.filter((c) => c.days.includes(reveal.day));
+    let st: DayState | undefined;
+    for (const c of cands) {
+      const cur = loaded[c.key];
+      if (!cur) {
+        void loadDay(c.key);
+        return;
+      }
+      if (cur.loading) return;
+      if (cur.groups.some((g) => g.group_id === reveal.id)) {
+        st = cur;
+        break;
+      }
+      if (cur.groups.length < c.groups && !cur.error) {
+        void loadDay(c.key, true);
+        return;
+      }
+    }
+    if (!st) {
       setReveal(null);
       toast('That photo is not in the timeline.', 'err');
-      return;
-    }
-    const st = loaded[reveal.day];
-    if (!st) {
-      void loadDay(reveal.day);
-      return;
-    }
-    if (st.loading) return;
-    if (!st.groups.some((g) => g.group_id === reveal.id)) {
-      if (st.groups.length < entry.groups && !st.error) void loadDay(reveal.day, true);
-      else setReveal(null);
       return;
     }
     const id = reveal.id;
@@ -304,7 +357,7 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto }:
       }
     }
     setScrollTo(id);
-  }, [reveal, volume, missing, shoot, days, daysKey, filterKey, loaded, loadDay, toast]);
+  }, [reveal, volume, missing, shoot, ready, view, flat, daysKey, filterKey, loaded, loadDay, toast]);
   // Scrolling is its own effect: clearing `reveal` above re-runs that effect, whose cleanup would cancel a hold
   // started there. It jumps to the tile and keeps it centred while the days around it load and grow and the
   // inspector narrows the grid (rv-27 fix 2: a single smooth scroll landed on whatever grew into its place).
@@ -390,6 +443,7 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto }:
     }
     const n = sel.has(g.group_id) ? sel.size : 1;
     const day = days?.find((d) => d.day === dayOf(g));
+    const sec = view === 'trips' ? flat.find((c) => loaded[c.key]?.groups.some((x) => x.group_id === g.group_id)) : undefined;
     const mounted = g.volume_id ? byVolume.get(g.volume_id)?.mounted ?? false : false;
     const name = vaultCopyName(g) || `Photo ${g.group_id}`;
     openMenu(
@@ -398,7 +452,8 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto }:
         { label: 'Open', icon: 'expand', hint: 'Space', disabled: !g.volume_id, onSelect: () => openViewer(g) },
         { label: filtered ? 'Show in All Photos' : 'Scroll to this photo', icon: 'image', onSelect: () => revealGroup(g) },
         'sep',
-        day && { label: `Select all of ${dayLabel(day.day)}`, icon: 'check', onSelect: () => void selectDay(day) },
+        view === 'days' && day && { label: `Select all of ${dayLabel(day.day)}`, icon: 'check', onSelect: () => void selectDay({ key: day.day, groups: day.groups }) },
+        sec && { label: sec.key.startsWith('loose:') ? `Select all of ${dayLabel(dayOf(g))}` : 'Select this whole shoot', icon: 'check', onSelect: () => void selectDay(sec) },
         g.shoot_id !== null && shoot !== String(g.shoot_id) && { label: `Show only ${g.shoot_name ?? 'this shoot'}`, icon: 'camera', onSelect: () => setShoot(String(g.shoot_id)) },
         'sep',
         { label: 'Copy name', icon: 'copy', onSelect: () => void copyText(name).then((ok) => toast(ok ? `Copied ${name}` : 'Could not copy.', ok ? 'ok' : 'err')) },
@@ -419,6 +474,18 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto }:
 
   const selected = useMemo(() => [...sel.values()], [sel]);
   const rail = useMemo(() => monthRail(days ?? []), [days]);
+  const shared: TripsShared = {
+    loaded,
+    need: loadDay,
+    selected: sel,
+    related: relatedIds,
+    flash,
+    onTile,
+    onOpen: openViewer,
+    onMenu: onTileMenu,
+    onSelectSection: (key, groups) => void selectDay({ key, groups }),
+    connected: (id) => (id ? byVolume.get(id)?.mounted ?? false : false),
+  };
   const chips = useMemo(() => {
     const d = volume ? byVolume.get(volume) : undefined;
     const sh = shoot ? shootList.find((x) => String(x.shoot_id) === shoot) : undefined;
@@ -433,6 +500,13 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto }:
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-2xl font-semibold tracking-tight">Photos</h1>
+            <div className="flex rounded-lg border border-line p-0.5" role="group" aria-label="Photos view">
+              {(['trips', 'days'] as const).map((v) => (
+                <button key={v} type="button" aria-pressed={view === v} onClick={() => setView(v)} className={`h-6 rounded-md px-2.5 text-xs ${view === v ? 'bg-ink/10 text-ink' : 'text-muted hover:text-ink'}`}>
+                  {v === 'trips' ? 'Trips' : 'Days'}
+                </button>
+              ))}
+            </div>
             <a
               href="#/review/shoots"
               title="Check the proposed trips and shoots as a dry run (nothing changes until you Apply)"
@@ -451,6 +525,14 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto }:
               'Every photo in the catalog, by the day it was taken.'
             )}
           </p>
+          {view === 'trips' && (
+            <p className="mt-0.5 text-xs text-muted" title="Decisions saved after the plan was made show here once you Re-plan.">
+              <span className="text-maybe/70">Names in amber</span> are proposals; confirm them in{' '}
+              <a href="#/review/shoots" className="underline hover:text-ink">
+                Review →
+              </a>
+            </p>
+          )}
         </div>
       </div>
 
@@ -503,14 +585,16 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto }:
 
       <div className={`grid items-start gap-4 ${sel.size ? 'xl:grid-cols-[minmax(0,1fr)_360px]' : ''}`}>
         <div className="grid min-w-0 items-start gap-3 md:grid-cols-[56px_minmax(0,1fr)]">
-          <MonthRail rail={rail} undated={days?.some((d) => d.day === UNDATED) ?? false} />
+          {view === 'trips' ? <TripsRail items={items ?? []} /> : <MonthRail rail={rail} undated={days?.some((d) => d.day === UNDATED) ?? false} />}
           <div className="flex min-w-0 flex-col gap-1">
-            {days === null ? (
+            {!ready ? (
               <Skeleton />
-            ) : days.length === 0 ? (
+            ) : flat.length === 0 ? (
               <Empty filtered={filtered} />
+            ) : view === 'trips' ? (
+              <TripsView items={items ?? []} shared={shared} />
             ) : (
-              days.map((d) => (
+              (days ?? []).map((d) => (
                 <DaySection
                   key={`${filterKey}|${d.day}`}
                   d={d}
@@ -523,7 +607,7 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto }:
                   onTile={onTile}
                   onOpen={openViewer}
                   onMenu={onTileMenu}
-                  onSelectDay={() => void selectDay(d)}
+                  onSelectDay={() => void selectDay({ key: d.day, groups: d.groups })}
                   filterNote=""
                   onClearFilters={clearFilters}
                   onShoot={(id) => setShoot(String(id))}
@@ -694,73 +778,6 @@ function DaySection({
     </section>
   );
 }
-
-const Tile = memo(function Tile({ g, on, related, flash, connected, offline, onTile, onOpen, onMenu }: { g: PhotoGroup; on: boolean; related: boolean; flash: boolean; connected: boolean; offline: boolean; onTile: (g: PhotoGroup, e: MouseEvent) => void; onOpen: (g: PhotoGroup) => void; onMenu: (g: PhotoGroup, e: MouseEvent) => void }) {
-  const [failed, setFailed] = useState(false);
-  const name = g.canonical_stem || `Photo ${g.group_id}`;
-  return (
-    <button
-      type="button"
-      aria-pressed={on}
-      data-gid={g.group_id}
-      title={`${name}${g.capture_time ? ` · ${g.capture_time.replace('T', ' ')}` : ''}${g.place_name ? ` · ${g.place_name}` : ''}`}
-      onClick={(e) => onTile(g, e)}
-      onDoubleClick={() => onOpen(g)}
-      onContextMenu={(e) => onMenu(g, e)}
-      onKeyDown={(e) => {
-        if (e.key === ' ' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
-          e.preventDefault(); // Space opens the viewer; it no longer toggles the selection
-          onOpen(g);
-        }
-      }}
-      onKeyUp={(e) => e.key === ' ' && e.preventDefault()}
-      className={`group relative aspect-square overflow-hidden rounded-lg bg-ink/5 ${related && !on ? '' : 'outline-none'} ring-offset-2 ring-offset-bg transition-shadow focus-visible:ring-2 focus-visible:ring-accent/60 ${flash ? 'ring-[5px] ring-accent motion-safe:animate-[pulse_0.7s_ease-in-out_2]' : on ? 'ring-[3px] ring-accent' : related ? 'outline-dashed outline-2 outline-accent/70 outline-offset-[-2px]' : ''}`}
-    >
-      {failed || !g.volume_id ? (
-        <span className="flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center text-2xs text-faint">
-          <Icon name="image" size={18} />
-          <span className="max-w-full truncate font-mono">{name}</span>
-          <span>{!g.volume_id ? 'No file indexed' : connected ? 'No preview' : 'Drive not connected'}</span>
-        </span>
-      ) : (
-        <img
-          src={`/api/groups/${g.group_id}/thumb`}
-          alt=""
-          loading="lazy"
-          decoding="async"
-          onError={() => setFailed(true)}
-          className={`h-full w-full object-cover transition-transform duration-300 ${on ? 'scale-[0.94] rounded-md' : 'group-hover:scale-[1.03]'}`}
-        />
-      )}
-      <span className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-gradient-to-t from-black/60 to-transparent px-1.5 pb-1 pt-4 text-2xs text-white opacity-0 transition-opacity group-hover:opacity-100">
-        <span className="truncate font-mono">{name}</span>
-        <span className="tabular">{clockTime(g.capture_time)}</span>
-      </span>
-      <span className="pointer-events-none absolute right-1 top-1 flex gap-0.5">
-        {g.lat !== null && (
-          <span className="rounded-full bg-black/45 p-0.5 text-white" title="Has a location">
-            <Icon name="pin" size={11} />
-          </span>
-        )}
-        {g.dirty && (
-          <span className="rounded-full bg-black/45 p-0.5 text-white" title="Edited; sidecar not written yet">
-            <Icon name="edit" size={11} />
-          </span>
-        )}
-      </span>
-      {offline && !on && (
-        <span className="pointer-events-none absolute bottom-1 left-1 rounded-full bg-black/55 p-0.5 text-white/90 group-hover:opacity-0" title={offlineTitle(g.held_on)}>
-          <Icon name="driveOff" size={11} />
-        </span>
-      )}
-      {on && (
-        <span className="absolute left-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-accent text-on-accent shadow">
-          <Icon name="check" size={12} />
-        </span>
-      )}
-    </button>
-  );
-});
 
 function Skeleton() {
   return (

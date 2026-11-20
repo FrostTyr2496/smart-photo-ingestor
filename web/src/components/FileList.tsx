@@ -3,9 +3,10 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from '
 import { createPortal } from 'react-dom';
 import { api } from '../lib/api';
 import { allKeys, buildTree, visibleRows, type FolderNode, type RunNode } from '../lib/filetree';
-import { fmtInt } from '../lib/format';
+import { fmtBytes, fmtInt } from '../lib/format';
 import { openMenu, placeMenu } from '../lib/menu';
-import { copyText } from '../lib/photos';
+import { copyText, dayLabel } from '../lib/photos';
+import { countsLine, dateRange, shootLine, titleTone, type Outline, type OutlineShoot, type OutlineState } from '../lib/outline';
 import { displayLabel, roleKey, roleLabel } from '../lib/labels';
 import { springs } from '../lib/motion';
 import { usePref } from '../lib/prefs';
@@ -339,6 +340,164 @@ function HoverPreview({ volumeId, relPath, x, y }: { volumeId: string; relPath: 
   );
 }
 
+// ---------------------------------------------------------------- by trip (rv-48)
+
+/** A shoot's (or "Not in a shoot" day's, or "Other files'") files, loaded when it opens. */
+export interface ShootFiles<T> {
+  rows: T[];
+  total: number;
+}
+
+interface FetchState<T> {
+  data?: ShootFiles<T>;
+  loading: boolean;
+  error: string;
+}
+
+function TreeRow({ depth, open, onToggle, cols, title, tone, meta }: { depth: number; open: boolean; onToggle: () => void; cols: number; title: string; tone: string; meta: string }) {
+  return (
+    <tr className={`border-b border-line ${depth === 0 ? 'bg-raised/30' : ''} hover:bg-ink/[0.03]`}>
+      <td colSpan={cols} className="px-3 py-1.5">
+        <button type="button" aria-expanded={open} onClick={onToggle} className="flex w-full flex-wrap items-baseline gap-x-3 gap-y-0.5 text-left" style={{ paddingLeft: depth * INDENT }}>
+          <motion.span animate={{ rotate: open ? 90 : 0 }} transition={springs.snappy} className="inline-flex shrink-0 self-center text-faint">
+            <Icon name="chevron" size={11} />
+          </motion.span>
+          <span className={`${depth === 0 ? 'text-sm font-semibold' : 'text-sm font-medium'} ${tone}`}>{title}</span>
+          <span className="text-2xs text-muted">{meta}</span>
+        </button>
+      </td>
+    </tr>
+  );
+}
+
+/**
+ * The Trips view of a file list (rv-48, D-134): trip, then shoot, then its files; days with no shoot under "Not in a
+ * shoot"; files with no photo group under "Other files". A shoot's files load when it opens, with the list's filters.
+ */
+function FileTrips<T extends { rel_path: string }>({
+  volumeId,
+  cols,
+  fetchShoot,
+  filterKey,
+  renderFile,
+}: {
+  volumeId: string;
+  cols: number;
+  fetchShoot: (key: string) => Promise<ShootFiles<T>>;
+  filterKey: string;
+  renderFile: (row: T, depth: number) => ReactNode;
+}) {
+  const { epoch } = useStore();
+  const [outline, setOutline] = useState<Outline | null>(null);
+  const [error, setError] = useState('');
+  const [shut, setShut] = useState<Set<string>>(new Set()); // trips default to open, everything else to closed
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const [files, setFiles] = useState<Record<string, FetchState<T>>>({});
+  const stamp = useRef('');
+
+  useEffect(() => {
+    let live = true;
+    api<Outline>('GET', `/api/outline?volume_id=${encodeURIComponent(volumeId)}`)
+      .then((d) => live && (setOutline(d), setError('')))
+      .catch((err: Error) => live && setError(err.message));
+    return () => {
+      live = false;
+    };
+  }, [volumeId, epoch]);
+
+  const load = (key: string) => {
+    const mine = stamp.current;
+    setFiles((f) => ({ ...f, [key]: { data: f[key]?.data, loading: true, error: '' } }));
+    fetchShoot(key)
+      .then((data) => stamp.current === mine && setFiles((f) => ({ ...f, [key]: { data, loading: false, error: '' } })))
+      .catch((err: Error) => stamp.current === mine && setFiles((f) => ({ ...f, [key]: { data: f[key]?.data, loading: false, error: err.message } })));
+  };
+  // New filters: forget what was loaded and fetch the open ones again.
+  useEffect(() => {
+    stamp.current = filterKey;
+    setFiles({});
+    open.forEach(load);
+  }, [filterKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const flip = (set: Set<string>, key: string) => {
+    const next = new Set(set);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    return next;
+  };
+  const toggleShoot = (key: string) => {
+    const opening = !open.has(key);
+    setOpen((o) => flip(o, key));
+    if (opening && !files[key]) load(key);
+  };
+
+  if (error) return <tr><td colSpan={cols} className="px-3 py-4 text-sm text-err">Could not load the outline: {error}</td></tr>;
+  if (!outline) return <tr><td colSpan={cols} className="px-3 py-4 text-center text-sm text-muted">Loading…</td></tr>;
+
+  const filesOf = (key: string, depth: number): ReactNode => {
+    const st = files[key];
+    if (!st || (st.loading && !st.data)) return <tr key={`${key}-l`}><td colSpan={cols} className="py-2 text-xs text-muted" style={{ paddingLeft: 12 + depth * INDENT }}>Loading…</td></tr>;
+    if (st.error) return <tr key={`${key}-e`}><td colSpan={cols} className="py-2 text-xs text-err" style={{ paddingLeft: 12 + depth * INDENT }}>Could not list files: {st.error}</td></tr>;
+    const d = st.data!;
+    return (
+      <Fragment key={`${key}-f`}>
+        {d.rows.map((r) => renderFile(r, depth))}
+        {d.rows.length === 0 && <tr><td colSpan={cols} className="py-2 text-xs text-muted" style={{ paddingLeft: 12 + depth * INDENT }}>No files match the filters.</td></tr>}
+        {d.total > d.rows.length && (
+          <tr><td colSpan={cols} className="py-2 text-xs text-muted" style={{ paddingLeft: 12 + depth * INDENT }}>Showing the first {fmtInt(d.rows.length)} of {fmtInt(d.total)}. Use the List view for the rest.</td></tr>
+        )}
+      </Fragment>
+    );
+  };
+  const shootRows = (s: OutlineShoot, depth: number): ReactNode =>
+    (s.files ?? 0) > 0 && (
+      <Fragment key={s.key}>
+        <TreeRow depth={depth} open={open.has(s.key)} onToggle={() => toggleShoot(s.key)} cols={cols} title={s.title} tone={titleTone(s.state)} meta={[shootLine(s), countsLine(s)].filter(Boolean).join(' · ')} />
+        {open.has(s.key) && filesOf(s.key, depth + 1)}
+      </Fragment>
+    );
+
+  const loose = outline.items.filter((i) => i.kind === 'day' && (i.files ?? 0) > 0);
+  const looseFiles = loose.reduce((n, i) => n + (i.files ?? 0), 0);
+  const looseBytes = loose.reduce((n, i) => n + (i.bytes ?? 0), 0);
+  const other = outline.other;
+  return (
+    <>
+      {outline.items.map((it) => {
+        if (it.kind === 'shoot') return shootRows(it, 0);
+        if (it.kind !== 'trip' || !(it.files ?? 0)) return null;
+        const isOpen = !shut.has(it.key);
+        return (
+          <Fragment key={it.key}>
+            <TreeRow depth={0} open={isOpen} onToggle={() => setShut((x) => flip(x, it.key))} cols={cols} title={it.name} tone={titleTone(it.state as OutlineState)} meta={[dateRange(it.start_date, it.end_date), `${fmtInt(it.shoots.length)} ${it.shoots.length === 1 ? 'shoot' : 'shoots'}`, countsLine(it)].join(' · ')} />
+            {isOpen && it.shoots.map((s) => shootRows(s, 1))}
+          </Fragment>
+        );
+      })}
+      {loose.length > 0 && (
+        <>
+          <TreeRow depth={0} open={open.has('~loose')} onToggle={() => setOpen((o) => flip(o, '~loose'))} cols={cols} title="Not in a shoot" tone="text-ink" meta={`${fmtInt(looseFiles)} files · ${fmtBytes(looseBytes)}`} />
+          {open.has('~loose') &&
+            loose.map((it) =>
+              it.kind === 'day' ? (
+                <Fragment key={it.key}>
+                  <TreeRow depth={1} open={open.has(it.key)} onToggle={() => toggleShoot(it.key)} cols={cols} title={dayLabel(it.day)} tone="text-ink" meta={countsLine(it)} />
+                  {open.has(it.key) && filesOf(it.key, 2)}
+                </Fragment>
+              ) : null,
+            )}
+        </>
+      )}
+      {other && other.files > 0 && (
+        <>
+          <TreeRow depth={0} open={open.has('other')} onToggle={() => toggleShoot('other')} cols={cols} title="Other files" tone="text-ink" meta={`${fmtInt(other.files)} files · ${fmtBytes(other.bytes)}`} />
+          {open.has('other') && filesOf('other', 1)}
+        </>
+      )}
+    </>
+  );
+}
+
 // ---------------------------------------------------------------- the table
 
 export interface Column<T> {
@@ -416,6 +575,9 @@ export function FileTable<T extends { rel_path: string; asset_id?: number | null
   mounted = false,
   loading,
   summarize,
+  pager,
+  fetchShoot,
+  filterKey = '',
 }: {
   rows: T[];
   columns: Array<Column<T>>;
@@ -425,9 +587,15 @@ export function FileTable<T extends { rel_path: string; asset_id?: number | null
   loading: boolean;
   /** One line for a folder or run row: e.g. total size and states. */
   summarize?: (rows: T[]) => ReactNode;
+  /** The page controls under the Folders and List views (the Trips view loads per shoot instead). */
+  pager?: ReactNode;
+  /** One shoot's files (`other` = no photo group) with the list's filters; turns on the Trips view (rv-48). */
+  fetchShoot?: (key: string) => Promise<ShootFiles<T>>;
+  /** Changes when the list's filters do, so the Trips view reloads. */
+  filterKey?: string;
 }) {
   const [openRow, setOpenRow] = useState<string | null>(null);
-  const [view, setView] = usePref<'tree' | 'list'>('pv.files.view', 'tree');
+  const [view, setView] = usePref<'trips' | 'tree' | 'list'>('pv.files.view', 'tree');
   const [closed, setClosed] = useState<Set<string>>(new Set());
   const [opened, setOpened] = useState<Set<string>>(new Set());
   const tree = useMemo(() => buildTree(rows), [rows]);
@@ -450,7 +618,8 @@ export function FileTable<T extends { rel_path: string; asset_id?: number | null
   useEffect(() => () => window.clearTimeout(hoverTimer.current), []);
   if (!rows.length) return <p className="py-4 text-center text-sm text-muted">{loading ? 'Loading…' : 'No files in this view.'}</p>;
 
-  const isTree = view === 'tree';
+  const isTrips = view === 'trips' && Boolean(fetchShoot);
+  const isTree = view === 'tree' || (view === 'trips' && !fetchShoot);
   const flip = (set: Set<string>, key: string) => {
     const next = new Set(set);
     if (next.has(key)) next.delete(key);
@@ -525,15 +694,15 @@ export function FileTable<T extends { rel_path: string; asset_id?: number | null
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex rounded-lg border border-line p-0.5" role="group" aria-label="File view">
-          {(['tree', 'list'] as const).map((v) => (
+          {(fetchShoot ? (['trips', 'tree', 'list'] as const) : (['tree', 'list'] as const)).map((v) => (
             <button
               key={v}
               type="button"
-              aria-pressed={view === v}
+              aria-pressed={(isTrips ? 'trips' : isTree ? 'tree' : 'list') === v}
               onClick={() => setView(v)}
-              className={`h-6 rounded-md px-2.5 text-2xs ${view === v ? 'bg-ink/10 text-ink' : 'text-muted hover:text-ink'}`}
+              className={`h-6 rounded-md px-2.5 text-2xs ${(isTrips ? 'trips' : isTree ? 'tree' : 'list') === v ? 'bg-ink/10 text-ink' : 'text-muted hover:text-ink'}`}
             >
-              {v === 'tree' ? 'Folders' : 'List'}
+              {v === 'trips' ? 'Trips' : v === 'tree' ? 'Folders' : 'List'}
             </button>
           ))}
         </div>
@@ -574,7 +743,10 @@ export function FileTable<T extends { rel_path: string; asset_id?: number | null
             </tr>
           </thead>
           <tbody>
-            {visible.map(({ node, depth }) =>
+            {isTrips && fetchShoot && (
+              <FileTrips<T> volumeId={volumeId} cols={columns.length} fetchShoot={fetchShoot} filterKey={filterKey} renderFile={(r, depth) => fileRow(r, r.rel_path.split('/').pop() ?? r.rel_path, depth)} />
+            )}
+            {!isTrips && visible.map(({ node, depth }) =>
               node.kind === 'file' ? (
                 fileRow(node.row, node.name, depth)
               ) : (
@@ -592,6 +764,7 @@ export function FileTable<T extends { rel_path: string; asset_id?: number | null
           </tbody>
         </table>
       </div>
+      {!isTrips && pager}
       {hover && <HoverPreview volumeId={volumeId} relPath={hover.relPath} x={hover.x} y={hover.y} />}
     </div>
   );

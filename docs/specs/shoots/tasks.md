@@ -369,3 +369,36 @@ Order: sp-9 and pv-1 (independent) → sh-8 → sh-9 → sh-10; ob-1 any time; s
   - Verify: `cd web && npm run typecheck && npm test && npm run build`; `uv run pytest tests/test_shoots_api.py -q`;
     **[user]** browser check.
   - Result (2026-11-19): a Group by switch (Time, Trip, Place; kept per browser as `review.shoots.group`) beside Sort in `#/review/shoots`. Trip shows the queue under the existing trip headers (`reviewSections`, time order); Place is `views/review/PlacesPane.tsx`: areas as headers when they hold 2+ spots, each spot with its name, source and count, alternative-name chips (click to fill the name box), years and frames, a lazy `MiniMap` with member pins, members as compact rows (ticked at `pretick_min` and above; applied, faint and word-joined-below-cut-off ones start unticked; opacity `0.25 + 0.75 x confidence`; faint ones under a dashed "beyond cut-off (beta)" divider), and Name this place for N shoots. That is a new review decision `name_place` stored as one `detail` (field `place`, source `user`) per ticked shoot with one `batch` id (`ui: name_place`), so the pending panel lists and undoes it as one line; it reloads from the stored rows as one action. Home spots sit in a collapsed "Home (hidden)". Fixture `shoots-fixture.json` gains invented `places`. No server change: `check_decision` already accepts `batch`/`ui` on `detail`. **[user]** browser check.
+
+- [ ] 17. **[stronger]** Phone-density split suggestions
+  - ID: sh-11 (after pl-1; user ask 2026-11-19, D-141). Idea: where iPhone photos are dense, the user was active and
+    likely made several separate outings, so a large camera shoot there may really be several shoots. The planner
+    **suggests** split points and never splits by itself (a split stays the user's `split` decision).
+  - **Density.** For each shoot, count the phone points (`geo_points` from the phone) in its span ±1 h, per hour, and
+    for each place collection (pl-1) the points per visit-hour. Compare against the library median, and expose
+    `phone_density: {points, per_hour, ratio_to_median}` on shoots and places.
+  - **Split candidates.** Every gap between consecutive camera sessions inside a shoot of at least `split_min_gap_s`
+    (20 min) is a candidate. Score it 0..1 from:
+    - **place change:** phone or camera points before and after the gap more than 1 km apart, or a different
+      venue / `place_name` within the spot decay range;
+    - **subject change:** low overlap between the phone labels and activities before and after the gap (Jaccard),
+      within the subject decay range;
+    - **gap:** the gap length against the shoot's other gaps;
+    - **density:** in a dense shoot or place (ratio > 1), the threshold eases, so more candidates rise above the
+      cut-offs. Weights live in `shoot_scoring` with the others.
+    Each candidate carries 1–3 plain reasons ("phone moved 3.2 km", "different venue", "phone labels change:
+    beach → restaurant", "busy area: 4× usual phone density").
+  - Plan file, additive:
+    - shoots gain `split_suggestions: [{after_group_id, gap_s, score, reasons, beyond_cutoff?}]`, and a flag
+      `may_split` when the best score ≥ `shoot_pretick_min`;
+    - beta keeps the faint ones with `beyond_cutoff`.
+  - Review:
+    - a queue filter chip **May be several shoots**;
+    - the row shows "2 possible splits";
+    - in the stack's Members step, a marker sits between session tiles where a split is suggested, faded by score,
+      with its reasons on hover. Clicking it records the existing `split` decision.
+    - place collections show their density ("iPhone: 340 photos · 4× usual").
+  - Verify: `uv run pytest tests/test_shoot_density.py tests/test_shoots.py -q` (synthetic cases: a dense day with two
+    venues and one quiet day with one; a coastline shoot whose phone points jump 5 km; a sparse shoot with no phone
+    data that gets no suggestion); `cd web && npm run typecheck && npm test && npm run build`; a read-only real-catalog
+    run, with aggregate counts in the Result.

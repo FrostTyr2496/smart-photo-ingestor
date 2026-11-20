@@ -377,6 +377,20 @@ function CardDetail({ id, onImport, onClear, onGreen }: { id: string; onImport: 
   const prevCounts = useRef<Card['counts'] | null>(null);
   const runsOf = useCardRuns();
 
+  // One shoot's files for the Trips view (rv-48): the same filters.
+  const fetchShoot = useCallback(
+    async (key: string) => {
+      const p = new URLSearchParams({ limit: '1000', offset: '0', shoot_key: key });
+      if (filter.tier) p.set('tier', filter.tier);
+      if (filter.camera) p.set('camera', filter.camera);
+      if (filter.copies) p.set('copies', filter.copies);
+      if (filter.other) p.set('other', filter.other);
+      const d = await api<{ files: CardFile[]; total: number }>('GET', `/api/cards/${encodeURIComponent(id)}/files?${p}`);
+      return { rows: d.files, total: d.total };
+    },
+    [id, filter],
+  );
+
   /** `quiet` (a live refresh): keep the table as it is while the new page loads, so it does not dim every 8 s. */
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -549,8 +563,17 @@ function CardDetail({ id, onImport, onClear, onGreen }: { id: string; onImport: 
           shown={data.total}
           total={c.files}
         />
-        <FileTable rows={data.files} columns={columns} volumeId={c.volume_id ?? ''} mounted={c.mounted && Boolean(c.volume_id)} loading={loading} summarize={summarizeCardFiles} />
-        <Pager offset={filter.offset} count={data.files.length} total={data.total} page={CARD_PAGE} onPage={(offset) => setFilter((f) => ({ ...f, offset }))} />
+        <FileTable
+          rows={data.files}
+          columns={columns}
+          volumeId={c.volume_id ?? ''}
+          mounted={c.mounted && Boolean(c.volume_id)}
+          loading={loading}
+          summarize={summarizeCardFiles}
+          filterKey={JSON.stringify({ ...filter, offset: 0 })}
+          fetchShoot={fetchShoot}
+          pager={<Pager offset={filter.offset} count={data.files.length} total={data.total} page={CARD_PAGE} onPage={(offset) => setFilter((f) => ({ ...f, offset }))} />}
+        />
       </section>
     </div>
   );
