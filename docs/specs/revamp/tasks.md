@@ -560,6 +560,8 @@ Rules for every task:
     role pill no longer wraps.
   - Verify: `cd web && npm run typecheck && npm test && npm run build`.
   - Result (2026-11-19): typecheck clean; 234 web tests pass; build committed. Not seen in a browser.
+  - Fix (2026-11-19, user report): the hover ⋯ covered the role pill ("Working dri…"). It now ends the status line,
+    above the ⏏, so it covers nothing; the row's top line is name, format and role only.
 
 - [x] 43. Eject a drive from the sidebar and from its page
   - ID: rv-43 (user ask, 2026-11-19; D-126)

@@ -149,31 +149,32 @@ function DriveRow({
           <RolePill role={d.role} isNew={isNew} />
         </span>
       </div>
-      {/* Less used actions live in a menu (rv-42): right-click the row, or this button, which shows on hover over the
-          pills without moving anything. */}
-      <button
-        type="button"
-        aria-label={`More for ${driveName(d)}`}
-        title="More (or right-click)"
-        className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-md border border-line bg-surface text-muted opacity-0 shadow-sm hover:text-ink focus:opacity-100 group-hover:opacity-100"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          menu(e);
-        }}
-      >
-        ⋯
-      </button>
-      <p
-        title={io.length ? status.text : undefined}
-        className={`mt-1 truncate pl-4 text-xs ${status.tone === 'running' ? 'text-ink/85' : status.tone === 'warn' ? 'text-maybe' : 'text-muted'}`}>
-        {io.length > 0 && (
-          <span className="mr-1 font-mono text-faint" aria-label={writing && reading ? 'Reading and writing' : writing ? 'Writing' : 'Reading'}>
-            {writing && reading ? '↓↑' : writing ? '↓' : '↑'}
-          </span>
-        )}
-        {d.mounted ? status.text : pulled ? 'Unplugged just now' : `Not connected${d.last_seen_at ? ` · last seen ${relTime(d.last_seen_at)}` : ''}`}
-      </p>
+      {/* The status line, with the row's ⋯ menu at its end (rv-42/rv-44): shown on hover, it covers no pill. */}
+      <div className="mt-1 flex items-center gap-1 pl-4">
+        <p
+          title={io.length ? status.text : undefined}
+          className={`min-w-0 flex-1 truncate text-xs ${status.tone === 'running' ? 'text-ink/85' : status.tone === 'warn' ? 'text-maybe' : 'text-muted'}`}>
+          {io.length > 0 && (
+            <span className="mr-1 font-mono text-faint" aria-label={writing && reading ? 'Reading and writing' : writing ? 'Writing' : 'Reading'}>
+              {writing && reading ? '↓↑' : writing ? '↓' : '↑'}
+            </span>
+          )}
+          {d.mounted ? status.text : pulled ? 'Unplugged just now' : `Not connected${d.last_seen_at ? ` · last seen ${relTime(d.last_seen_at)}` : ''}`}
+        </p>
+        <button
+          type="button"
+          aria-label={`More for ${driveName(d)}`}
+          title="More (or right-click)"
+          className="-my-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded text-faint opacity-0 hover:bg-ink/10 hover:text-ink focus:opacity-100 group-hover:opacity-100"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            menu(e);
+          }}
+        >
+          ⋯
+        </button>
+      </div>
       {d.mounted && (used !== null || canEject) && (
         <div className="mt-2 flex items-center gap-2 pl-4">
           {/* A full card is normal; a full drive is not. */}
