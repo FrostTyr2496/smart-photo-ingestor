@@ -286,11 +286,16 @@ Order: sp-9 and pv-1 (independent) → sh-8 → sh-9 → sh-10; ob-1 any time; s
   - Verify: `uv run pytest tests/test_shoots_apply.py -q`; `cd web && npm run typecheck && npm test`; **[user]** browser
     check.
 
-- [ ] 13. Library checklist
+- [x] 13. Library checklist
   - ID: ob-1. _Design:_ review §3.
   - A card on the home (Tasks) page lists, per drive: indexed, hashed, thumbs. Then the phone import (with analysis),
     meta scan, and the latest plan, with a link to "N shoots to confirm".
   - Verify: `cd web && npm test`; **[user]** browser check.
+  - Result (2026-11-19): `GET /api/library/checklist` (server.py, read-only; drives not ignored with indexed, hashed /
+    total files, thumbs from one listing of the review folder; phone points and analysed; metadata scanned; newest plan
+    with `unconfirmed` = plan shoots not locked, since `confirmed_at` is not set by apply yet). `LibraryCard` at the top
+    of Tasks (`web/src/views/LibraryCard.tsx`), wording and step rules in `web/src/lib/library.ts`. Tests:
+    `tests/test_web_api.py::test_library_checklist_counts_what_is_done`, `web/src/lib/library.test.ts`. **[user]** browser check.
 
 - [ ] 14. Subject from a model: local or API, behind a setting
   - ID: sh-7 (after sh-10). D-080 idea, shaped by D-127 answer 4.
