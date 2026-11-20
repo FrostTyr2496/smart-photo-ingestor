@@ -7,7 +7,10 @@
   "merge_h": 36,
   "region_km": 300,
   "from": null,
-  "to": null
+  "to": null,
+  "pretick_min": 0.5,
+  "show_min": 0.1,
+  "beta": true
  },
  "summary": {
   "frames": 5802,
@@ -21,7 +24,7 @@
   {
    "proposal_id": "t:b2be26c544e9",
    "name": {
-    "value": "Northland · 9–12 Mar",
+    "value": "Northland \u00b7 9\u201312 Mar",
     "source": "phone",
     "alternatives": [
      {
@@ -43,7 +46,7 @@
   {
    "proposal_id": "t:1975e2d4fa61",
    "name": {
-    "value": "Old Quarter · 2–3 Jul",
+    "value": "Old Quarter \u00b7 2\u20133 Jul",
     "source": "phone",
     "alternatives": [
      {
@@ -197,7 +200,164 @@
      "label": "Archive HDD",
      "frames": 312
     }
-   ]
+   ],
+   "members": {
+    "core_sessions": [
+     [
+      101,
+      109
+     ],
+     [
+      110,
+      118
+     ]
+    ]
+   },
+   "candidates": [
+    {
+     "session": [
+      119,
+      125
+     ],
+     "score": 0.72,
+     "band": "likely",
+     "reasons": [
+      {
+       "term": "time",
+       "text": "+2 h 10 min after"
+      },
+      {
+       "term": "time",
+       "text": "same body"
+      }
+     ],
+     "home_proposal": "s:c55a245a8a59",
+     "frames": 14,
+     "start_instant": "2026-03-10T05:10:00+00:00",
+     "end_instant": "2026-03-10T05:40:00+00:00",
+     "bodies": {
+      "Z6": 14
+     }
+    },
+    {
+     "session": [
+      126,
+      130
+     ],
+     "score": 0.31,
+     "band": "maybe",
+     "reasons": [
+      {
+       "term": "time",
+       "text": "+5 h after"
+      }
+     ],
+     "home_proposal": null,
+     "frames": 6,
+     "start_instant": "2026-03-10T05:10:00+00:00",
+     "end_instant": "2026-03-10T05:40:00+00:00",
+     "bodies": {
+      "Z6": 6
+     }
+    },
+    {
+     "session": [
+      131,
+      134
+     ],
+     "score": 0.06,
+     "band": "beyond_cutoff",
+     "reasons": [
+      {
+       "term": "time",
+       "text": "+14 h after"
+      },
+      {
+       "term": "time",
+       "text": "other body"
+      }
+     ],
+     "home_proposal": null,
+     "frames": 4,
+     "start_instant": "2026-03-10T05:10:00+00:00",
+     "end_instant": "2026-03-10T05:40:00+00:00",
+     "bodies": {
+      "Z6II": 4
+     },
+     "beyond_cutoff": true
+    }
+   ],
+   "details": {
+    "place": {
+     "value": "Dune Lookout",
+     "source": "phone_venue",
+     "confidence": 0.82,
+     "evidence": 5,
+     "alternatives": [
+      {
+       "value": "Harbourton",
+       "source": "phone_area",
+       "confidence": 0.4,
+       "evidence": 2
+      },
+      {
+       "value": "Old Pier",
+       "source": "phone_area",
+       "confidence": 0.1,
+       "evidence": 1,
+       "beyond_cutoff": true
+      }
+     ]
+    },
+    "subject": {
+     "value": "Moonrise over the water",
+     "source": "phone_caption",
+     "confidence": 0.74,
+     "evidence": 6,
+     "alternatives": [
+      {
+       "value": "night sky",
+       "source": "phone_label",
+       "confidence": 0.35,
+       "evidence": 2
+      },
+      {
+       "value": "harbour",
+       "source": "folder",
+       "confidence": 0.2,
+       "evidence": 1,
+       "beyond_cutoff": true
+      }
+     ],
+     "top_terms": [
+      "Moonrise over the water",
+      "night sky",
+      "harbour"
+     ],
+     "example_caption": {
+      "value": "A pale moon above the harbour wall",
+      "confidence": 0.7,
+      "beyond_cutoff": false
+     }
+    },
+    "people": {
+     "value": [
+      "Ana Example"
+     ],
+     "source": "phone_person",
+     "confidence": 0.8,
+     "evidence": 1,
+     "names": [
+      {
+       "value": "Ana Example",
+       "source": "phone_person",
+       "confidence": 0.8,
+       "evidence": 2
+      }
+     ],
+     "alternatives": []
+    }
+   }
   },
   {
    "proposal_id": "s:c55a245a8a59",
@@ -359,7 +519,48 @@
      "label": "Archive HDD",
      "frames": 540
     }
-   ]
+   ],
+   "members": {
+    "core_sessions": [
+     [
+      119,
+      139
+     ],
+     [
+      140,
+      160
+     ]
+    ]
+   },
+   "candidates": [],
+   "details": {
+    "place": {
+     "value": "Harbourton market",
+     "source": "phone_place",
+     "confidence": 0.55,
+     "evidence": 3,
+     "alternatives": []
+    },
+    "subject": {
+     "value": "market stalls",
+     "source": "phone_label",
+     "confidence": 0.45,
+     "evidence": 2,
+     "alternatives": [],
+     "top_terms": [
+      "market stalls"
+     ],
+     "example_caption": null
+    },
+    "people": {
+     "value": [],
+     "source": null,
+     "confidence": 0.0,
+     "evidence": 0,
+     "names": [],
+     "alternatives": []
+    }
+   }
   },
   {
    "proposal_id": "s:ccb87fd54398",
@@ -520,7 +721,70 @@
      "label": "Archive HDD",
      "frames": 420
     }
-   ]
+   ],
+   "members": {
+    "core_sessions": [
+     [
+      161,
+      180
+     ],
+     [
+      181,
+      200
+     ]
+    ]
+   },
+   "candidates": [
+    {
+     "session": [
+      155,
+      160
+     ],
+     "score": 0.55,
+     "band": "likely",
+     "reasons": [
+      {
+       "term": "time",
+       "text": "same folder"
+      }
+     ],
+     "home_proposal": null,
+     "frames": 9,
+     "start_instant": "2026-03-10T05:10:00+00:00",
+     "end_instant": "2026-03-10T05:40:00+00:00",
+     "bodies": {
+      "Z6": 9
+     }
+    }
+   ],
+   "details": {
+    "place": {
+     "value": "Northland Ridge",
+     "source": "folder",
+     "confidence": 0.9,
+     "evidence": 8,
+     "alternatives": []
+    },
+    "subject": {
+     "value": "Ridge walk",
+     "source": "folder",
+     "confidence": 0.85,
+     "evidence": 8,
+     "alternatives": [],
+     "top_terms": [
+      "Ridge walk"
+     ],
+     "example_caption": null
+    },
+    "people": {
+     "value": [],
+     "source": null,
+     "confidence": 0.0,
+     "evidence": 0,
+     "names": [],
+     "alternatives": []
+    }
+   }
   },
   {
    "proposal_id": "s:defd0c85f0c2",
@@ -666,7 +930,68 @@
      "label": "Archive HDD",
      "frames": 200
     }
-   ]
+   ],
+   "members": {
+    "core_sessions": [
+     [
+      201,
+      215
+     ],
+     [
+      216,
+      230
+     ]
+    ]
+   },
+   "candidates": [
+    {
+     "session": [
+      231,
+      236
+     ],
+     "score": 0.2,
+     "band": "maybe",
+     "reasons": [
+      {
+       "term": "time",
+       "text": "+1 h"
+      }
+     ],
+     "home_proposal": null,
+     "frames": 5,
+     "start_instant": "2026-03-10T05:10:00+00:00",
+     "end_instant": "2026-03-10T05:40:00+00:00",
+     "bodies": {
+      "Z6": 5
+     }
+    }
+   ],
+   "details": {
+    "place": {
+     "value": "Sandbar",
+     "source": "phone_area",
+     "confidence": 0.3,
+     "evidence": 1,
+     "alternatives": []
+    },
+    "subject": {
+     "value": null,
+     "source": null,
+     "confidence": 0.0,
+     "evidence": 0,
+     "alternatives": [],
+     "top_terms": [],
+     "example_caption": null
+    },
+    "people": {
+     "value": [],
+     "source": null,
+     "confidence": 0.0,
+     "evidence": 0,
+     "names": [],
+     "alternatives": []
+    }
+   }
   },
   {
    "proposal_id": "s:37c223666b3d",
@@ -809,7 +1134,48 @@
      "label": "Working SSD",
      "frames": 260
     }
-   ]
+   ],
+   "members": {
+    "core_sessions": [
+     [
+      301,
+      315
+     ],
+     [
+      316,
+      330
+     ]
+    ]
+   },
+   "candidates": [],
+   "details": {
+    "place": {
+     "value": "Old Quarter",
+     "source": "phone_area",
+     "confidence": 0.9,
+     "evidence": 9,
+     "alternatives": []
+    },
+    "subject": {
+     "value": "Lantern Festival",
+     "source": "phone_holiday",
+     "confidence": 0.95,
+     "evidence": 4,
+     "alternatives": [],
+     "top_terms": [
+      "Lantern Festival"
+     ],
+     "example_caption": null
+    },
+    "people": {
+     "value": [],
+     "source": null,
+     "confidence": 0.0,
+     "evidence": 0,
+     "names": [],
+     "alternatives": []
+    }
+   }
   },
   {
    "proposal_id": "s:8d6be35b569d",
@@ -945,7 +1311,57 @@
      "label": "Working SSD",
      "frames": 70
     }
-   ]
+   ],
+   "members": {
+    "core_sessions": [
+     [
+      501,
+      510
+     ],
+     [
+      511,
+      520
+     ]
+    ]
+   },
+   "candidates": [],
+   "details": {
+    "place": {
+     "value": null,
+     "source": null,
+     "confidence": 0.0,
+     "evidence": 0,
+     "alternatives": []
+    },
+    "subject": {
+     "value": null,
+     "source": null,
+     "confidence": 0.0,
+     "evidence": 0,
+     "alternatives": [],
+     "top_terms": [],
+     "example_caption": null
+    },
+    "people": {
+     "value": [],
+     "source": null,
+     "confidence": 0.0,
+     "evidence": 0,
+     "names": [],
+     "alternatives": []
+    }
+   }
+  }
+ ],
+ "unassigned_sessions": [
+  {
+   "session": [
+    700,
+    705
+   ],
+   "frames": 40,
+   "start_instant": "2026-03-12T05:00:00+00:00",
+   "end_instant": "2026-03-12T05:30:00+00:00"
   }
  ]
 }

@@ -159,3 +159,21 @@ def test_api_plan_starts_a_task(srv: Client, monkeypatch) -> None:  # noqa: F811
     assert seen == [["shoots", "plan", "--gap-h", "6"]]
     assert srv.call("POST", "/api/shoots/plan", {"gap_h": -1})[0] == 400
     assert srv.call("POST", "/api/run", {"cmd": "shoots_plan", "args": {}}) == (200, {"task_id": 7})
+
+
+def test_api_stores_include_exclude_detail_and_confirmed_accept(srv: Client, monkeypatch) -> None:  # noqa: F811
+    monkeypatch.delenv("PHOTOVAULT_DEV_PLAN", raising=False)
+    pid = "s:abcdef1234567890"
+    rows = [{"proposal_id": pid, "kind": "include", "payload": {"session": [3, 9]}},
+            {"proposal_id": pid, "kind": "exclude", "payload": {"session": [10, 12]}},
+            {"proposal_id": pid, "kind": "detail", "payload": {"field": "people", "value": ["Ana Test"], "source": "user"}},
+            {"proposal_id": pid, "kind": "detail", "payload": {"field": "place", "value": "Dune Lookout"}},
+            {"proposal_id": pid, "kind": "accept", "payload": {"confirmed": True}}]
+    status, body = srv.call("POST", "/api/shoots/decisions", {"decisions": rows})
+    assert status == 200 and [x["kind"] for x in body["decisions"]] == ["include", "exclude", "detail", "detail", "accept"]
+    assert body["decisions"][0]["payload"] == {"session": [3, 9]}
+    for bad in ({"kind": "include", "payload": {"session": [3]}},
+                {"kind": "detail", "payload": {"field": "people", "value": "x"}},
+                {"kind": "detail", "payload": {"field": "colour", "value": "x"}},
+                {"kind": "accept", "payload": {"confirmed": False}}):
+        assert srv.call("POST", "/api/shoots/decisions", {"decisions": [{"proposal_id": pid, **bad}]})[0] == 400

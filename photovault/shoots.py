@@ -522,7 +522,7 @@ def _trip_dict(members: list[dict], pid: str | None = None) -> dict:
 DECISION_KINDS = ("accept", "split", "merge", "skip", "rename", "reject_name", "move", "include", "exclude",
                   "detail")  # the V9 CHECK
 DETAIL_FIELDS = ("place", "subject", "people")
-_PAYLOAD_KEYS = {"accept": set(), "skip": set(), "split": {"after_group_id"}, "merge": {"with"},
+_PAYLOAD_KEYS = {"accept": {"confirmed"}, "skip": set(), "split": {"after_group_id"}, "merge": {"with"},
                  "rename": {"value", "source"}, "reject_name": {"value"}, "move": {"trip_id"},
                  "include": {"session"}, "exclude": {"session"}, "detail": {"field", "value", "source"}}
 # Every kind may also carry these: `batch` groups the rows of one review action ("Accept trip", "Accept all
@@ -602,6 +602,8 @@ def check_decision(d: Any) -> tuple[str, str, dict]:
     for k in ("batch", "ui", "trip"):
         if k in payload and not isinstance(payload[k], str):
             raise ValueError(f"{k} must be text")
+    if "confirmed" in payload and payload["confirmed"] is not True:
+        raise ValueError("confirmed must be true")
     return pid, kind, payload
 
 
@@ -788,6 +790,8 @@ def plan(conn: sqlite3.Connection, *, gap_h: float = 8, split_km: float = 50, me
             shoot_scoring.set_detail(s["details"], d.get("field"), d.get("value"), d.get("source") or "user")
         elif kind == "accept" and (s is not None and not s["locked"]):
             s["state"] = "accepted"
+            if d.get("confirmed"):
+                s["confirmed"] = True  # sh-10: accepted through a stack; Apply sets shoots.confirmed_at
         elif kind == "skip" and (s is not None and not s["locked"]):
             s["state"] = "skipped"
     trips += _locked_trips(conn, [s for s in shoots if s["locked"]])
@@ -809,7 +813,9 @@ def plan(conn: sqlite3.Connection, *, gap_h: float = 8, split_km: float = 50, me
         # the newest decision already folded in (sh-2): review replays only the ones after it
         "decisions_through": max((d["decision_id"] for d in decisions), default=0),
         "params": {"gap_h": gap_h, "split_km": split_km, "merge_h": merge_h, "region_km": region_km,
-                   "from": frm, "to": to},
+                   "from": frm, "to": to,
+                   # sh-9: the band cut-offs and beta mode the review draws with (settings, D-127, D-128)
+                   "pretick_min": cfg.pretick, "show_min": cfg.show, "beta": cfg.beta},
         "summary": {"frames": total_frames, "shoots": len(shoots), "trips": len(trips), "unassigned": unassigned,
                     "locked": sum(1 for s in shoots if s["locked"]), "flagged": flagged},
         "trips": trips, "shoots": shoots, "unassigned_sessions": unassigned_sessions,
@@ -962,7 +968,7 @@ def apply(conn: sqlite3.Connection, *, params: dict | None = None, expect: int |
             "INSERT INTO shoots (name, shoot_date, kind, created_at, trip_id, local_offset, name_source) "
             "VALUES (?,?,'general',?,?,?,?)",
             (name, s["shoot_date"], at, trip_ids.get(s["trip_id"]), off, s["name"]["source"])).lastrowid
-        _write_details(conn, sid, s)
+        _write_details(conn, sid, s, at)
         created.append({"shoot_id": sid, "name": name, "shoot_date": s["shoot_date"], "proposal_id": s["proposal_id"]})
         for gid in s["group_ids"]:
             cur = conn.execute("UPDATE capture_groups SET shoot_id = ? WHERE group_id = ? AND shoot_id IS NULL",
@@ -975,19 +981,25 @@ def apply(conn: sqlite3.Connection, *, params: dict | None = None, expect: int |
             "renamed": renamed, "created": created}
 
 
-def _write_details(conn: sqlite3.Connection, shoot_id: int, s: dict) -> None:
+def _write_details(conn: sqlite3.Connection, shoot_id: int, s: dict, at: str | None = None) -> None:
     """Store the details the user set (decision `detail`, source ``user``) in ``shoots.place`` / ``subject`` /
-    ``subject_source``. Suggestions from the phone or folders are not written: they are unconfirmed. ``confirmed_at``
-    is left to sh-10's stack review."""
+    ``subject_source``. Suggestions from the phone or folders are not written unless the shoot was confirmed through a
+    stack (then the proposed value counts as confirmed, with its source kept as phone / folder / model). ``confirmed_at``
+    is set (to ``at``) for shoots confirmed through a stack (an `accept` decision with ``confirmed``)."""
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(shoots)")}
     det = s.get("details") or {}
     sets, vals = [], []
-    if "place" in cols and (det.get("place") or {}).get("source") == "user":
+    ok = lambda f: (det.get(f) or {}).get("value") and ((det[f].get("source") == "user") or s.get("confirmed"))  # noqa: E731
+    if "place" in cols and ok("place"):
         sets.append("place = ?")
         vals.append(det["place"]["value"])
-    if {"subject", "subject_source"} <= cols and (det.get("subject") or {}).get("source") == "user":
+    if {"subject", "subject_source"} <= cols and ok("subject"):
+        src = str(det["subject"].get("source") or "user")
         sets += ["subject = ?", "subject_source = ?"]
-        vals += [det["subject"]["value"], "user"]
+        vals += [det["subject"]["value"], "phone" if src.startswith("phone") else src if src in ("folder", "model") else "user"]
+    if "confirmed_at" in cols and s.get("confirmed"):
+        sets.append("confirmed_at = ?")
+        vals.append(at or datetime.now(UTC).isoformat(timespec="seconds"))
     if sets:
         conn.execute(f"UPDATE shoots SET {', '.join(sets)} WHERE shoot_id = ?", (*vals, shoot_id))
 
