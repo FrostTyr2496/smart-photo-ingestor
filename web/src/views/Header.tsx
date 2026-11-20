@@ -1,10 +1,12 @@
 import { AnimatePresence, motion } from 'framer-motion';
+import { useEffect, useState } from 'react';
 import { Icon, Logo } from '../components/bits';
 import { ProgressBar } from '../components/ProgressBar';
 import { extVM, taskVM } from '../components/TaskCard';
 import { springs } from '../lib/motion';
 import { type Route } from '../lib/route';
 import { badgeCount } from '../lib/actions';
+import { api } from '../lib/api';
 import { useStore } from '../lib/store';
 import { useActions, useActionsPolling } from '../lib/useActions';
 import { worstTier } from '../lib/tiers';
@@ -53,6 +55,66 @@ function GlobalProgress() {
         </motion.a>
       )}
     </AnimatePresence>
+  );
+}
+
+interface SleepStatus {
+  enabled: boolean;
+  running: number;
+  sleeps_in_s: number | null;
+  slept: boolean;
+}
+
+/** Sleep when done (ui-17, D-149): a top-bar switch, shown while anything runs (or while it is on). The server does
+ * the work, so it still sleeps the Mac if this page is closed: once nothing has run for a minute, `pmset sleepnow`,
+ * once, and the switch turns itself off. */
+function SleepWhenDone() {
+  const { tasks, elsewhere, toast } = useStore();
+  const anyRunning = tasks.some((t) => !t.final) || elsewhere.length > 0;
+  const [st, setSt] = useState<SleepStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const load = () => api<SleepStatus>('GET', '/api/sleep-when-done').then((d) => alive && setSt(d)).catch(() => {});
+    void load();
+    const timer = window.setInterval(load, st?.enabled ? 5000 : 30000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [st?.enabled]);
+  if (!st || (!st.enabled && !anyRunning)) return null;
+  const toggle = async () => {
+    setBusy(true);
+    try {
+      const d = await api<SleepStatus>('POST', '/api/sleep-when-done', { enabled: !st.enabled });
+      setSt(d);
+      toast(d.enabled ? 'The Mac will sleep once every run has finished.' : 'Sleep when done is off.');
+    } catch (err) {
+      toast((err as Error).message, 'err');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const label = !st.enabled ? 'Sleep when done' : st.sleeps_in_s !== null ? `Sleeps in ${st.sleeps_in_s} s` : 'Sleeps when done';
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      disabled={busy}
+      aria-pressed={st.enabled}
+      title={
+        st.enabled
+          ? `On: the Mac sleeps a minute after the last run ends (${st.running} running now). Click to cancel.`
+          : 'Put the Mac to sleep once every PhotoVault run has finished (works with this page closed).'
+      }
+      className={`flex h-7 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-xs disabled:opacity-50 ${
+        st.enabled ? 'border-accent/60 bg-accent/15 text-ink' : 'border-line text-muted hover:border-line-strong hover:text-ink'
+      }`}
+    >
+      <Icon name="moon" size={12} />
+      <span className="hidden lg:inline">{label}</span>
+    </button>
   );
 }
 
@@ -106,8 +168,9 @@ export function Header({ route, sidebarHidden, onToggleSidebar }: { route: Route
           <Logo />
           <span className="hidden text-[1.05rem] font-semibold tracking-tight sm:inline">PhotoVault</span>
         </a>
-        <div className="flex min-w-0 flex-1 justify-center">
+        <div className="flex min-w-0 flex-1 items-center justify-center gap-2">
           <GlobalProgress />
+          <SleepWhenDone />
         </div>
         <nav
           className="no-scrollbar flex min-w-0 shrink items-center gap-0.5 overflow-x-auto rounded-full border border-line bg-surface/60 p-0.5"

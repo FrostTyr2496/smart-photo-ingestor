@@ -236,6 +236,11 @@ class TaskRunner:
                 state = "failed"
             task.finish(state, code)
 
+    def running(self) -> int:
+        """Tasks of this server still running (for Sleep when done)."""
+        with self._lock:
+            return sum(1 for p in self._procs.values() if p.poll() is None)
+
     def pause(self, task_id: int) -> dict:
         with self._lock:
             task = self._tasks.get(task_id)
@@ -561,6 +566,13 @@ class WebApp:
     watcher: VolumeWatcher | None = None
     auto_replan: bool = True
     _replan_timer: threading.Timer | None = None
+    sleeper: Any = None  # SleepWhenDone (ui-17), made on first use
+
+    def sleep_when_done(self) -> Any:
+        if self.sleeper is None:
+            from photovault.web.sleep import SleepWhenDone
+            self.sleeper = SleepWhenDone(self.runner.running)
+        return self.sleeper
 
     def schedule_replan(self) -> None:
         """Re-plan shoots a few seconds after the last edit (debounced), so names and suggestions follow what the user
@@ -1107,6 +1119,8 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
         ("GET", "/api/tasks"): lambda: {"tasks": app.runner.summaries()},
         ("GET", "/api/activity"): lambda: activity.snapshot(conn, app.home, server_pid=os.getpid()),
         ("GET", "/api/actions"): lambda: _actions(app, conn, query),
+        ("GET", "/api/sleep-when-done"): lambda: app.sleep_when_done().status(),
+        ("POST", "/api/sleep-when-done"): lambda: app.sleep_when_done().set(bool(_body_dict(body).get("enabled"))),
         ("GET", "/api/shoots/plan"): lambda: _shoots_plan(app),
         ("POST", "/api/shoots/plan"): lambda: {"task_id": app.runner.start(build_argv("shoots_plan", _body_dict(
             body or {})))},

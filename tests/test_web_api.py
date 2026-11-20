@@ -1420,3 +1420,14 @@ def test_saving_photo_metadata_schedules_one_replan(monkeypatch) -> None:
     app.schedule_replan()
     time.sleep(0.4)
     assert len(started) == 1
+
+
+def test_sleep_when_done_api(srv: Client) -> None:
+    status, body = srv.call("GET", "/api/sleep-when-done")
+    assert status == 200 and body["enabled"] is False
+    srv.app.sleep_when_done().sleep_argv = ["/usr/bin/true"]  # never sleep the test machine
+    srv.app.sleep_when_done().poll_s = 3600
+    status, body = srv.call("POST", "/api/sleep-when-done", {"enabled": True})
+    assert status == 200 and body["enabled"] is True
+    status, body = srv.call("POST", "/api/sleep-when-done", {"enabled": False})
+    assert body["enabled"] is False
