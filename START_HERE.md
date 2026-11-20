@@ -82,7 +82,7 @@ task's commit:
    [user] im-5 and im-6: see "Waiting on user".
 3. **[user] idx-6:** resume the PP 1 hash with `--skip-prefix` on the damaged folder, then run `report duplicates`
    ("If a drive shows I/O errors" in `docs/user/INDEX_WORKFLOW.md`). idx-5 is done except `lrcat mark`.
-4. **Shoots to confirm (D-127, spec `docs/specs/shoots` tasks 8–14):** sp-9 (V9 + phone analysis) and pv-1 (opt-in thumbs) first, then sh-8 → sh-9 → sh-10; ob-1 any time; sh-7 last.
+4. **Shoots to confirm (D-127, spec `docs/specs/shoots` tasks 8–14):** sp-9 (V9 + phone analysis; the user re-imported: 18,995 rows) and pv-1 (opt-in review thumbs, Settings) done; sh-8 in progress, then sh-9 → sh-10; ob-1 any time; sh-7 last.
    **Curation (spec `docs/specs/curation`, D-069):** wave 1 is approved and ready: ing-13, idx-9, idx-10, idx-14,
    seq-1b (then seq-2), rv-11; then lr-0, set-1; cu-0 / dd-0 / ro-0 are proposals first. **Phone + related
    (D-070..D-079):** rv-16, sp-2, sp-3, sp-7, sp-7b, sp-8, rv-10, rv-17..rv-24 done. **Shoots (spec
@@ -94,6 +94,7 @@ task's commit:
    met-2 (web view); met-4 after bk-1.
 
 ## Waiting on user
+- **[user] pv-1 review thumbs:** restart `serve`; Settings → Review thumbs (off by default, folder `~/Sandbox/PhotoVault Thumbs`): turn it on, re-hash a connected drive, check thumbs show with the drive unplugged.
 - **[user] test card (tc-1, D-111):** after the copy, mark the card, restart `serve`, then import and watch it turn
   yellow then green: `uv run photovault --json test-card mark "<card mount>" --hide "<drive>"` (repeat `--hide`),
   `test-card show`, `test-card clear` (see `docs/user/CARD_WORKFLOW.md`). Not seen in a browser yet.

@@ -204,3 +204,6 @@ testdata/
 *.sqlite-wal
 *.sqlite-shm
 .claude/settings.local.json
+
+# agent worktrees
+.claude/worktrees/
