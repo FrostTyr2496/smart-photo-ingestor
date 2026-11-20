@@ -96,6 +96,16 @@ def _confidence(details: dict) -> float | None:
     return round(min(vals), 3) if vals else None
 
 
+# How much a shoot or trip name says when the plan has no place or subject confidence (D-146): a name built from the
+# date and camera says nothing (gray); a folder name a little; a phone place more.
+NAME_SOURCE_CONFIDENCE = {"user": 1.0, "folder": 0.5, "phone": 0.6, "meta": 0.6, "fallback": 0.0}
+
+
+def _name_confidence(name: Any) -> float | None:
+    src = name.get("source") if isinstance(name, dict) else None
+    return NAME_SOURCE_CONFIDENCE.get(src) if isinstance(src, str) else None
+
+
 def outline(conn: sqlite3.Connection, plan: dict | None, *, volume_id: str | None = None,
             missing: str | None = None) -> dict:
     """``{"trips": [...], "items": [...], "plan_id", "frames"}``; see the module doc and rv-46 in the revamp spec.
@@ -111,7 +121,7 @@ def outline(conn: sqlite3.Connection, plan: dict | None, *, volume_id: str | Non
 
     # --- accepted shoots and their trips
     db_shoots = {r["shoot_id"]: r for r in conn.execute(
-        """SELECT s.shoot_id, s.name, s.shoot_date, s.place, s.subject, s.trip_id, t.name AS trip_name,
+        """SELECT s.shoot_id, s.name, s.name_source, s.shoot_date, s.place, s.subject, s.trip_id, t.name AS trip_name,
                   t.start_date AS trip_start, t.end_date AS trip_end
            FROM shoots s LEFT JOIN trips t ON t.trip_id = s.trip_id""")}
     labels = {v["volume_id"]: v["label"] for v in repo.list_volumes(conn)}
@@ -176,6 +186,9 @@ def outline(conn: sqlite3.Connection, plan: dict | None, *, volume_id: str | Non
             guessed = [det[k] for k, own in (("place", d["place"]), ("subject", d["subject"]))
                        if not own and isinstance(det.get(k), dict) and det[k].get("value")]
             conf = round(min(float(g.get("confidence") or 0) for g in guessed), 3) if guessed else 1.0
+            if not guessed and not d["place"] and not d["subject"] and d["name_source"] == "fallback":
+                conf = 0.0  # applied with only a date-and-camera name: shown gray, as a guess
+                guessed = [{}]
             shoots.append({**t, "shoot_id": sid, "proposal_id": None, "state": "accepted", "confidence": conf,
                            "suggested": bool(guessed),
                            "title": title_of(place, subject, d["name"]), "name": d["name"],
@@ -191,7 +204,8 @@ def outline(conn: sqlite3.Connection, plan: dict | None, *, volume_id: str | Non
             keep = set(b["gids"])
             samples = [g for g in ps.get("sample_group_ids") or [] if g in keep][:8] or _spread(sorted(keep))
             shoots.append({**t, "shoot_id": None, "proposal_id": key, "state": "proposed",
-                           "confidence": _confidence(det),
+                           "confidence": (_confidence(det) if _confidence(det) is not None
+                                          else _name_confidence(ps.get("name"))),
                            "title": title_of(place, subject, name), "name": name, "place": place,
                            "subject": subject, "shoot_date": ps.get("shoot_date"),
                            "wall": ps.get("wall") or {"start": None, "end": None},
@@ -231,6 +245,8 @@ def outline(conn: sqlite3.Connection, plan: dict | None, *, volume_id: str | Non
         weight = sum(n for _, n in known)
         tr["confidence"] = (1.0 if tr["state"] == "accepted" else
                             round(sum(c * n for c, n in known) / weight, 3) if weight else None)
+        if tr["state"] == "proposed" and (plan_trips.get(tr["key"]) or {}).get("name", {}).get("source") == "fallback":
+            tr["confidence"] = 0.0  # a trip named only by its date ("2021-04-14 trip") says nothing: gray
         dates = [s["shoot_date"] for s in tr["shoots"] if s["shoot_date"]]
         tr["start_date"] = tr["start_date"] or (min(dates) if dates else None)
         tr["end_date"] = tr["end_date"] or (max(dates) if dates else None)

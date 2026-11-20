@@ -79,6 +79,7 @@ def _fmt_off(seconds: int) -> str:
 def _is_container(name: str, stop: set[str]) -> bool:
     low = name.lower()
     return (low in stop or _BARE_DATE_RE.match(name) is not None or any(p.match(name) for p in _BUILTIN_STOP)
+            or shoot_scoring.is_generic_name(name)
             or not any(ch.isalpha() for ch in name))
 
 

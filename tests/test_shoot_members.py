@@ -147,3 +147,15 @@ def test_detail_decision_sets_value_with_user_source(conn, b):
 def test_new_decision_kinds_are_checked(bad):
     with pytest.raises(ValueError):
         shoots.check_decision(bad)
+
+
+def test_generic_names_and_short_places() -> None:
+    """User report 2026-11-19: storage folder names became shoot names, and full addresses made titles too long."""
+    from photovault import shoot_scoring as sc
+    for junk in ("Photography", "Archived Raw Photos", "2nd card", "22may - 64gb", "JPEGs", "Lightroom exports"):
+        assert sc.is_generic_name(junk), junk
+    for real in ("Harbour Moonrise", "Americana Road Trip", "Beavertail Light", "Coast week"):
+        assert not sc.is_generic_name(real), real
+    assert sc.short_place("Hull, Massachusetts, United States") == "Hull"
+    assert sc.short_place("Harbour Lookout") == "Harbour Lookout"
+    assert "cloudy" in sc.DEFAULT_LABEL_STOPLIST and "activity" in sc.DEFAULT_LABEL_STOPLIST

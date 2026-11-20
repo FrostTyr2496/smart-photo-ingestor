@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from bisect import bisect_left, bisect_right
 from collections import Counter
 from dataclasses import dataclass, field
@@ -47,7 +48,31 @@ MAX_SPLIT_SUGGESTIONS = 5
 MAX_ALTERNATIVES = 8
 FOLDER_DATED_CONF, FOLDER_HUMAN_CONF = 0.9, 0.5
 DEFAULT_LABEL_STOPLIST = ["sky", "outdoor", "outdoors", "indoor", "plant", "tree", "grass", "building", "cloud",
-                          "clouds", "people", "person", "nature", "text", "sunlight", "day"]
+                          "clouds", "people", "person", "nature", "text", "sunlight", "day",
+                          # generic scene and object labels that name no subject (user report, 2026-11-19)
+                          "cloudy", "sunny", "activity", "land", "apartment", "room", "interior room", "furniture",
+                          "bottle", "container", "drink", "water", "wood", "rock", "structure", "vehicle", "machine",
+                          "adult", "child", "hand", "clothing", "footwear", "document", "art", "material", "liquid"]
+
+# Folder and album names that describe storage, not a shoot (D-146). Used for shoot names (via `shoots`), folder
+# subjects and phone albums.
+GENERIC_NAME_RES = [re.compile(p, re.I) for p in (
+    r"^photography$", r"^(my )?photos?( library)?$", r"^archived?( raw)?( photos)?$", r"^raw photos$",
+    r"^\d+(st|nd|rd|th)\s+card$", r"^(first|second|third)\s+card$", r".*\b\d+(\.\d+)?\s*[gt]b\b.*",
+    r"^(jpe?g|nef|arw|cr[23]|dng|heic)s?$", r"^lightroom\b.*", r"^(un)?sorted$", r"^to (sort|edit)$",
+    r"^downloads?$", r"^desktop$", r"^recents?$", r"^favou?rites$", r"^camera roll$", r"^instagram$",
+)]
+
+
+def is_generic_name(name: str) -> bool:
+    n = name.strip()
+    return any(r.match(n) for r in GENERIC_NAME_RES)
+
+
+def short_place(name: str) -> str:
+    """The first part of a phone place name ("Hull, Massachusetts, United States" -> "Hull"), so titles stay short."""
+    parts = [x.strip() for x in name.split(",") if x.strip()]
+    return parts[0] if parts else name.strip()
 _FALSE = ("0", "false", "no", "off")
 
 
@@ -396,10 +421,10 @@ def build_details(s: dict, phone, cfg: Config) -> dict:
         sw, sb = w("spot")
         sb = sb or dt > SPOT_MAX_S
         if p[4]:
-            place.add("spot", p[4], "phone_place", sw, sb)
+            place.add("spot", short_place(p[4]), "phone_place", sw, sb)
         for key in ("venues", "landmarks", "areas_of_interest", "bodies_of_water"):
             for v in hl(key):
-                place.add("spot", v, "phone_venue", sw, sb)
+                place.add("spot", short_place(v), "phone_venue", sw, sb)
         place.end()
 
         subj_w, subj_b = w("subject")
@@ -410,7 +435,8 @@ def build_details(s: dict, phone, cfg: Config) -> dict:
         for key, src in (("activities", "phone_activity"), ("landmarks", "phone_landmark"),
                          ("events", "phone_event"), ("albums", "phone_album")):
             for v in hl(key):
-                subject.add("subject", v, src, subj_w, subj_b)
+                if not is_generic_name(v) and v.lower() not in cfg.stoplist:
+                    subject.add("subject", v, src, subj_w, subj_b)
         if hl("holidays"):
             local = (datetime.fromtimestamp(p[0], UTC)
                      + timedelta(seconds=_off_seconds(p[3] or shoot_off, offs))).date().isoformat()
