@@ -149,7 +149,7 @@ function DriveRow({
           <RolePill role={d.role} isNew={isNew} />
         </span>
       </div>
-      {/* The status line, with the row's ⋯ menu at its end (rv-42/rv-44): shown on hover, it covers no pill. */}
+      {/* The status line, with the row's ⋯ menu at its end (rv-42): shown on hover, it covers no pill. */}
       <div className="mt-1 flex items-center gap-1 pl-4">
         <p
           title={io.length ? status.text : undefined}
