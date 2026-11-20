@@ -12,9 +12,9 @@ import sqlite3
 import time
 from collections import Counter, defaultdict
 from pathlib import Path, PurePosixPath
-from typing import Callable, Iterable
+from typing import Any, Callable, Iterable
 
-from photovault import metadata, usage, volumes
+from photovault import metadata, previews, usage, volumes
 from photovault.catalog import repo
 from photovault.config import Config
 from photovault.groups import build_groups
@@ -226,10 +226,21 @@ def _folder(key: str) -> str:
     return str(PurePosixPath(key).parent)
 
 
-def baseline_hash(
+def baseline_hash(conn: sqlite3.Connection, cfg: Config, mount: Path, **kwargs: Any) -> int:
+    """`_baseline_hash`, plus the opt-in review thumbs (pv-1): when the setting is on, each primary file read gets a
+    384 px thumb in the user's Mac folder. A thumb error is counted and reported, never fatal."""
+    thumbs = kwargs.pop("thumbs", None) or previews.ThumbMaker.from_settings(conn)
+    try:
+        return _baseline_hash(conn, cfg, mount, thumbs=thumbs, **kwargs)
+    finally:
+        if thumbs is not None:
+            thumbs.close()
+
+
+def _baseline_hash(
     conn: sqlite3.Connection, cfg: Config, mount: Path, *, emit: Emitter, max_mbps: float | None = None,
     should_stop: Callable[[], bool] = lambda: False, skip_prefixes: Iterable[str] = (),
-    retry_unreadable: bool = False, only_candidates: bool = False,
+    retry_unreadable: bool = False, only_candidates: bool = False, thumbs: Any = None,
 ) -> int:
     """Full-hash every indexed, unlinked instance on a volume; returns the job id. Read-only on the volume.
 
@@ -281,8 +292,11 @@ def baseline_hash(
     beat_t, beat_bytes = start, 0
 
     def run_stats(**extra: bool) -> dict:
-        return {"files": len(todo), "hashed": hashed, "skipped": stale, "unreadable": unreadable,
-                "deferred": deferred, "excluded": excluded, "bytes": bytes_done, **extra}
+        out = {"files": len(todo), "hashed": hashed, "skipped": stale, "unreadable": unreadable,
+               "deferred": deferred, "excluded": excluded, "bytes": bytes_done, **extra}
+        if thumbs is not None:
+            out["thumbs"] = dict(thumbs.counts)
+        return out
 
     def pause(code: str, message: str) -> int:
         with repo.transaction(conn):
@@ -354,6 +368,8 @@ def baseline_hash(
                                  verified_sha256=sha)
         hashed += 1
         bytes_done += inst["size"]
+        if thumbs is not None and group_id is not None and role == "primary":
+            thumbs.make(group_id, path)  # never raises; errors are counted
         delay = throttle_delay(bytes_done, time.monotonic() - start, max_mbps)
         if delay > 0:
             time.sleep(delay)
@@ -368,5 +384,8 @@ def baseline_hash(
                           "unhashed; run hash again to retry them, or pass --skip-prefix to leave them out")
     emit.emit("result", job_id=job_id, volume=vol["label"], hashed=hashed, skipped=stale, unreadable=unreadable,
               deferred=deferred, excluded=excluded, bytes=bytes_done, size=human_bytes(bytes_done),
-              elapsed_s=round(elapsed, 1))
+              elapsed_s=round(elapsed, 1), **({"thumbs": dict(thumbs.counts)} if thumbs is not None else {}))
+    if thumbs is not None and thumbs.counts["errors"]:
+        emit.emit("warning", code="thumb_errors",
+                  message=f"{thumbs.counts['errors']} review thumbs could not be made (the hash is unaffected)")
     return job_id

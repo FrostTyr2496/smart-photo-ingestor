@@ -569,7 +569,12 @@ def cmd_previews_cache(args, cfg, emit) -> int:
     row = registered_volume(conn, mount)
     stop = _Stop()
     stop.install(emit)
-    counts = previews.cache_volume(conn, cfg.home, mount, row["volume_id"], emit, should_stop=stop)
+    review = previews.ThumbMaker.from_settings(conn)
+    try:
+        counts = previews.cache_volume(conn, cfg.home, mount, row["volume_id"], emit, should_stop=stop, review=review)
+    finally:
+        if review is not None:
+            review.close()
     emit.emit("result", volume=row["label"], **counts)
     return EXIT_PAUSED if counts["paused"] else EXIT_OK
 

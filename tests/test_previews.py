@@ -165,3 +165,123 @@ def test_thumb_is_served_from_the_cache_while_unplugged(srv: Client) -> None:  #
     previews.store(srv.home, 4242, JPEG)
     status, body = srv.call("GET", "/api/groups/4242/thumb")
     assert status == 200 and body == JPEG
+
+
+# ---- pv-1: review thumbs in a Mac folder -------------------------------------------------------------------------
+
+def _big_jpeg(size=(1620, 1080)) -> bytes:
+    import io
+    import os as _os
+
+    from PIL import Image, ImageFilter
+    img = Image.frombytes("RGB", size, _os.urandom(size[0] * size[1] * 3))
+    img = img.filter(ImageFilter.GaussianBlur(6))
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=85)
+    return buf.getvalue()
+
+
+class RealReader(FakeReader):
+    data = b""
+
+    def read(self, path, tags=()):
+        return None if "nopreview" in str(path) else RealReader.data
+
+
+def _enable(conn, folder: Path, enabled: bool = True) -> None:
+    import json
+
+    from photovault.catalog import repo
+    repo.set_setting(conn, "review_thumbs", json.dumps({"enabled": enabled, "folder": str(folder)}))
+    conn.commit()
+
+
+def test_review_jpeg_is_384_px_and_small() -> None:
+    import io
+
+    from PIL import Image
+    out = previews.make_review_jpeg(_big_jpeg())
+    with Image.open(io.BytesIO(out)) as im:
+        assert max(im.size) == 384 and im.format == "JPEG"
+    assert len(out) < 30_000
+    with pytest.raises(ValueError):
+        previews.make_review_jpeg(b"\xff\xd8 not an image")
+
+
+def test_review_folder_refuses_mounts_and_defaults_off(conn, tmp_path) -> None:
+    assert previews.review_config(conn) == {"enabled": False, "folder": previews.REVIEW_DEFAULT_FOLDER}
+    assert previews.ThumbMaker.from_settings(conn) is None
+    with pytest.raises(ValueError):
+        previews.review_folder("/Volumes/Some Drive/thumbs")
+    assert previews.review_folder(str(tmp_path / "t")) == (tmp_path / "t").resolve()
+    assert previews.review_folder("~/x").is_absolute()
+
+
+def test_cache_volume_makes_review_thumbs_and_counts_errors(tmp_path, conn) -> None:
+    mount, ids = drive(tmp_path, conn)
+    home, folder = tmp_path / "home", tmp_path / "thumbs"
+    RealReader.data = _big_jpeg()
+    _enable(conn, folder)
+    review = previews.ThumbMaker.from_settings(conn)
+    previews.cache_volume(conn, home, mount, "v1", Emit(), reader=RealReader, review=review)
+    assert previews.review_ids(folder) == set(ids)
+    assert not [p for p in folder.iterdir() if p.name.startswith(".")]  # no temp files left
+    assert review.counts["added"] == 5 and review.counts["errors"] == 0
+    # an existing thumb is skipped; a bad preview is counted, not raised
+    RealReader.data = b"\xff\xd8 broken"
+    second = previews.ThumbMaker(folder, reader=RealReader)
+    assert second.make(ids[0], mount) is False and second.counts["existing"] == 1
+    assert second.make(12345, mount) is False and second.counts["errors"] == 1
+
+
+def test_hash_makes_thumbs_only_when_enabled_and_survives_errors(tmp_path, capsys, monkeypatch) -> None:
+    from photovault import metadata, volumes
+    from tests.test_baseline_hash import assign_and_index, conn as cat, make_drive
+    from tests.test_cli import fake_probe, fake_read
+    monkeypatch.setenv("PHOTOVAULT_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(volumes, "probe", fake_probe)
+    monkeypatch.setattr(metadata, "read_metadata", fake_read)
+    drv = make_drive(tmp_path / "Vols" / "OLD1")
+    assign_and_index(capsys, drv)
+    folder = tmp_path / "thumbs"
+    RealReader.data = _big_jpeg()
+    monkeypatch.setattr(previews, "PreviewReader", RealReader)
+    c = cat()
+    _enable(c, folder, enabled=False)
+    code, lines = run(capsys, "hash", str(drv))
+    assert code == 0 and not folder.exists() and "thumbs" not in result(lines)
+    c.execute("UPDATE instances SET state = 'indexed', asset_id = NULL")  # hash again, this time with thumbs on
+    c.commit()
+    _enable(c, folder)
+    code, lines = run(capsys, "hash", str(drv))
+    r = result(lines)
+    assert code == 0 and r["hashed"] == 8
+    assert r["thumbs"]["errors"] == 0 and r["thumbs"]["added"] == len(previews.review_ids(folder)) > 0
+    # a thumb error never fails the hash
+    c.execute("UPDATE instances SET state = 'indexed', asset_id = NULL")
+    c.commit()
+    for f in folder.iterdir():
+        f.unlink()
+    RealReader.data = b"\xff\xd8 broken"
+    code, lines = run(capsys, "hash", str(drv))
+    r = result(lines)
+    assert code == 0 and r["hashed"] == 8 and r["thumbs"]["errors"] > 0 and r["thumbs"]["added"] == 0
+
+
+def test_thumb_route_falls_back_to_review_folder_and_settings_validate(srv: Client, tmp_path) -> None:  # noqa: F811
+    conn = db.connect(srv.app.catalog_path)
+    conn.execute("INSERT INTO capture_groups (group_id, body_id, shutter_count, capture_time, time_source, "
+                 "canonical_stem, original_stem, created_at) VALUES (4243, NULL, NULL, '2023-09-10T10:00:00', "
+                 "'exif', 'c', 'c', 'x')")
+    conn.commit()
+    conn.close()
+    folder = tmp_path / "rt"
+    folder.mkdir()
+    (folder / "4243.jpg").write_bytes(JPEG)
+    assert srv.call("GET", "/api/groups/4243/thumb")[0] == 404  # setting is off
+    status, body = srv.call("POST", "/api/settings", {"review_thumbs": {"enabled": True, "folder": str(folder)}})
+    assert status == 200 and body["settings"]["review_thumbs"]["count"] == 1
+    assert body["settings"]["review_thumbs"]["frames"] >= 1
+    assert srv.call("GET", "/api/groups/4243/thumb") == (200, JPEG)
+    status, _ = srv.call("POST", "/api/settings", {"review_thumbs": {"enabled": True, "folder": "/Volumes/X/t"}})
+    assert status == 400
