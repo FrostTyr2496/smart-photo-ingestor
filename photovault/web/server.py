@@ -1099,6 +1099,7 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
 
     routes: dict[tuple[str, str], Any] = {
         ("GET", "/api/drives"): lambda: {"drives": _drive_list(conn, app.volumes_root)},
+        ("GET", "/api/drives/usage"): lambda: {"usage": _drives_usage(conn)},
         ("POST", "/api/drives/ignore"): lambda: _post_ignore_drive(conn, body),
         ("GET", "/api/jobs"): lambda: {"jobs": [dict(r) for r in repo.list_jobs(
             conn, _int_param(query, "limit", 20, 1, 200))]},
@@ -1620,6 +1621,21 @@ def _volume_usage(conn, volume_id: str, states: dict) -> dict | None:
     cap = conn.execute("SELECT capacity_bytes FROM volumes WHERE volume_id = ?", (volume_id,)).fetchone()
     return usage.summarize(sum(v["bytes"] for v in tracked), sum(v["files"] for v in tracked),
                            repo.volume_usage(conn, volume_id), cap["capacity_bytes"] if cap else None)
+
+
+def _drives_usage(conn) -> dict[str, dict]:
+    """Per drive, the bytes of the drive page's space bar (idx-13): photography, not photography, unaccounted, used and
+    capacity. For the sidebar's space bars; a drive no index has counted yet is left out. Fetched on demand, not with
+    every /api/drives poll, since it sums each drive's instances."""
+    out: dict[str, dict] = {}
+    for v in repo.list_volumes(conn):
+        vid = v["volume_id"]
+        states = {r["state"]: {"files": r["files"], "bytes": r["bytes"]} for r in repo.volume_state_counts(conn, vid)}
+        u = _volume_usage(conn, vid, states)
+        if u:
+            out[vid] = {"photo": u["photo"]["bytes"], "non_photo": u["non_photo"]["bytes"],
+                        "unaccounted": u["unaccounted"], "used": u["used"], "capacity": u["capacity"]}
+    return out
 
 
 def _volume_cameras(conn, volume_id: str) -> list[dict]:

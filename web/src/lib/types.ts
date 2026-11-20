@@ -142,8 +142,6 @@ export interface CardInfo {
   label: string;
   mounted: boolean;
   tier: string;
-  /** Files and bytes per tier (only on card, not checked, one copy, backed up), as on the card page. */
-  counts?: Record<'only_on_card' | 'unchecked' | 'needs_backup' | 'backed_up', FilesBytes>;
 }
 
 export interface Run {

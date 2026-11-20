@@ -6,8 +6,6 @@ import { PULLED_MS } from '../components/Unplugged';
 import { openMenu } from '../lib/menu';
 import { EjectButton, useEjectBlock } from '../components/Eject';
 import { ProgressBar } from '../components/ProgressBar';
-import { TIER, TIER_ORDER, TIER_TONE } from '../lib/tiers';
-import type { CardInfo } from '../lib/types';
 import { extVM, FinishedRow, RunningCard, taskVM } from '../components/TaskCard';
 import { useDriveActivity } from '../lib/driveActivity';
 import {
@@ -24,11 +22,12 @@ import {
   type SortKey,
   type TypeKey,
 } from '../lib/driveList';
-import { parseSize, relTime } from '../lib/format';
+import { fmtBytes, parseSize, relTime } from '../lib/format';
 import { argvWords, driveIO, driveName, driveStatus, flagValue, isCardDrive, liveStep, newestAssignTask, ROLE_WORD, roleKey, staleText } from '../lib/labels';
 import { rise, springs } from '../lib/motion';
 import { usePref } from '../lib/prefs';
 import { hrefFor, type Route } from '../lib/route';
+import { api } from '../lib/api';
 import { useStore } from '../lib/store';
 import type { Drive } from '../lib/types';
 
@@ -50,8 +49,11 @@ function DriveRow({
   landed = false,
   pulled = false,
   onSeen,
+  split,
 }: {
   d: Drive;
+  /** Photography vs the rest on this drive, once an index has counted it. */
+  split?: SpaceSplit;
   active: boolean;
   fresh: boolean;
   /** Plugged in seconds ago: play the landing animation. */
@@ -59,8 +61,7 @@ function DriveRow({
   pulled?: boolean;
   onSeen: () => void;
 }) {
-  const { tasks, elsewhere, setIgnored, drives, ejectDrive, cards } = useStore();
-  const card = d.volume_id ? cards.find((c) => c.volume_id === d.volume_id) : undefined;
+  const { tasks, elsewhere, setIgnored, drives, ejectDrive } = useStore();
   const isNew = !d.volume_id && !isCardDrive(d);
   const live = d.mounted ? liveStep(d, tasks, elsewhere) : null;
   // Being read or written right now (rv-35): the row is shaded with a moving sheen, and says what is happening.
@@ -181,8 +182,8 @@ function DriveRow({
       {d.mounted && (used !== null || canEject) && (
         <div className="mt-2 flex items-center gap-2 pl-4">
           {/* A full card is normal; a full drive is not. */}
-          {used !== null && key === 'card' && card?.counts ? (
-            <CardSpaceBar used={used} counts={card.counts} />
+          {used !== null && split ? (
+            <SpaceSplitBar used={used} split={split} />
           ) : used !== null ? (
             <ProgressBar
               value={used}
@@ -202,17 +203,31 @@ function DriveRow({
   );
 }
 
-/** A card's space bar: the used part split by tier in the same proportions as the card page's bar (by files), so a
- *  card's safety shows in the sidebar too. */
-function CardSpaceBar({ used, counts }: { used: number; counts: NonNullable<CardInfo['counts']> }) {
-  const total = TIER_ORDER.reduce((n, t) => n + counts[t].files, 0);
+/** Bytes per drive for the sidebar's space bars (`GET /api/drives/usage`, idx-13). */
+export interface SpaceSplit {
+  photo: number;
+  non_photo: number;
+  unaccounted: number | null;
+  used: number | null;
+  capacity: number | null;
+}
+
+/** A drive's space bar split like the drive page's: photography, not photography, unaccounted, then free. The live
+ *  used fraction sets the bar's length; the split comes from the last index. */
+function SpaceSplitBar({ used, split }: { used: number; split: SpaceSplit }) {
+  const parts = [
+    { key: 'photo', label: 'Photography', bytes: split.photo, bar: 'bg-accent' },
+    { key: 'non', label: 'Not photography', bytes: split.non_photo, bar: 'bg-maybe' },
+    { key: 'unacc', label: 'Unaccounted', bytes: split.unaccounted ?? 0, bar: 'bg-ink/25' },
+  ].filter((x) => x.bytes > 0);
+  const counted = parts.reduce((n, x) => n + x.bytes, 0);
   const pct = Math.max(0, Math.min(1, used)) * 100;
-  const label = `Space used ${Math.round(pct)} %: ${TIER_ORDER.filter((t) => counts[t].files).map((t) => `${counts[t].files} ${TIER[t].label.toLowerCase()}`).join(', ')}`;
+  const label = `${Math.round(pct)} % used: ${parts.map((x) => `${x.label} ${fmtBytes(x.bytes)}`).join(', ')}`;
   return (
     <div role="img" aria-label={label} title={label} className="relative h-1 w-full overflow-hidden rounded-full bg-ink/[0.07]">
-      <motion.div className="flex h-full gap-px overflow-hidden rounded-full" initial={false} animate={{ width: `${pct > 0 ? Math.max(pct, 1.5) : 0}%` }} transition={springs.glide}>
-        {total > 0
-          ? TIER_ORDER.filter((t) => counts[t].files).map((t) => <span key={t} className={`h-full ${TIER_TONE[t].solid}`} style={{ width: `${(counts[t].files / total) * 100}%` }} />)
+      <motion.div className="flex h-full overflow-hidden rounded-full" initial={false} animate={{ width: `${pct > 0 ? Math.max(pct, 1.5) : 0}%` }} transition={springs.glide}>
+        {counted > 0
+          ? parts.map((x) => <span key={x.key} className={`h-full ${x.bar}`} style={{ width: `${(x.bytes / counted) * 100}%` }} />)
           : <span className="h-full w-full bg-ink/25" />}
       </motion.div>
     </div>
@@ -409,7 +424,19 @@ function FreshBanner({ list, onSeen }: { list: Drive[]; onSeen: (d: Drive) => vo
 }
 
 function DriveList({ route }: { route: Route }) {
-  const { drives, loaded, now } = useStore();
+  const { drives, loaded, now, recent } = useStore();
+  // The space split per drive: fetched again when a drive comes or goes and when a run finishes (an index recounts).
+  const [usage, setUsage] = useState<Record<string, SpaceSplit>>({});
+  const mountKey = drives.filter((d) => d.mounted).map((d) => d.volume_id ?? d.key).join(',');
+  useEffect(() => {
+    let alive = true;
+    api<{ usage: Record<string, SpaceSplit> }>('GET', '/api/drives/usage')
+      .then((r) => alive && setUsage(r.usage))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [mountKey, recent.length]);
   const { fresh, touched, touch, left } = useDriveActivity();
   const [folded, setFolded] = usePref<string[]>('pv:driveFold', ['ignored']);
   // A drive just unplugged moves to Not connected: open that group so it stays in sight (rv-38).
@@ -499,7 +526,7 @@ function DriveList({ route }: { route: Route }) {
                     <div className="flex flex-col gap-1.5 pb-2">
                       {list.map((d, i) => (
                         <motion.div key={d.key} {...rise(i)}>
-                          <DriveRow d={d} fresh={fresh[d.key] !== undefined} landed={fresh[d.key] !== undefined && (now || Date.now()) - fresh[d.key]! < LANDED_MS} pulled={!d.mounted && left[d.key] !== undefined && (now || Date.now()) - left[d.key]! < PULLED_MS} onSeen={() => touch(d.key)} active={
+                          <DriveRow d={d} fresh={fresh[d.key] !== undefined} landed={fresh[d.key] !== undefined && (now || Date.now()) - fresh[d.key]! < LANDED_MS} pulled={!d.mounted && left[d.key] !== undefined && (now || Date.now()) - left[d.key]! < PULLED_MS} onSeen={() => touch(d.key)} split={d.volume_id ? usage[d.volume_id] : undefined} active={
                               route.view === 'setup'
                                 ? route.key === d.key
                                 : (route.view === 'drive' || route.view === 'cards') && route.id !== null && route.id === d.volume_id

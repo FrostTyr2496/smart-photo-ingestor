@@ -706,6 +706,21 @@ def test_volume_summary_usage_splits_photography_from_the_rest(srv: Client) -> N
     assert u["free"] == (max(cap - 200, 0) if cap else None)
 
 
+def test_drives_usage_gives_each_counted_drive_its_space_split(srv: Client) -> None:
+    """The sidebar's space bars: only drives an index has counted, in bytes, matching the drive page."""
+    assert srv.call("GET", "/api/drives/usage")[1]["usage"] == {}
+    c = db.connect(srv.app.catalog_path)
+    try:
+        with repo.transaction(c):
+            repo.replace_volume_usage(c, "vol-work", {"lightroom": (2, 5), "audio": (3, 100), "disk_used": (0, 200)})
+    finally:
+        c.close()
+    status, body = srv.call("GET", "/api/drives/usage")
+    assert status == 200 and list(body["usage"]) == ["vol-work"]
+    u = body["usage"]["vol-work"]
+    assert (u["photo"], u["non_photo"], u["unaccounted"], u["used"]) == (15, 100, 85, 200)
+
+
 def test_volume_summary_lists_runs_with_their_results(srv: Client) -> None:
     c = db.connect(srv.app.catalog_path)
     with repo.transaction(c):
