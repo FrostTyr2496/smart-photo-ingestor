@@ -60,6 +60,8 @@ interface Store {
   confirm: ConfirmAsk | null;
   startTask: (cmd: string, args: Record<string, unknown>) => Promise<number | null>;
   pauseTask: (id: number) => Promise<void>;
+  /** Pause a run this server did not start, by pid (kept in `pausing` as -pid). */
+  pauseRun: (pid: number) => Promise<void>;
   runWorkflow: (d: Drive) => Promise<void>;
   runStep: (d: Drive, step: WorkflowStep) => Promise<void>;
   busy: (d: Drive) => boolean;
@@ -359,6 +361,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [toast],
   );
 
+  const pauseRun = useCallback(
+    async (pid: number) => {
+      setPausing((p) => new Set(p).add(-pid));
+      try {
+        await api('POST', `/api/activity/${pid}/pause`, {});
+        toast('Pausing. The run stops after the current file.');
+      } catch (err) {
+        setPausing((p) => {
+          const n = new Set(p);
+          n.delete(-pid);
+          return n;
+        });
+        toast((err as Error).message, 'err');
+      }
+    },
+    [toast],
+  );
+
   const waitForTask = useCallback(
     (id: number) =>
       new Promise<TaskRec>((resolve) => {
@@ -552,6 +572,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     confirm,
     startTask,
     pauseTask,
+    pauseRun,
     runWorkflow,
     runStep,
     busy,

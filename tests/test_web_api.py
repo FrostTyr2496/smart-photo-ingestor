@@ -6,6 +6,7 @@ Everything runs on tmp_path roots and a tmp catalog through a real server thread
 from __future__ import annotations
 
 import json
+import os
 import re
 import select
 import subprocess
@@ -1355,3 +1356,31 @@ def test_generation_poll_answers_without_holding_a_connection(srv: Client) -> No
     """The UI polls this instead of /api/events, so tabs no longer use up the browser's connections to the host."""
     status, body = srv.call("GET", "/api/generation")
     assert status == 200 and isinstance(body["generation"], int)
+
+
+def test_tasks_run_detached_from_the_server(tmp_path) -> None:
+    """Headless tasks: own session (a Ctrl-C on `serve` never reaches them), output via a log file (no broken pipe when
+    `serve` exits); the server follows the file and removes it when the task ends."""
+    child = ("import os, sys, json, time\n"
+             "print(json.dumps({'event': 'progress', 'phase': 'x', 'sid': os.getsid(0)}), flush=True)\n"
+             "time.sleep(0.3)\n"
+             "print(json.dumps({'event': 'result', 'ok': True}), flush=True)\n")
+    runner = web.TaskRunner([sys.executable, "-c", child], awake_argv=None, log_dir=tmp_path / "logs")
+    task_id = runner.start(["hash", "/x"])
+    deadline = time.time() + 10
+    while runner.get(task_id).state == "running" and time.time() < deadline:
+        time.sleep(0.05)
+    task = runner.get(task_id)
+    assert task.state == "done"
+    events = [e["event"] for e in task.events]
+    assert events == ["progress", "result"]
+    assert task.events[0]["sid"] != os.getsid(0)
+    assert list((tmp_path / "logs").iterdir()) == []
+
+
+def test_pause_by_pid_only_signals_a_listed_photovault_run(srv: Client) -> None:
+    """A run left by an earlier `serve` (headless) is paused by pid; any other pid is refused, never signalled."""
+    status, body = srv.call("POST", f"/api/activity/{os.getpid()}/pause", {})
+    assert status == 404 and "no PhotoVault run" in body["error"]
+    status, _ = srv.call("GET", f"/api/activity/{os.getpid()}/pause")
+    assert status == 405

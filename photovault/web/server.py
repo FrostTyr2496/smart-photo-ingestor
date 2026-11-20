@@ -22,6 +22,7 @@ import signal
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import threading
 from collections import Counter, deque
 from contextlib import nullcontext as _nullcontext
@@ -46,6 +47,7 @@ from photovault.phone import SOURCES as PHONE_SOURCES
 from photovault.protocol import EXIT_PAUSED, human_bytes
 
 logger = logging.getLogger(__name__)
+PUMP_POLL_S = 0.2  # how often a task's log file is checked for new lines
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 ROLE_CHOICES = ("WORKING", "MASTER", "LEGACY")
@@ -153,7 +155,9 @@ class TaskRunner:
     By default it is `default_awake_argv()` when running the real engine, and off for a custom `base_argv`.
     """
 
-    def __init__(self, base_argv: list[str] | None = None, awake_argv: list[str] | None | str = "auto") -> None:
+    def __init__(self, base_argv: list[str] | None = None, awake_argv: list[str] | None | str = "auto",
+                 log_dir: Path | None = None) -> None:
+        self.log_dir = Path(log_dir) if log_dir is not None else Path(tempfile.gettempdir()) / "photovault-tasks"
         self.base_argv = list(base_argv) if base_argv is not None else default_base_argv()
         if awake_argv == "auto":
             awake_argv = default_awake_argv() if base_argv is None else None
@@ -170,10 +174,15 @@ class TaskRunner:
             self._next_id += 1
             task = _Task(task_id, argv)
             self._tasks[task_id] = task
+        # Detached (headless): the task gets its own session, so Ctrl-C or a closed terminal on `serve` never reaches
+        # it, and it writes to a log file rather than a pipe, so it never dies of a broken pipe when `serve` exits. The
+        # server follows the file. A run that outlives the server shows on Tasks through its activity file (ui-11).
+        log_path = self.log_dir / f"task-{os.getpid()}-{task_id}.log"
         try:
-            proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                    stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
-                                    bufsize=1)
+            self.log_dir.mkdir(parents=True, exist_ok=True)
+            with open(log_path, "wb") as log:
+                proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                                        start_new_session=True)
         except OSError as exc:
             task.add({"event": "error", "code": "spawn", "message": str(exc)})
             task.finish("failed", None)
@@ -183,19 +192,39 @@ class TaskRunner:
         if self.awake_argv:
             try:  # it exits on its own when the task does (`-w <pid>`)
                 subprocess.Popen([*self.awake_argv, str(proc.pid)], stdin=subprocess.DEVNULL,
-                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
                 task.keep_awake = True
             except OSError as exc:
                 logger.warning("cannot keep the Mac awake: %s", exc)
-        threading.Thread(target=self._pump, args=(task, proc), daemon=True, name=f"task-{task_id}").start()
+        threading.Thread(target=self._pump, args=(task, proc, log_path), daemon=True, name=f"task-{task_id}").start()
         return task_id
 
-    def _pump(self, task: _Task, proc: subprocess.Popen) -> None:
+    def _pump(self, task: _Task, proc: subprocess.Popen, log_path: Path) -> None:
+        """Follow the task's log file until the process exits, then read what is left and remove the file."""
         try:
-            for line in proc.stdout:
-                if line.strip():
-                    task.add(parse_line(line))
+            with open(log_path, encoding="utf-8", errors="replace") as log:
+                pending = ""
+                while True:
+                    chunk = log.read()
+                    if chunk:
+                        pending += chunk
+                        *lines, pending = pending.split("\n")
+                        for line in lines:
+                            if line.strip():
+                                task.add(parse_line(line))
+                    elif proc.poll() is not None:
+                        if pending.strip():
+                            task.add(parse_line(pending))
+                        break
+                    else:
+                        time.sleep(PUMP_POLL_S)
+        except OSError as exc:
+            task.add({"event": "error", "code": "log", "message": f"lost the task's output: {exc}"})
         finally:
+            try:
+                log_path.unlink()
+            except OSError:
+                pass
             code = proc.wait()
             with self._lock:
                 self._procs.pop(task.task_id, None)
@@ -928,7 +957,25 @@ def route(app: WebApp, method: str, path: str, query: dict, body: Any) -> tuple[
         conn.close()
 
 
+def _pause_run(app: WebApp, conn, pid: int) -> dict:
+    """Pause a run this server did not start (a terminal run, or a task of an earlier `serve`, which now runs headless):
+    SIGINT, the same signal Pause sends to a task. Only a PhotoVault run listed in the activity snapshot is signalled."""
+    snap = activity.snapshot(conn, app.home, server_pid=os.getpid())
+    if not any(e.get("pid") == pid for e in snap["activity"]):
+        raise NotFound(f"no PhotoVault run with pid {pid}")
+    try:
+        os.kill(pid, signal.SIGINT)
+    except ProcessLookupError as exc:
+        raise Conflict(f"run {pid} already exited") from exc
+    return {"pid": pid, "state": "pausing"}
+
+
 def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) -> tuple[int, Any]:
+    m = re.fullmatch(r"/api/activity/(\d+)/pause", path)
+    if m:
+        if method != "POST":
+            return 405, {"error": "method not allowed"}
+        return 200, _pause_run(app, conn, int(m.group(1)))
     m = re.fullmatch(r"/api/tasks/(\d+)(/pause)?", path)
     if m:
         task_id = int(m.group(1))

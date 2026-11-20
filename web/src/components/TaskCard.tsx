@@ -22,6 +22,8 @@ export interface TaskVM {
   origin: string | null;
   tech: string;
   pauseId: number | null;
+  /** A run this server did not start (terminal, or a task left by an earlier `serve`): paused by pid. */
+  pausePid: number | null;
   /** The command, as `commandKey` names it ("ingest", "backup", "card_clear"…). */
   kind: string;
   /** The last files the run handled, newest last (rv-34). */
@@ -54,6 +56,7 @@ export function taskVM(t: TaskRec, drives: Drive[], now: number, driveFiles: Rec
     origin: null,
     tech: `task ${t.id} · exit ${t.exitCode ?? '–'}\n${t.argv.length ? t.argv.join(' ') : '(not started yet)'}`,
     pauseId: t.id,
+    pausePid: null,
     kind: commandKey(words),
     files: t.files ?? [],
     route: copyRoute(commandKey(words), runMounts(t, drives, true), drives),
@@ -94,6 +97,7 @@ export function extVM(e: ExtRun, drives: Drive[], now: number, driveFiles: Recor
       : 'Started in a terminal. Counts come from the catalog; exact totals show for runs started after ui-11.',
     tech: `pid ${e.pid}${j ? ` · job ${j.job_id} (${j.kind})` : ''} · started ${e.started_at}\nphotovault ${words.join(' ')}`,
     pauseId: null,
+    pausePid: e.pid,
     kind: commandKey(words),
     files: e.files ?? [],
     route: copyRoute(commandKey(words), taskMounts(words), drives),
@@ -216,11 +220,11 @@ export function RunningCard({
   /** Briefly ringed when a link lands on it. */
   highlight?: boolean;
 }) {
-  const { pauseTask, pausing } = useStore();
+  const { pauseTask, pauseRun, pausing } = useStore();
   const [open, setOpen] = useState(false);
   const [techOpen, setTechOpen] = useState(false);
   const p = vm.pace;
-  const isPausing = vm.pauseId !== null && pausing.has(vm.pauseId);
+  const isPausing = vm.pauseId !== null ? pausing.has(vm.pauseId) : vm.pausePid !== null && pausing.has(-vm.pausePid);
   const last = vm.files[vm.files.length - 1];
 
   const footer = (
@@ -282,10 +286,10 @@ export function RunningCard({
             </span>
           )}
         </h3>
-        {vm.pauseId !== null ? (
+        {vm.pauseId !== null || vm.pausePid !== null ? (
           <button
             type="button"
-            onClick={() => pauseTask(vm.pauseId!)}
+            onClick={() => (vm.pauseId !== null ? pauseTask(vm.pauseId) : pauseRun(vm.pausePid!))}
             disabled={isPausing}
             aria-label={isPausing ? 'Pausing' : `Pause: ${vm.title}`}
             title={isPausing ? 'Pausing after the current file…' : 'Pause'}
