@@ -1,11 +1,13 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { useEffect, useMemo, useState, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { Disclosure, FsPill, Icon, RolePill, ROLE_DOT } from '../components/bits';
 import { RefsDialog } from './RefsDialog';
 import { PULLED_MS } from '../components/Unplugged';
 import { openMenu } from '../lib/menu';
 import { EjectButton, useEjectBlock } from '../components/Eject';
 import { ProgressBar } from '../components/ProgressBar';
+import { createPortal } from 'react-dom';
+import { TIER, TIER_ORDER, TIER_TONE } from '../lib/tiers';
 import { extVM, FinishedRow, RunningCard, taskVM } from '../components/TaskCard';
 import { useDriveActivity } from '../lib/driveActivity';
 import {
@@ -22,14 +24,14 @@ import {
   type SortKey,
   type TypeKey,
 } from '../lib/driveList';
-import { fmtBytes, parseSize, relTime } from '../lib/format';
+import { fmtBytes, parseSize, plural, relTime } from '../lib/format';
 import { argvWords, driveIO, driveName, driveStatus, flagValue, isCardDrive, liveStep, newestAssignTask, ROLE_WORD, roleKey, staleText } from '../lib/labels';
 import { rise, springs } from '../lib/motion';
 import { usePref } from '../lib/prefs';
 import { hrefFor, type Route } from '../lib/route';
 import { api } from '../lib/api';
 import { useStore } from '../lib/store';
-import type { Drive } from '../lib/types';
+import type { CardInfo, Drive } from '../lib/types';
 
 const RECENT_FINISHED = 3;
 /** A drive plugged in this recently plays its landing animation when its row appears (rv-38). */
@@ -61,7 +63,9 @@ function DriveRow({
   pulled?: boolean;
   onSeen: () => void;
 }) {
-  const { tasks, elsewhere, setIgnored, drives, ejectDrive } = useStore();
+  const { tasks, elsewhere, setIgnored, drives, ejectDrive, cards } = useStore();
+  const card = roleKey(d.role) === 'card' && d.volume_id ? cards.find((c) => c.volume_id === d.volume_id) : undefined;
+  const parts = spaceParts(card, split);
   const isNew = !d.volume_id && !isCardDrive(d);
   const live = d.mounted ? liveStep(d, tasks, elsewhere) : null;
   // Being read or written right now (rv-35): the row is shaded with a moving sheen, and says what is happening.
@@ -182,8 +186,8 @@ function DriveRow({
       {d.mounted && (used !== null || canEject) && (
         <div className="mt-2 flex items-center gap-2 pl-4">
           {/* A full card is normal; a full drive is not. */}
-          {used !== null && split ? (
-            <SpaceSplitBar used={used} split={split} />
+          {used !== null && parts ? (
+            <SplitSpaceBar used={used} parts={parts} free={d.free ?? null} title={key === 'card' ? 'Files on this card' : 'Space on this drive'} />
           ) : used !== null ? (
             <ProgressBar
               value={used}
@@ -212,24 +216,80 @@ export interface SpaceSplit {
   capacity: number | null;
 }
 
-/** A drive's space bar split like the drive page's: photography, not photography, unaccounted, then free. The live
- *  used fraction sets the bar's length; the split comes from the last index. */
-function SpaceSplitBar({ used, split }: { used: number; split: SpaceSplit }) {
-  const parts = [
-    { key: 'photo', label: 'Photography', bytes: split.photo, bar: 'bg-accent' },
-    { key: 'non', label: 'Not photography', bytes: split.non_photo, bar: 'bg-maybe' },
-    { key: 'unacc', label: 'Unaccounted', bytes: split.unaccounted ?? 0, bar: 'bg-ink/25' },
-  ].filter((x) => x.bytes > 0);
-  const counted = parts.reduce((n, x) => n + x.bytes, 0);
+interface SpacePart {
+  key: string;
+  label: string;
+  bar: string;
+  /** The segment's share is value / sum of values. */
+  value: number;
+  detail: string;
+}
+
+/** The parts of a sidebar space bar. A card splits by tier (by files, as the card page's bar does); a drive by what
+ *  the last index counted: photography, not photography, unaccounted (as the drive page's bar does). */
+function spaceParts(card: CardInfo | undefined, split: SpaceSplit | undefined): SpacePart[] | null {
+  if (card?.counts) {
+    const c = card.counts;
+    return TIER_ORDER.filter((t) => c[t].files > 0).map((t) => ({
+      key: t,
+      label: TIER[t].label,
+      bar: TIER_TONE[t].solid,
+      value: c[t].files,
+      detail: `${plural(c[t].files, 'file')} · ${fmtBytes(c[t].bytes)}`,
+    }));
+  }
+  if (split) {
+    return [
+      { key: 'photo', label: 'Photography', bar: 'bg-accent', value: split.photo, detail: fmtBytes(split.photo) },
+      { key: 'non', label: 'Not photography', bar: 'bg-maybe', value: split.non_photo, detail: fmtBytes(split.non_photo) },
+      { key: 'unacc', label: 'Unaccounted', bar: 'bg-ink/25', value: split.unaccounted ?? 0, detail: fmtBytes(split.unaccounted ?? 0) },
+    ].filter((x) => x.value > 0);
+  }
+  return null;
+}
+
+/** A space bar whose used part is split into coloured parts. Hovering anywhere on the space line opens a small panel
+ *  (in a portal, so the sidebar's collapsible groups do not clip it) that names each part. */
+function SplitSpaceBar({ used, parts, free, title }: { used: number; parts: SpacePart[]; free: string | null; title: string }) {
+  const total = parts.reduce((n, x) => n + x.value, 0);
   const pct = Math.max(0, Math.min(1, used)) * 100;
-  const label = `${Math.round(pct)} % used: ${parts.map((x) => `${x.label} ${fmtBytes(x.bytes)}`).join(', ')}`;
+  const box = useRef<HTMLDivElement>(null);
+  const [at, setAt] = useState<DOMRect | null>(null);
   return (
-    <div role="img" aria-label={label} title={label} className="relative h-1 w-full overflow-hidden rounded-full bg-ink/[0.07]">
-      <motion.div className="flex h-full overflow-hidden rounded-full" initial={false} animate={{ width: `${pct > 0 ? Math.max(pct, 1.5) : 0}%` }} transition={springs.glide}>
-        {counted > 0
-          ? parts.map((x) => <span key={x.key} className={`h-full ${x.bar}`} style={{ width: `${(x.bytes / counted) * 100}%` }} />)
-          : <span className="h-full w-full bg-ink/25" />}
-      </motion.div>
+    <div
+      ref={box}
+      className="-my-1.5 flex-1 py-1.5"
+      onMouseEnter={() => setAt(box.current?.getBoundingClientRect() ?? null)}
+      onMouseLeave={() => setAt(null)}
+    >
+      <div role="img" aria-label={`${Math.round(pct)} % used: ${parts.map((x) => `${x.label} ${x.detail}`).join(', ')}`} className="relative h-1 w-full overflow-hidden rounded-full bg-ink/[0.07]">
+        <motion.div className="flex h-full gap-px overflow-hidden rounded-full" initial={false} animate={{ width: `${pct > 0 ? Math.max(pct, 1.5) : 0}%` }} transition={springs.glide}>
+          {total > 0
+            ? parts.map((x) => <span key={x.key} className={`h-full ${x.bar}`} style={{ width: `${(x.value / total) * 100}%` }} />)
+            : <span className="h-full w-full bg-ink/25" />}
+        </motion.div>
+      </div>
+      {at &&
+        createPortal(
+          <div
+            className="pointer-events-none fixed z-50 w-64 rounded-lg border border-line bg-surface/95 p-2.5 text-xs shadow-2xl backdrop-blur"
+            style={{ top: at.bottom + 8, left: Math.max(8, at.left) }}
+          >
+            <p className="mb-1.5 font-medium">
+              {title} <span className="font-normal text-faint">· {Math.round(pct)} % used{free ? ` · ${free} free` : ''}</span>
+            </p>
+            <ul className="flex flex-col gap-1">
+              {parts.map((x) => (
+                <li key={x.key} className="flex items-center gap-2">
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${x.bar}`} aria-hidden="true" />
+                  <span className="flex-1 text-muted">{x.label}</span>
+                  <span className="tabular text-ink/85">{x.detail}</span>
+                </li>
+              ))}
+            </ul>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
