@@ -31,7 +31,7 @@ import {
 import { openMenu } from '../lib/menu';
 import { onlyShoot, sectionsOf, type Outline, type Section } from '../lib/outline';
 import { holdCentred } from '../lib/reveal';
-import { usePref } from '../lib/prefs';
+import { readPref, usePref, writePref } from '../lib/prefs';
 import { useStore } from '../lib/store';
 import { ClockBanner } from './ClockBanner';
 import { Lightbox } from './Lightbox';
@@ -39,6 +39,8 @@ import { PhotoInspector } from './PhotoInspector';
 import { goToSection, TripsRail, TripsView, type TripsShared } from './PhotosTrips';
 import { PAGE, Tile, type DayState } from './PhotoTile';
 
+const SEL_PREF = 'photos.selection';
+const SEL_KEEP = 1000;
 const reducedMotion = (): boolean => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 
 interface ShootRow {
@@ -73,7 +75,13 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto, s
   const [daysKey, setDaysKey] = useState('');
   const [counts, setCounts] = useState<MissingCounts | null>(null);
   const [loaded, setLoaded] = useState<Record<string, DayState>>({});
-  const [sel, setSel] = useState<Map<number, PhotoGroup>>(() => new Map());
+  // The selection survives a refresh (saved per browser, up to SEL_KEEP photos). Restored photos are the saved copies
+  // until their section loads, when the fresh rows replace them once (`staleSel`).
+  const [sel, setSel] = useState<Map<number, PhotoGroup>>(() => new Map(readPref<PhotoGroup[]>(SEL_PREF, []).map((g) => [g.group_id, g])));
+  const staleSel = useRef<Set<number>>(new Set(sel.keys()));
+  useEffect(() => {
+    writePref(SEL_PREF, sel.size ? [...sel.values()].slice(-SEL_KEEP) : null);
+  }, [sel]);
   const [settings, setSettings] = useState<PhotoSettings>({ creator: '', copyright: '', default_offset: '+00:00' });
   const [windowS, setWindowS] = useState(1800);
   const [reload, setReload] = useState(0);
@@ -294,6 +302,21 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto, s
   // Show in All Photos (rv-19): drop the filters, load the photo's day (and further pages of it), centre the tile and
   // flash its ring once.
   const [reveal, setReveal] = useState<{ id: number; day: string } | null>(null);
+  // After a refresh, bring the last selected photo back into view (only with no filters, as a reveal needs).
+  useEffect(() => {
+    if (wantPhoto || volume || missing || shoot) return;
+    const last = [...sel.values()].pop();
+    if (last) setReveal({ id: last.group_id, day: dayOf(last) });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const stale = staleSel.current;
+    if (!stale.size) return;
+    const fresh = new Map<number, PhotoGroup>();
+    for (const st of Object.values(loaded)) for (const g of st.groups) if (stale.has(g.group_id)) fresh.set(g.group_id, g);
+    if (!fresh.size) return;
+    fresh.forEach((_, id) => stale.delete(id));
+    setSel((prev) => new Map([...prev].map(([id, g]) => [id, fresh.get(id) ?? g])));
+  }, [loaded]);
   const [flash, setFlash] = useState<number | null>(null);
   // The one function that clears the drive and "missing" filters: the chips' x and Show in All Photos use it (rv-21).
   const clearFilters = useCallback(() => {
