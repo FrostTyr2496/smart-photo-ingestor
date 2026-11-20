@@ -257,6 +257,13 @@ def test_hash_makes_thumbs_only_when_enabled_and_survives_errors(tmp_path, capsy
     r = result(lines)
     assert code == 0 and r["hashed"] == 8
     assert r["thumbs"]["errors"] == 0 and r["thumbs"]["added"] == len(previews.review_ids(folder)) > 0
+    # a drive hashed before thumbs were on: a re-hash reads no file, yet fills the missing thumbs
+    for f in folder.iterdir():
+        f.unlink()
+    code, lines = run(capsys, "hash", str(drv))
+    r = result(lines)
+    assert code == 0 and r["hashed"] == 0
+    assert r["thumbs"]["backfilled"] == r["thumbs"]["added"] == len(previews.review_ids(folder)) > 0
     # a thumb error never fails the hash
     c.execute("UPDATE instances SET state = 'indexed', asset_id = NULL")
     c.commit()

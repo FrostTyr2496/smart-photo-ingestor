@@ -237,6 +237,28 @@ def baseline_hash(conn: sqlite3.Connection, cfg: Config, mount: Path, **kwargs: 
             thumbs.close()
 
 
+def _backfill_thumbs(conn: sqlite3.Connection, mount: Path, thumbs: Any, emit: Emitter,
+                     should_stop: Callable[[], bool]) -> None:
+    """Review thumbs for primaries hashed before thumbs were turned on: a hash reads only unhashed files, so an
+    already-hashed drive would otherwise never get them. Reads only each file's embedded preview."""
+    base = Path(mount).resolve()
+    vid = registered_volume(conn, Path(mount))["volume_id"]
+    todo = [(g, rel) for g, rel in previews.volume_primaries(conn, vid) if not thumbs.has(g)]
+    if not todo:
+        return
+    before = thumbs.counts["added"]
+    for k, (gid, rel) in enumerate(todo, 1):
+        if should_stop():
+            break
+        src = (base / rel).resolve()
+        if src.is_relative_to(base) and src.is_file():
+            thumbs.make(gid, src)
+        if k % previews.PROGRESS_EVERY == 0 or k == len(todo):
+            emit.emit("progress", phase="thumbs", current=k, total=len(todo),
+                      message=f"review thumbs: {k:,} of {len(todo):,} photos")
+    thumbs.counts["backfilled"] = thumbs.counts["added"] - before
+
+
 def _baseline_hash(
     conn: sqlite3.Connection, cfg: Config, mount: Path, *, emit: Emitter, max_mbps: float | None = None,
     should_stop: Callable[[], bool] = lambda: False, skip_prefixes: Iterable[str] = (),
@@ -374,6 +396,8 @@ def _baseline_hash(
         if delay > 0:
             time.sleep(delay)
 
+    if thumbs is not None and not only_candidates:
+        _backfill_thumbs(conn, mount, thumbs, emit, should_stop)  # photos hashed before thumbs were turned on
     with repo.transaction(conn):
         repo.set_job_state(conn, job_id, "done")
         repo.set_job_result(conn, job_id, run_stats())
