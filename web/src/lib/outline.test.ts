@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { countsLine, dateRange, onlyShoot, railOf, sectionsOf, shootLine, titleTone, type OutlineItem, type OutlineShoot } from './outline';
+import { countsLine, dateRange, onlyShoot, railOf, sectionsOf, shootLine, titleShade, titleTone, type OutlineItem, type OutlineShoot } from './outline';
 
 const shoot = (key: string, over: Partial<OutlineShoot> = {}): OutlineShoot => ({
   key,
@@ -62,5 +62,15 @@ describe('outline helpers (rv-47)', () => {
     expect(shootLine(shoot('s1'))).toContain('08:05–11:30 · Z6 · X9 Pro');
     expect(countsLine({ groups: 5 })).toBe('5 photos');
     expect(countsLine({ groups: 5, files: 312, bytes: 9.8e9 })).toContain('312 files');
+  });
+});
+
+describe('titleShade', () => {
+  it('draws accepted names in ink and proposals in amber, fading with confidence', () => {
+    expect(titleShade('accepted', 0.1)).toEqual({ className: 'text-ink', opacity: 1, hint: 'Accepted' });
+    expect(titleShade('proposed', 1)).toMatchObject({ className: 'text-maybe', opacity: 1, hint: 'Proposed · 100% confidence' });
+    expect(titleShade('proposed', 0).opacity).toBe(0.3);
+    expect(titleShade('proposed', 0.5).opacity).toBe(0.65);
+    expect(titleShade('proposed', null)).toMatchObject({ opacity: 0.6, hint: 'Proposed · Re-plan for a confidence' });
   });
 });

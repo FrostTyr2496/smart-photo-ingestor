@@ -20,7 +20,7 @@ def _plan(ids: dict[str, int]) -> dict:
         "shoots": [{"proposal_id": "s:1", "trip_id": "t:1", "name": {"value": "Cove day", "source": "folder"},
                     "shoot_date": "2026-11-10", "wall": {"start": "2026-11-10T21:00:00", "end": "2026-11-10T21:00:00"},
                     "group_ids": [ids["b"], ids["c"]], "sample_group_ids": [ids["b"]],
-                    "details": {"place": {"value": "Harbourton"}, "subject": {"value": "Boats"}},
+                    "details": {"place": {"value": "Harbourton", "confidence": 0.8}, "subject": {"value": "Boats", "confidence": 0.4}},
                     "volumes": [{"volume_id": "vol-work", "label": "WORK", "frames": 2}], "locked": False}],
     }
 
@@ -68,6 +68,9 @@ def test_accepted_proposed_and_loose(srv: Client, monkeypatch: pytest.MonkeyPatc
     assert s_prop["proposal_id"] == "s:1" and s_prop["sample_group_ids"] == [srv.ids["b"]]
     assert s_prop["days"] == [{"day": "2026-11-10", "groups": 2}]
     assert out["items"][0]["kind"] == "trip" and len(out["items"]) == 2  # no loose frames left
+    # name shading (rv-47): accepted = 1; proposed = the lower of place and subject; a trip = its shoots, by photos
+    assert (s_acc["confidence"], acc["confidence"]) == (1.0, 1.0)
+    assert (s_prop["confidence"], prop["confidence"]) == (0.4, 0.4)
 
 
 def test_loose_when_unplanned_and_key_resolution(srv: Client, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:

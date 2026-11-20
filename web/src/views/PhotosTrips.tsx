@@ -1,6 +1,6 @@
 import { useEffect, useRef, type MouseEvent } from 'react';
 import { fmtInt } from '../lib/format';
-import { countsLine, railOf, shootLine, titleTone, tripLine, type OutlineItem, type OutlineShoot, type OutlineTrip } from '../lib/outline';
+import { countsLine, railOf, shootLine, titleShade, tripLine, type OutlineItem, type OutlineShoot, type OutlineTrip } from '../lib/outline';
 import { dayLabel, dayOf, fullOffline, type PhotoGroup } from '../lib/photos';
 import { PAGE, Tile, type DayState } from './PhotoTile';
 
@@ -104,7 +104,7 @@ function ShootSection({ s, shared }: { s: OutlineShoot; shared: TripsShared }) {
       {...shared}
       header={
         <>
-          <h3 className={`truncate text-base font-medium ${titleTone(s.state)}`}>{s.title}</h3>
+          <h3 className={`truncate text-base font-medium ${titleShade(s.state, s.confidence).className}`} style={{ opacity: titleShade(s.state, s.confidence).opacity }} title={titleShade(s.state, s.confidence).hint}>{s.title}</h3>
           <p className="truncate text-xs text-muted" title={shootLine(s)}>
             {[shootLine(s), countsLine(s)].filter(Boolean).join(' · ')}
           </p>
@@ -118,7 +118,7 @@ function TripBlock({ t, shared }: { t: OutlineTrip; shared: TripsShared }) {
   return (
     <div id={`sec-${t.key}`} className="mt-6 flex scroll-mt-[64px] flex-col gap-1 first:mt-0">
       <header className="border-b border-line pb-2">
-        <h2 className={`text-xl font-semibold tracking-tight ${titleTone(t.state)}`}>{t.name}</h2>
+        <h2 className={`text-xl font-semibold tracking-tight ${titleShade(t.state, t.confidence).className}`} style={{ opacity: titleShade(t.state, t.confidence).opacity }} title={titleShade(t.state, t.confidence).hint}>{t.name}</h2>
         <p className="mt-0.5 text-sm text-muted">{tripLine(t)}</p>
       </header>
       {t.shoots.map((s) => (
@@ -181,8 +181,9 @@ export function TripsRail({ items }: { items: OutlineItem[] }) {
                 key={e.key}
                 type="button"
                 onClick={() => goToSection(e.key)}
-                title={`${e.label} · ${e.sub}`}
-                className={`rounded px-1 py-0.5 text-left text-xs leading-snug hover:bg-ink/5 ${e.state === 'accepted' ? 'text-muted hover:text-ink' : 'text-maybe/70 hover:text-maybe'}`}
+                title={`${e.label} · ${e.sub} · ${titleShade(e.state, e.confidence).hint}`}
+                style={e.state === 'accepted' ? undefined : { opacity: titleShade(e.state, e.confidence).opacity }}
+                className={`rounded px-1 py-0.5 text-left text-xs leading-snug hover:bg-ink/5 hover:!opacity-100 ${e.state === 'accepted' ? 'text-muted hover:text-ink' : 'text-maybe'}`}
               >
                 {e.label ? (
                   <>

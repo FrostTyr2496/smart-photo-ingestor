@@ -88,6 +88,14 @@ def _plan_shoot(plan: dict | None, key: str) -> dict:
     return {}
 
 
+def _confidence(details: dict) -> float | None:
+    """A proposed shoot's confidence for shading its name: the lower of its place and subject confidence among those
+    proposed (sh-8 details), or None when the plan has neither (a plan made before sh-8)."""
+    vals = [float(d["confidence"]) for d in (details.get("place"), details.get("subject"))
+            if isinstance(d, dict) and d.get("value") and isinstance(d.get("confidence"), (int, float))]
+    return round(min(vals), 3) if vals else None
+
+
 def outline(conn: sqlite3.Connection, plan: dict | None, *, volume_id: str | None = None,
             missing: str | None = None) -> dict:
     """``{"trips": [...], "items": [...], "plan_id", "frames"}``; see the module doc and rv-46 in the revamp spec.
@@ -159,7 +167,7 @@ def outline(conn: sqlite3.Connection, plan: dict | None, *, volume_id: str | Non
             vols = [{"volume_id": v, "label": labels.get(v) or "Drive", "frames": n}
                     for v, n in sorted(acc_vols.get(sid, {}).items(), key=lambda x: -x[1])]
             times = t["_times"]
-            shoots.append({**t, "shoot_id": sid, "proposal_id": None, "state": "accepted",
+            shoots.append({**t, "shoot_id": sid, "proposal_id": None, "state": "accepted", "confidence": 1.0,
                            "title": title_of(d["place"], d["subject"], d["name"]), "name": d["name"],
                            "place": d["place"], "subject": d["subject"], "shoot_date": d["shoot_date"],
                            "wall": {"start": times[0] if times else None, "end": times[-1] if times else None},
@@ -173,6 +181,7 @@ def outline(conn: sqlite3.Connection, plan: dict | None, *, volume_id: str | Non
             keep = set(b["gids"])
             samples = [g for g in ps.get("sample_group_ids") or [] if g in keep][:8] or _spread(sorted(keep))
             shoots.append({**t, "shoot_id": None, "proposal_id": key, "state": "proposed",
+                           "confidence": _confidence(det),
                            "title": title_of(place, subject, name), "name": name, "place": place,
                            "subject": subject, "shoot_date": ps.get("shoot_date"),
                            "wall": ps.get("wall") or {"start": None, "end": None},
@@ -208,6 +217,10 @@ def outline(conn: sqlite3.Connection, plan: dict | None, *, volume_id: str | Non
         if files is not None:
             tr["files"] = sum(s["files"] for s in tr["shoots"])
             tr["bytes"] = sum(s["bytes"] for s in tr["shoots"])
+        known = [(s["confidence"], s["groups"]) for s in tr["shoots"] if s["confidence"] is not None]
+        weight = sum(n for _, n in known)
+        tr["confidence"] = (1.0 if tr["state"] == "accepted" else
+                            round(sum(c * n for c, n in known) / weight, 3) if weight else None)
         dates = [s["shoot_date"] for s in tr["shoots"] if s["shoot_date"]]
         tr["start_date"] = tr["start_date"] or (min(dates) if dates else None)
         tr["end_date"] = tr["end_date"] or (max(dates) if dates else None)
