@@ -82,7 +82,7 @@ task's commit:
    [user] im-5 and im-6: see "Waiting on user".
 3. **[user] idx-6:** resume the PP 1 hash with `--skip-prefix` on the damaged folder, then run `report duplicates`
    ("If a drive shows I/O errors" in `docs/user/INDEX_WORKFLOW.md`). idx-5 is done except `lrcat mark`.
-4. **Shoots to confirm (D-127, spec `docs/specs/shoots` tasks 8–14):** sp-9 (V9 + phone analysis; the user re-imported: 18,995 rows) and pv-1 (opt-in review thumbs, Settings) done; sh-8 in progress, then sh-9 → sh-10; ob-1 any time; sh-7 last.
+4. **Shoots to confirm (D-127..D-133, spec `docs/specs/shoots` tasks 8–14):** sp-9, pv-1, sh-8, sh-9, sh-10, ob-1 done (`#/review/shoots` = queue + stack, beta fades low confidence; Library card on Tasks). Next: sh-7 (model subjects) starts with a proposal for the user; sh-5 still open.
    **Curation (spec `docs/specs/curation`, D-069):** wave 1 is approved and ready: ing-13, idx-9, idx-10, idx-14,
    seq-1b (then seq-2), rv-11; then lr-0, set-1; cu-0 / dd-0 / ro-0 are proposals first. **Phone + related
    (D-070..D-079):** rv-16, sp-2, sp-3, sp-7, sp-7b, sp-8, rv-10, rv-17..rv-24 done. **Shoots (spec
@@ -94,7 +94,7 @@ task's commit:
    met-2 (web view); met-4 after bk-1.
 
 ## Waiting on user
-- **[user] pv-1 review thumbs:** restart `serve`; Settings → Review thumbs (off by default, folder `~/Sandbox/PhotoVault Thumbs`): turn it on, re-hash a connected drive, check thumbs show with the drive unplugged.
+- **[user] Shoots to confirm (browser):** restart `serve`. Re-hash X9 Pro (thumbs on: it now fills thumbs for already-hashed photos), check `~/Sandbox/PhotoVault Thumbs`. Re-plan in `#/review/shoots`: queue sort (Oldest/Newest, ⇅ Reverse), filter chips, open a stack (Details → Members → In question; Enter, Tab, J/K, X, S), faded beyond-cut-off items; the Library card on Tasks.
 - **[user] test card (tc-1, D-111):** after the copy, mark the card, restart `serve`, then import and watch it turn
   yellow then green: `uv run photovault --json test-card mark "<card mount>" --hide "<drive>"` (repeat `--hide`),
   `test-card show`, `test-card clear` (see `docs/user/CARD_WORKFLOW.md`). Not seen in a browser yet.
@@ -124,11 +124,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-133 (agent): sh-10 stack edits stay a local draft until Confirm, then go out as ordinary decisions; Apply sets `confirmed_at`.
+- D-132 (agent): sh-9 "high confidence" = place and subject ≥ 0.6 and no flags; confirmed = accepted.
+- D-131 (agent): sh-8 scores sessions (15 min chains) on time/place/continuity/clock; beta looks 24 h out.
+- D-130 (agent): pv-1 setting `review_thumbs` `{enabled, folder}`; thumbs made during hash and `previews cache`.
 - D-128 (user): beta review shows everything beyond the cut-offs, faded by confidence; review thumbs Mac-only, default `~/Sandbox/PhotoVault Thumbs`.
-- D-127 (user): Shoots to confirm: bands 0.5 / 0.1, phone analysis with time-decayed confidence, opt-in thumbs on a chosen device, local+API models behind a setting, `place`/`subject` columns, phone = context only.
-- D-126 (user+agent): rv-43 Eject (`diskutil eject`) from the sidebar ⏏, its menu, and drive/card pages; refused while a task uses the drive.
-- D-125 (user+agent): rv-42 no Rename/Ignore buttons in sidebar rows; Ignore via right-click or a hover ⋯ menu.
-- D-124 (user+agent): rv-41 "Recently used" counts plug-in, tasks and step runs only; opening or clicking a drive just clears New.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.
