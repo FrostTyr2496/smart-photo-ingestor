@@ -328,3 +328,42 @@ Order: sp-9 and pv-1 (independent) → sh-8 → sh-9 → sh-10; ob-1 any time; s
     shoots), after a preview of the exact payload. No GPS is sent, and the place name only if ticked.
   - Results are suggestion chips with source `model`, cached by proposal id and a hash of the input.
   - Verify: unit tests with a fake model; **[user]** a run on 5 shoots.
+
+## Place collections (D-138, review `docs/reviews/2026-11-19-pl-0-place-collections.md`)
+
+- [ ] 15. **[stronger]** Planner: place collections
+  - ID: pl-1. _Design:_ review §2 and §4.
+  - `shoots.plan` adds a top-level `places` list. Each spot is
+    `{key, kind: "spot", name: {value, source, confidence, count, alternatives}, centroid, radius_km, area_key,
+    members: [{proposal_id, confidence, via: "coords"|"name"|"folder", beyond_cutoff?}], frames, first_date, last_date,
+    home: bool}`. Each area is `{key, kind: "area", name, spot_keys, members}`.
+    - Spots: single-link on shoot centroids at `place_spot_km` (1.5), cut where the diameter would exceed
+      `place_spot_max_km` (5). Areas: `place_area_km` (25), named by the phone area.
+    - Shoots without coordinates join only by a user-confirmed place name or a shared human folder.
+    - Name priority: user > phone venue > phone place > folder > area.
+    - Member confidence: the centre distance against the radius, times the shoot's place confidence. Beta keeps faint
+      members with `beyond_cutoff`.
+    - Home: the spot that phone `search_info.home` points at most (from `phone_analysis.hints_json` or the raw flag if
+      stored; otherwise the spot with the most phone points at night), flagged `home: true`.
+    - The key is stable: a hash of the member proposal ids, sorted.
+    - Locked (applied) shoots join as members too, read-only.
+  - Settings with defaults, as for sh-8. No schema change.
+  - Verify: `uv run pytest tests/test_shoot_places.py tests/test_shoots.py -q`, with synthetic coordinates: a spot of 3
+    visits over 2 years; a coastline chain cut at 5 km; a shoot with no GPS joined by a confirmed name; a folder join;
+    home flagged. Then a read-only run on the real catalog, with the counts (aggregates only) in the Result.
+
+- [ ] 16. Review: Group by Time · Trip · Place
+  - ID: pl-2 (after pl-1). _Design:_ review §3–4.
+  - A "Group by" switch beside Sort in `#/review/shoots`, kept per browser. Time is today's flat queue; Trip groups
+    the queue rows by trip; Place lists the collections, biggest first, with areas as headers.
+  - Each spot shows:
+    - its name with its source and count ("iPhone venue · 4 of 7"), and alternatives as chips;
+    - years and frames;
+    - a lazy Leaflet mini map with member pins;
+    - members as compact queue rows, ticked by confidence (≥ `shoot_pretick_min`), faint ones faded below the beta
+      divider.
+  - **Name this place for N shoots**: one `detail` (field `place`) per ticked shoot in one batch, with a single undo
+    in the pending panel. Opening a member opens its stack.
+  - Home is collapsed under "Home (hidden)" until expanded.
+  - Verify: `cd web && npm run typecheck && npm test && npm run build`; `uv run pytest tests/test_shoots_api.py -q`;
+    **[user]** browser check.

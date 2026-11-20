@@ -1,6 +1,8 @@
 # pl-0: place collections in review: shoots grouped by where, across time
 
-Status: **proposal, awaiting the user (2026-11-19)**. It builds on the shoots-to-confirm queue (D-127..D-133) and the
+Status: **building v1 with the recommended answers (2026-11-19, D-138)**: the user asked for it to be built now. Answers
+taken: 1 two levels (1.5 / 25 km); 2 confirmed name or shared folder only; 3 home hidden; 4 v1 without merge/split;
+5 v2 later. Each stays open to the user's change. It builds on the shoots-to-confirm queue (D-127..D-133) and the
 trips view (D-134). Trips group shoots by **time**. A place collection groups them by **where**, across years: the
 same lookout visited six times, or the local park. This file is public, so it holds aggregates only.
 

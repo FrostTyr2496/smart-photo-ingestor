@@ -82,7 +82,7 @@ task's commit:
    [user] im-5 and im-6: see "Waiting on user".
 3. **[user] idx-6:** resume the PP 1 hash with `--skip-prefix` on the damaged folder, then run `report duplicates`
    ("If a drive shows I/O errors" in `docs/user/INDEX_WORKFLOW.md`). idx-5 is done except `lrcat mark`.
-4. **Shoots to confirm (D-127..D-133, spec `docs/specs/shoots` tasks 8–14):** sp-9, pv-1, sh-8, sh-9, sh-10, ob-1 done (`#/review/shoots` = queue + stack, beta fades low confidence; Library card on Tasks). Next: sh-7 (model subjects) starts with a proposal for the user; sh-5 still open.
+4. **Shoots to confirm (D-127..D-133, spec `docs/specs/shoots` tasks 8–14):** sp-9, pv-1, sh-8, sh-9, sh-10, ob-1 done (`#/review/shoots` = queue + stack, beta fades low confidence; Library card on Tasks). Building: rv-46..48 (Photos/Files by trip, D-134) and pl-1/pl-2 (place collections, D-138). Next: sh-7 (model subjects) starts with a proposal; sh-5 still open.
    **Curation (spec `docs/specs/curation`, D-069):** wave 1 is approved and ready: ing-13, idx-9, idx-10, idx-14,
    seq-1b (then seq-2), rv-11; then lr-0, set-1; cu-0 / dd-0 / ro-0 are proposals first. **Phone + related
    (D-070..D-079):** rv-16, sp-2, sp-3, sp-7, sp-7b, sp-8, rv-10, rv-17..rv-24 done. **Shoots (spec
@@ -124,11 +124,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-138 (user+agent): place collections v1: 1.5 km spots in 25 km areas, home hidden, no schema change; a `places` table is v2.
+- D-134 (user): Photos and Files by trip → shoot, drawn as if accepted; proposed titles shaded amber.
 - D-133 (agent): sh-10 stack edits stay a local draft until Confirm, then go out as ordinary decisions; Apply sets `confirmed_at`.
 - D-132 (agent): sh-9 "high confidence" = place and subject ≥ 0.6 and no flags; confirmed = accepted.
 - D-131 (agent): sh-8 scores sessions (15 min chains) on time/place/continuity/clock; beta looks 24 h out.
-- D-130 (agent): pv-1 setting `review_thumbs` `{enabled, folder}`; thumbs made during hash and `previews cache`.
-- D-128 (user): beta review shows everything beyond the cut-offs, faded by confidence; review thumbs Mac-only, default `~/Sandbox/PhotoVault Thumbs`.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.
