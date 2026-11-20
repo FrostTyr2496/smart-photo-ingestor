@@ -584,3 +584,61 @@ Rules for every task:
     volume id) has no page and stays as it was.
   - Verify: `cd web && npm run typecheck && npm test && npm run build`.
   - Result (2026-11-19): typecheck clean; 261 web tests pass; build committed. Not seen in a browser.
+
+## Trips view (D-134): Photos and Files organised as trip → shoot, drawn as if accepted
+
+The user's direction (2026-11-19): Photos and drive Files are organised by **trip → shoot**, designed as if every trip
+and shoot were already accepted. Proposed (not yet applied) ones look the same, except their **title text is shaded
+in the review hue** (`text-maybe` at reduced opacity) instead of the normal ink; accepted ones use normal ink. A one-line
+legend says so. No badges, no extra chrome: keep it clean.
+
+Source of truth for each frame: an applied shoot (`capture_groups.shoot_id`, its trip) is **accepted**; otherwise the
+newest plan's proposal holding the group (`shoots[].group_ids`, its `trip_id`) is **proposed**; otherwise the frame is
+**loose** (no shoot) and shows grouped by day, in time order between the shoots. Stack title = `place · subject` from
+the shoot's columns or the plan's details, falling back to the shoot name. Decisions saved after the plan are not folded
+in (Re-plan does that); say so in the legend's tooltip.
+
+- [ ] 46. **[stronger]** Outline API: trips, shoots and loose days with their state
+  - ID: rv-46 (user ask, 2026-11-19; D-134).
+  - `photovault/outline.py` `outline(conn, plan: dict | None, *, volume_id=None, missing=None) -> dict`, pure and read-only:
+    `{"trips": [{key, name, state, start_date, end_date, groups, shoots: [...]}], "items": [...]}` where `items` is the
+    whole timeline newest first: trips, shoots without a trip, and loose days (`{"kind": "day", "day", "groups"}`).
+    A shoot is `{key, shoot_id|null, proposal_id|null, state: accepted|proposed, title, name, place, subject, shoot_date,
+    wall: {start, end}, groups, bodies, volumes, sample_group_ids (≤ 8), days: [{day, groups}]}`. `key` is
+    `s<shoot_id>` or the proposal id; trips likewise. Counts respect `volume_id` / `missing` (the Photos filters) and
+    a drive filter (only its groups).
+  - `GET /api/outline?volume_id=&missing=` (newest plan via the existing plan lookup, or none). `GET /api/groups` gains
+    `shoot_key=<key>` (accepted: by `shoot_id`; proposed: the plan's `group_ids`; `loose:<day>`: groups of that wall day
+    with no shoot), paged as today.
+  - `GET /api/volumes/<id>/files` gains `shoot_key` the same way, so the Files list can open one shoot.
+  - Performance: the real catalog (65k groups) answers under 1 s; cache the plan's group → proposal map per plan id.
+  - Verify: `uv run pytest tests/test_outline.py tests/test_web_api.py -q` (accepted, proposed, loose, a drive filter,
+    no plan).
+
+- [ ] 47. Photos by trip
+  - ID: rv-47 (after rv-46).
+  - A view switch in Photos' header, **Trips | Days** (default Trips, kept per browser); Days is today's timeline,
+    unchanged.
+  - Trips view, newest first:
+    - a **trip header**: name (large), date range, shoot count, frame count;
+    - inside it, each **shoot** as a section: title `place · subject` (medium), a quiet line with the wall-clock range,
+      bodies and drives;
+    - then its grid, loaded lazily per shoot like DaySection does per day (reuse Tile, selection, inspector, lightbox,
+      context menu). A multi-day shoot gets small day dividers inside its grid.
+    - shoots with no trip stand alone, at the same level as trips; loose photos show as plain day sections between them.
+  - The left rail lists years, then trips (and lone shoots) by name, and jumps to them.
+  - **State shading:** accepted titles in normal ink; proposed titles (trip and shoot) in `text-maybe` at ~70 %
+    opacity. The header has a one-line legend: "Names in amber are proposals; confirm them in Review →" (link to
+    `#/review/shoots`).
+  - Deep links: `#/photos?shoot=<key>` scrolls to that shoot. Show in Photos (rv-27) keeps working (lands on the photo
+    in whichever view is active).
+  - Verify: `cd web && npm run typecheck && npm test && npm run build`; **[user]** browser check.
+
+- [ ] 48. Files by trip
+  - ID: rv-48 (after rv-46).
+  - The drive/card Files list (`web/src/components/FileList.tsx`) gains a third view: **Trips | Folders | List**. Trips is
+    a tree: trip → shoot → files (each group's primary plus its sidecars and pairs), with the same title shading and
+    counts ("312 files · 9.8 GB"). Files with no shoot fall under "Not in a shoot" by day; files with no group
+    (non-photo) under "Other files". The filter bar (Show · Copies · Camera) applies inside.
+  - Expanding a shoot loads its files via `shoot_key`. The hover preview, right-click and Show in Photos keep working.
+  - Verify: `cd web && npm run typecheck && npm test && npm run build`; **[user]** browser check on X9 Pro.
