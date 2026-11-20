@@ -127,6 +127,7 @@ export function PhotoInspector({
   savedEpoch,
   onShowInAll,
   onOpenViewer,
+  onPeek,
 }: {
   selected: PhotoGroup[];
   pool: PhotoGroup[];
@@ -138,6 +139,8 @@ export function PhotoInspector({
   savedEpoch: number;
   onShowInAll: () => void;
   onOpenViewer: (g: PhotoGroup) => void;
+  /** Full screen over a list of preview thumbnails (rv-49), without changing the selection. */
+  onPeek: (list: PhotoGroup[], g: PhotoGroup) => void;
 }) {
   const { toast, drives } = useStore();
   const [pend, setPend] = useState<Pending>(NO_EDITS);
@@ -415,6 +418,7 @@ export function PhotoInspector({
             autoS={scopes.autoS}
             counts={scopes.counts}
             dayCount={scopes.dayCount}
+            onPeek={onPeek}
           />
         </Section>
       </div>
@@ -1046,6 +1050,7 @@ function AppliesTo({
   autoS,
   counts,
   dayCount,
+  onPeek,
 }: {
   selected: PhotoGroup[];
   rel: RelatedState;
@@ -1069,6 +1074,7 @@ function AppliesTo({
   autoS: number;
   counts: number[];
   dayCount: number;
+  onPeek: (list: PhotoGroup[], g: PhotoGroup) => void;
 }) {
   const hasTime = selected.some((g) => g.capture_time);
   const toggle = (id: number) => {
@@ -1078,6 +1084,7 @@ function AppliesTo({
     setExcluded(next);
   };
   const shown = placeList.slice(0, REL_SHOWN);
+  const viewable = placeList.filter((g) => g.volume_id);
   const ticked = placeList.filter((g) => !excluded.has(g.group_id)).length;
   const delta = (g: PhotoGroup): string => {
     let best: number | null = null;
@@ -1120,7 +1127,7 @@ function AppliesTo({
             </div>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(52px,1fr))] gap-1">
               {shown.map((g) => (
-                <RelatedThumb key={g.group_id} g={g} on={!excluded.has(g.group_id)} title={`${g.canonical_stem || `Photo ${g.group_id}`} · ${g.capture_time?.replace('T', ' ') ?? ''}${delta(g)}`} onToggle={() => toggle(g.group_id)} />
+                <RelatedThumb key={g.group_id} g={g} on={!excluded.has(g.group_id)} title={`${g.canonical_stem || `Photo ${g.group_id}`} · ${g.capture_time?.replace('T', ' ') ?? ''}${delta(g)}${g.volume_id ? ' · right-click: full screen' : ''}`} onToggle={() => toggle(g.group_id)} onPeek={() => onPeek(viewable, g)} />
               ))}
             </div>
             {placeList.length > shown.length && <p className="text-xs text-faint">+{fmtInt(placeList.length - shown.length)} more (all ticked unless you chose None)</p>}
@@ -1134,7 +1141,7 @@ function AppliesTo({
   );
 }
 
-function RelatedThumb({ g, on, title, onToggle }: { g: PhotoGroup; on: boolean; title: string; onToggle: () => void }) {
+function RelatedThumb({ g, on, title, onToggle, onPeek }: { g: PhotoGroup; on: boolean; title: string; onToggle: () => void; onPeek: () => void }) {
   const [failed, setFailed] = useState(false);
   return (
     <button
@@ -1142,6 +1149,12 @@ function RelatedThumb({ g, on, title, onToggle }: { g: PhotoGroup; on: boolean; 
       aria-pressed={on}
       title={title}
       onClick={onToggle}
+      onContextMenu={(e) => {
+        // Right-click opens the photo full screen (rv-49); Shift keeps the browser's menu, as elsewhere (rv-28).
+        if (e.shiftKey || !g.volume_id) return;
+        e.preventDefault();
+        onPeek();
+      }}
       className={`relative aspect-square overflow-hidden rounded-md bg-ink/5 outline-none focus-visible:ring-2 focus-visible:ring-accent/60 ${on ? 'ring-2 ring-accent' : 'opacity-60'}`}
     >
       {failed || !g.volume_id ? (

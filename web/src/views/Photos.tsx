@@ -429,6 +429,22 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto, s
     [viewerList, viewerIndex],
   );
 
+  // Full screen over the inspector's preview thumbnails (rv-49): steps through that list and leaves the selection alone,
+  // so the inspector keeps its photo and pending edits.
+  const [peek, setPeek] = useState<{ list: PhotoGroup[]; id: number } | null>(null);
+  const peekIndex = peek ? peek.list.findIndex((g) => g.group_id === peek.id) : -1;
+  const openPeek = useCallback((list: PhotoGroup[], g: PhotoGroup) => {
+    if (g.volume_id && list.some((x) => x.group_id === g.group_id)) setPeek({ list, id: g.group_id });
+  }, []);
+  const closePeek = useCallback(() => setPeek(null), []);
+  const stepPeek = useCallback((d: number) => {
+    setPeek((p) => {
+      if (!p) return p;
+      const next = p.list[wrapIndex(p.list.findIndex((g) => g.group_id === p.id), d, p.list.length)];
+      return next ? { ...p, id: next.group_id } : p;
+    });
+  }, []);
+
   const clear = useCallback(() => setSel(new Map()), []);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -654,13 +670,16 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto, s
               transition={{ type: 'spring', stiffness: 420, damping: 36 }}
               className="fixed bottom-2 right-2 top-16 z-20 w-[min(380px,calc(100vw-1rem))] xl:sticky xl:top-[117px] xl:bottom-auto xl:right-auto xl:z-auto xl:w-auto xl:self-start"
             >
-              <PhotoInspector selected={selected} pool={pool} settings={settings} windowS={windowS} onClear={clear} onSaved={onSaved} onRelated={onRelated} savedEpoch={savedEpoch} onShowInAll={showInAll} onOpenViewer={openViewer} />
+              <PhotoInspector selected={selected} pool={pool} settings={settings} windowS={windowS} onClear={clear} onSaved={onSaved} onRelated={onRelated} savedEpoch={savedEpoch} onShowInAll={showInAll} onOpenViewer={openViewer} onPeek={openPeek} />
             </motion.div>
           )}
         </AnimatePresence>
       </div>
       {createPortal(
-        <AnimatePresence>{viewerId !== null && viewerIndex >= 0 && <Lightbox key="viewer" list={viewerList} index={viewerIndex} onClose={closeViewer} onStep={stepViewer} />}</AnimatePresence>,
+        <AnimatePresence>
+          {viewerId !== null && viewerIndex >= 0 && <Lightbox key="viewer" list={viewerList} index={viewerIndex} onClose={closeViewer} onStep={stepViewer} />}
+          {viewerId === null && peek && peekIndex >= 0 && <Lightbox key="peek" list={peek.list} index={peekIndex} onClose={closePeek} onStep={stepPeek} />}
+        </AnimatePresence>,
         document.body,
       )}
     </div>

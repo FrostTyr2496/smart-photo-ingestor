@@ -652,3 +652,11 @@ in (Re-plan does that); say so in the legend's tooltip.
   - Result (2026-11-19): typecheck, `npm test` (268), `npm run build` and full `uv run pytest -q` (824 passed, 9 skipped)
     pass (D-137). Added `shoot_key=other` on drive and card files (backend, in `tests/test_outline.py`). Not seen in a
     browser. Files not hashed yet fall under "Other files"; a shoot shows at most its first 1000 files.
+
+- [x] 49. Right-click a preview thumbnail for full screen
+  - ID: rv-49 (user ask, 2026-11-19). Builds on rv-20 (viewer) and rv-16 (Applies to).
+  - In Photos, right-clicking a thumbnail in the inspector's "Applies to" grid opens it in the full-screen viewer, which
+    steps (←/→) through that list. The selection and pending edits stay as they were. Shift+right-click keeps the
+    browser's menu (as rv-28). Thumbnails with no drive (unplugged, no volume) are skipped.
+  - Verify: `cd web && npm run typecheck && npm test && npm run build`; **[user]** browser check.
+  - Result (2026-11-19): typecheck, `npm test` (274 passed) and `npm run build` pass. Not seen in a browser.
