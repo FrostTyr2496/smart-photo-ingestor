@@ -500,13 +500,6 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto, s
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-2xl font-semibold tracking-tight">Photos</h1>
-            <div className="flex rounded-lg border border-line p-0.5" role="group" aria-label="Photos view">
-              {(['trips', 'days'] as const).map((v) => (
-                <button key={v} type="button" aria-pressed={view === v} onClick={() => setView(v)} className={`h-6 rounded-md px-2.5 text-xs ${view === v ? 'bg-ink/10 text-ink' : 'text-muted hover:text-ink'}`}>
-                  {v === 'trips' ? 'Trips' : 'Days'}
-                </button>
-              ))}
-            </div>
             <a
               href="#/review/shoots"
               title="Check the proposed trips and shoots as a dry run (nothing changes until you Apply)"
@@ -538,6 +531,14 @@ export function Photos({ missing: wantMissing, day: wantDay, photo: wantPhoto, s
 
       {/* Persistent filter bar: stays above the sticky day header while the grid scrolls. */}
       <div className="no-scrollbar sticky top-[57px] z-20 -mx-1 flex h-12 items-center gap-2 overflow-x-auto border-b border-line bg-bg/90 px-1 backdrop-blur" aria-label="Filters">
+        {/* Trips / Days lives in the sticky bar so it stays reachable after scrolling. */}
+        <div className="flex h-8 shrink-0 items-center rounded-lg border border-line p-0.5" role="group" aria-label="Photos view">
+          {(['trips', 'days'] as const).map((v) => (
+            <button key={v} type="button" aria-pressed={view === v} onClick={() => setView(v)} className={`h-full rounded-md px-3 text-xs ${view === v ? 'bg-ink/10 text-ink' : 'text-muted hover:text-ink'}`}>
+              {v === 'trips' ? 'Trips' : 'Days'}
+            </button>
+          ))}
+        </div>
         <select value={volume} onChange={(e) => setVolume(e.target.value)} className="h-8 shrink-0" aria-label="Drive">
           <option value="">All drives</option>
           {registered.map((d) => (
