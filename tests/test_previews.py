@@ -337,3 +337,35 @@ def test_stay_open_exiftool_reads_a_real_preview(tmp_path) -> None:
         assert b"64" in et.execute("-ImageWidth", str(src))                # the next command still answers
     finally:
         et.close()
+
+
+def test_a_stop_while_making_thumbs_pauses_the_hash_job(tmp_path, capsys, monkeypatch) -> None:
+    """A stop (Ctrl-C, or `serve` exiting) during the thumbs step left the job `done` with exit 0 (2026-11-19)."""
+    from photovault import index, metadata, volumes
+    from photovault.catalog import repo as catrepo
+    from photovault.protocol import Emitter
+    from tests.test_baseline_hash import assign_and_index, conn as cat, make_drive
+    from tests.test_cli import fake_probe, fake_read
+    monkeypatch.setenv("PHOTOVAULT_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(volumes, "probe", fake_probe)
+    monkeypatch.setattr(metadata, "read_metadata", fake_read)
+    drv = make_drive(tmp_path / "Vols" / "OLD1")
+    assign_and_index(capsys, drv)
+    RealReader.data = _big_jpeg()
+    monkeypatch.setattr(previews, "PreviewReader", RealReader)
+    c = cat()
+    folder = tmp_path / "thumbs"
+    _enable(c, folder, enabled=False)
+    assert run(capsys, "hash", str(drv))[0] == 0          # hashed, no thumbs yet
+    _enable(c, folder)
+    calls = {"n": 0}
+
+    def stop_after_first_thumb() -> bool:
+        calls["n"] += 1
+        return len(previews.review_ids(folder)) >= 1
+
+    from photovault.config import load_config
+    job_id = index.baseline_hash(c, load_config(), drv, emit=Emitter(stream=__import__("io").StringIO()),
+                                 should_stop=stop_after_first_thumb)
+    assert catrepo.get_job(c, job_id)["state"] == "paused"
+    assert 1 <= len(previews.review_ids(folder)) < 8

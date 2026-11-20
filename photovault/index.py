@@ -398,6 +398,8 @@ def _baseline_hash(
 
     if thumbs is not None and not only_candidates:
         _backfill_thumbs(conn, mount, thumbs, emit, should_stop)  # photos hashed before thumbs were turned on
+        if should_stop():  # stopped while making thumbs: the job is not done (a re-run carries on with the thumbs)
+            return pause("paused", "stopped while making review thumbs; run the same hash command again to resume")
     with repo.transaction(conn):
         repo.set_job_state(conn, job_id, "done")
         repo.set_job_result(conn, job_id, run_stats())
