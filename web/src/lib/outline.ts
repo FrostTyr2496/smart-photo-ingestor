@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { fmtBytes, plural } from './format';
 import { dayLabel, MONTHS, UNDATED } from './photos';
 
@@ -7,6 +8,8 @@ export type OutlineState = 'accepted' | 'proposed';
 export interface OutlineShoot {
   /** 1 when accepted; for a proposal the lower of its place and subject confidence, or null (plan before sh-8). */
   confidence?: number | null;
+  /** An applied shoot showing the planner's suggestion for a place or subject the user has not set. */
+  suggested?: boolean;
   key: string;
   shoot_id: number | null;
   proposal_id: string | null;
@@ -63,16 +66,19 @@ export interface Outline {
 /** Title shading (D-134): normal ink when accepted, the review hue at about 70 % when proposed. */
 export const titleTone = (state: OutlineState): string => (state === 'accepted' ? 'text-ink' : 'text-maybe');
 
-/** How a trip or shoot name is drawn: accepted in normal ink; a proposal in amber, fading with its confidence
- * (`0.3 + 0.7 × confidence`, so a sure proposal is nearly solid and a weak one faint; 0.6 when the plan has no
- * confidence). `hint` is the hover text. */
-export function titleShade(state: OutlineState, confidence: number | null | undefined): { className: string; opacity: number; hint: string } {
-  if (state === 'accepted') return { className: 'text-ink', opacity: 1, hint: 'Accepted' };
+/** How a trip or shoot name is drawn. A name the user accepted or set is normal ink. A guess (a proposal, or an applied
+ * shoot showing the planner's suggestion) is always shown, coloured on a scale from gray (low confidence) to amber
+ * (high): `color-mix` of faint and maybe by the confidence. Unknown confidence (a plan before sh-8) sits midway.
+ * `hint` is the hover text. */
+export function titleShade(state: OutlineState, confidence: number | null | undefined, suggested = false): { className: string; style: CSSProperties | undefined; hint: string } {
+  if (state === 'accepted' && !suggested) return { className: 'text-ink', style: undefined, hint: 'Accepted' };
   const c = typeof confidence === 'number' ? Math.max(0, Math.min(1, confidence)) : null;
+  const pct = Math.round((c ?? 0.5) * 100);
+  const what = state === 'accepted' ? 'Suggested for an applied shoot' : 'Proposed';
   return {
-    className: 'text-maybe',
-    opacity: c === null ? 0.6 : Math.round((0.3 + 0.7 * c) * 100) / 100,
-    hint: c === null ? 'Proposed · Re-plan for a confidence' : `Proposed · ${Math.round(c * 100)}% confidence`,
+    className: '',
+    style: { color: `color-mix(in oklab, rgb(var(--c-maybe)) ${pct}%, rgb(var(--c-faint)))` },
+    hint: c === null ? `${what} · Re-plan for a confidence` : `${what} · ${pct}% confidence`,
   };
 }
 
@@ -151,6 +157,7 @@ export interface RailEntry {
   /** Shown when the rail is expanded on hover: dates and photo count. */
   sub: string;
   confidence: number | null;
+  suggested: boolean;
 }
 export interface RailYear {
   year: string;
@@ -175,8 +182,8 @@ export function railOf(items: OutlineItem[]): { years: RailYear[]; undated: stri
       y = { year, first: it.key, entries: [] };
       years.push(y);
     }
-    if (it.kind === 'trip') y.entries.push({ key: it.key, label: it.name, state: it.state, confidence: it.confidence ?? null, sub: [dateRange(it.start_date, it.end_date), plural(it.groups, 'photo')].filter(Boolean).join(' · ') });
-    else if (it.kind === 'shoot') y.entries.push({ key: it.key, label: it.title, state: it.state, confidence: it.confidence ?? null, sub: [it.shoot_date ?? '', plural(it.groups, 'photo')].filter(Boolean).join(' · ') });
+    if (it.kind === 'trip') y.entries.push({ key: it.key, label: it.name, state: it.state, confidence: it.confidence ?? null, suggested: false, sub: [dateRange(it.start_date, it.end_date), plural(it.groups, 'photo')].filter(Boolean).join(' · ') });
+    else if (it.kind === 'shoot') y.entries.push({ key: it.key, label: it.title, state: it.state, confidence: it.confidence ?? null, suggested: !!it.suggested, sub: [it.shoot_date ?? '', plural(it.groups, 'photo')].filter(Boolean).join(' · ') });
   }
   return { years, undated };
 }

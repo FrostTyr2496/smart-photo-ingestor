@@ -61,6 +61,22 @@ import {
 import { usePref } from '../lib/prefs';
 import { useStore } from '../lib/store';
 
+/** The best location suggestion for a photo with no location, named in the Location line (not saved). */
+interface TopGuess {
+  label: string;
+  /** 0..1, from the server's score or the tier. */
+  score: number;
+  why: string;
+  loc: PendingLoc;
+  fields?: PlaceFields;
+}
+
+const TIER_SCORE: Record<string, number> = { high: 0.9, medium: 0.6, low: 0.35, far: 0.25, weak: 0.2, hint: 0.1 };
+
+/** Gray (low) to amber (high), like trip and shoot names (D-145). */
+export const guessColor = (score: number): string =>
+  `color-mix(in oklab, rgb(var(--c-maybe)) ${Math.round(Math.max(0, Math.min(1, score)) * 100)}%, rgb(var(--c-faint)))`;
+
 interface Suggestion {
   lat: number;
   lon: number;
@@ -183,11 +199,17 @@ export function PhotoInspector({
   const [focus, setFocus] = useState(0);
   const [big, setBig] = useState(false);
   useEffect(() => setFocus((f) => f + 1), [selKey]);
-  // The top suggestion for a photo with no location: shown faintly on the map, which centres on it.
+  // The top suggestion for a photo with no location: shown faintly on the map, which centres on it, and named in the
+  // Location line on a gray-to-amber scale by confidence (D-145). Nothing is saved until the user presses Use.
   const [hint, setHint] = useState<MapPoint | null>(null);
-  useEffect(() => setHint(null), [selKey]);
-  const onTop = (p: MapPoint | null) => {
+  const [guess, setGuess] = useState<TopGuess | null>(null);
+  useEffect(() => {
+    setHint(null);
+    setGuess(null);
+  }, [selKey]);
+  const onTop = (p: MapPoint | null, g?: TopGuess | null) => {
     setHint(p);
+    setGuess(g ?? null);
     if (p) setFocus((f) => f + 1);
   };
 
@@ -282,7 +304,19 @@ export function PhotoInspector({
               : n === 1 && first
                 ? first.lat !== null && first.lon !== null
                   ? <><Coord lat={first.lat} lon={first.lon} /> · {GPS_LABEL[first.gps_source ?? 'camera'] ?? first.gps_source}</>
-                  : 'No location yet. Click the map, search a place or use a suggestion.'
+                  : guess
+                    ? (
+                      <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span title={`Not saved · ${Math.round(guess.score * 100)}% confidence · ${guess.why}`}>
+                          Probably <span className="font-medium" style={{ color: guessColor(guess.score) }}>{guess.label}</span>
+                          <span className="text-faint"> · {guess.why}</span>
+                        </span>
+                        <button type="button" className="btn-ghost h-6 px-2 text-2xs" onClick={() => { setLoc(guess.loc, true); if (guess.fields) setPend((p) => ({ ...p, ...placeEdits(guess.fields!) })); }}>
+                          Use
+                        </button>
+                      </span>
+                    )
+                    : 'No location yet. Click the map, search a place or use a suggestion.'
                 : `${fmtInt(located.length)} of ${fmtInt(n)} have a location.`}
           </p>
           <div className="relative">
@@ -557,7 +591,7 @@ function TextField({
   );
 }
 
-function Suggestions({ first, pool, selected, windowS, onUse, onTop }: { first: PhotoGroup; pool: PhotoGroup[]; selected: PhotoGroup[]; windowS: number; onUse: (l: PendingLoc, f?: PlaceFields) => void; onTop?: (p: MapPoint | null) => void }) {
+function Suggestions({ first, pool, selected, windowS, onUse, onTop }: { first: PhotoGroup; pool: PhotoGroup[]; selected: PhotoGroup[]; windowS: number; onUse: (l: PendingLoc, f?: PlaceFields) => void; onTop?: (p: MapPoint | null, g?: TopGuess | null) => void }) {
   const [list, setList] = useState<Suggestion[] | null>(null);
   const [err, setErr] = useState('');
   useEffect(() => {
@@ -572,7 +606,7 @@ function Suggestions({ first, pool, selected, windowS, onUse, onTop }: { first: 
   const ids = useMemo(() => new Set(selected.map((g) => g.group_id)), [selected]);
   const near = nearestWithLocation(first, pool, ids, windowS);
 
-  const rows: Array<{ key: string; text: string; sub: ReactNode; loc: PendingLoc; fields?: PlaceFields; quiet?: boolean }> = [];
+  const rows: Array<{ key: string; text: string; sub: ReactNode; loc: PendingLoc; fields?: PlaceFields; quiet?: boolean; guess?: TopGuess }> = [];
   for (const [i, s] of (list ?? []).entries()) {
     const fields: PlaceFields = { place_name: s.place_name ?? null, city: s.city ?? null, state: s.state ?? null, country: s.country ?? null };
     const label = placeLabel(fields);
@@ -598,6 +632,13 @@ function Suggestions({ first, pool, selected, windowS, onUse, onTop }: { first: 
       fields,
       sub: <>{via}<Coord lat={s.lat} lon={s.lon} /> · {tierText}</>,
       loc: { lat: s.lat, lon: s.lon, alt: s.alt ?? null, source: 'match' },
+      guess: {
+        label: label || name,
+        score: typeof s.score === 'number' ? s.score : (TIER_SCORE[tier] ?? 0.5),
+        why: `${tierText} · iPhone ${outer ? fmtApart(s.delta_s) : fmtDelta(s.delta_s)}`,
+        loc: { lat: s.lat, lon: s.lon, alt: s.alt ?? null, source: 'match' },
+        fields,
+      },
     });
   }
   if (near) {
@@ -613,7 +654,7 @@ function Suggestions({ first, pool, selected, windowS, onUse, onTop }: { first: 
   const topKey = top && top.lat !== null && top.lon !== null ? `${top.lat},${top.lon}` : '';
   useEffect(() => {
     if (list === null && !near) return;
-    onTop?.(top && top.lat !== null && top.lon !== null ? { lat: top.lat, lon: top.lon } : null);
+    onTop?.(top && top.lat !== null && top.lon !== null ? { lat: top.lat, lon: top.lon } : null, rows[0]?.guess ?? null);
   }, [topKey, list === null]); // eslint-disable-line react-hooks/exhaustive-deps
   if (list === null && !err) return <p className="text-xs text-faint">Looking for GPS matches…</p>;
   if (!rows.length) return <p className="text-xs text-faint">{err || 'No GPS points or located photos near this time. Add a GPS reference folder in Settings to match by time.'}</p>;

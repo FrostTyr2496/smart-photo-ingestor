@@ -167,9 +167,19 @@ def outline(conn: sqlite3.Connection, plan: dict | None, *, volume_id: str | Non
             vols = [{"volume_id": v, "label": labels.get(v) or "Drive", "frames": n}
                     for v, n in sorted(acc_vols.get(sid, {}).items(), key=lambda x: -x[1])]
             times = t["_times"]
-            shoots.append({**t, "shoot_id": sid, "proposal_id": None, "state": "accepted", "confidence": 1.0,
-                           "title": title_of(d["place"], d["subject"], d["name"]), "name": d["name"],
-                           "place": d["place"], "subject": d["subject"], "shoot_date": d["shoot_date"],
+            # an applied shoot whose place or subject the user has not set shows the planner's suggestion (D-145),
+            # shaded by its confidence; set fields count as confidence 1
+            det = next((x.get("details") or {} for x in (plan or {}).get("shoots") or []
+                        if x.get("locked") and x.get("shoot_id") == sid), {})
+            place = d["place"] or _text(det.get("place"))
+            subject = d["subject"] or _text(det.get("subject"))
+            guessed = [det[k] for k, own in (("place", d["place"]), ("subject", d["subject"]))
+                       if not own and isinstance(det.get(k), dict) and det[k].get("value")]
+            conf = round(min(float(g.get("confidence") or 0) for g in guessed), 3) if guessed else 1.0
+            shoots.append({**t, "shoot_id": sid, "proposal_id": None, "state": "accepted", "confidence": conf,
+                           "suggested": bool(guessed),
+                           "title": title_of(place, subject, d["name"]), "name": d["name"],
+                           "place": place, "subject": subject, "shoot_date": d["shoot_date"],
                            "wall": {"start": times[0] if times else None, "end": times[-1] if times else None},
                            "volumes": vols, "sample_group_ids": _spread(sorted(b["gids"])),
                            "_trip": f"t{d['trip_id']}" if d["trip_id"] else None})

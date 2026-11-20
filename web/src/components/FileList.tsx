@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import type { CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../lib/api';
 import { allKeys, buildTree, visibleRows, type FolderNode, type RunNode } from '../lib/filetree';
@@ -354,7 +355,7 @@ interface FetchState<T> {
   error: string;
 }
 
-function TreeRow({ depth, open, onToggle, cols, title, tone, meta, opacity = 1, hint }: { depth: number; open: boolean; onToggle: () => void; cols: number; title: string; tone: string; meta: string; opacity?: number; hint?: string }) {
+function TreeRow({ depth, open, onToggle, cols, title, tone, meta, shade, hint }: { depth: number; open: boolean; onToggle: () => void; cols: number; title: string; tone: string; meta: string; shade?: CSSProperties; hint?: string }) {
   return (
     <tr className={`border-b border-line ${depth === 0 ? 'bg-raised/30' : ''} hover:bg-ink/[0.03]`}>
       <td colSpan={cols} className="px-3 py-1.5">
@@ -362,7 +363,7 @@ function TreeRow({ depth, open, onToggle, cols, title, tone, meta, opacity = 1, 
           <motion.span animate={{ rotate: open ? 90 : 0 }} transition={springs.snappy} className="inline-flex shrink-0 self-center text-faint">
             <Icon name="chevron" size={11} />
           </motion.span>
-          <span className={`${depth === 0 ? 'text-sm font-semibold' : 'text-sm font-medium'} ${tone}`} style={opacity < 1 ? { opacity } : undefined} title={hint}>{title}</span>
+          <span className={`${depth === 0 ? 'text-sm font-semibold' : 'text-sm font-medium'} ${tone}`} style={shade} title={hint}>{title}</span>
           <span className="text-2xs text-muted">{meta}</span>
         </button>
       </td>
@@ -452,7 +453,7 @@ function FileTrips<T extends { rel_path: string }>({
   const shootRows = (s: OutlineShoot, depth: number): ReactNode =>
     (s.files ?? 0) > 0 && (
       <Fragment key={s.key}>
-        <TreeRow depth={depth} open={open.has(s.key)} onToggle={() => toggleShoot(s.key)} cols={cols} title={s.title} tone={titleShade(s.state, s.confidence).className} opacity={titleShade(s.state, s.confidence).opacity} hint={titleShade(s.state, s.confidence).hint} meta={[shootLine(s), countsLine(s)].filter(Boolean).join(' · ')} />
+        <TreeRow depth={depth} open={open.has(s.key)} onToggle={() => toggleShoot(s.key)} cols={cols} title={s.title} tone={titleShade(s.state, s.confidence, s.suggested).className} shade={titleShade(s.state, s.confidence, s.suggested).style} hint={titleShade(s.state, s.confidence, s.suggested).hint} meta={[shootLine(s), countsLine(s)].filter(Boolean).join(' · ')} />
         {open.has(s.key) && filesOf(s.key, depth + 1)}
       </Fragment>
     );
@@ -469,7 +470,7 @@ function FileTrips<T extends { rel_path: string }>({
         const isOpen = !shut.has(it.key);
         return (
           <Fragment key={it.key}>
-            <TreeRow depth={0} open={isOpen} onToggle={() => setShut((x) => flip(x, it.key))} cols={cols} title={it.name} tone={titleShade(it.state as OutlineState, it.confidence).className} opacity={titleShade(it.state as OutlineState, it.confidence).opacity} hint={titleShade(it.state as OutlineState, it.confidence).hint} meta={[dateRange(it.start_date, it.end_date), `${fmtInt(it.shoots.length)} ${it.shoots.length === 1 ? 'shoot' : 'shoots'}`, countsLine(it)].join(' · ')} />
+            <TreeRow depth={0} open={isOpen} onToggle={() => setShut((x) => flip(x, it.key))} cols={cols} title={it.name} tone={titleShade(it.state as OutlineState, it.confidence).className} shade={titleShade(it.state as OutlineState, it.confidence).style} hint={titleShade(it.state as OutlineState, it.confidence).hint} meta={[dateRange(it.start_date, it.end_date), `${fmtInt(it.shoots.length)} ${it.shoots.length === 1 ? 'shoot' : 'shoots'}`, countsLine(it)].join(' · ')} />
             {isOpen && it.shoots.map((s) => shootRows(s, 1))}
           </Fragment>
         );

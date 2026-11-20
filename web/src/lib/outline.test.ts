@@ -66,11 +66,12 @@ describe('outline helpers (rv-47)', () => {
 });
 
 describe('titleShade', () => {
-  it('draws accepted names in ink and proposals in amber, fading with confidence', () => {
-    expect(titleShade('accepted', 0.1)).toEqual({ className: 'text-ink', opacity: 1, hint: 'Accepted' });
-    expect(titleShade('proposed', 1)).toMatchObject({ className: 'text-maybe', opacity: 1, hint: 'Proposed · 100% confidence' });
-    expect(titleShade('proposed', 0).opacity).toBe(0.3);
-    expect(titleShade('proposed', 0.5).opacity).toBe(0.65);
-    expect(titleShade('proposed', null)).toMatchObject({ opacity: 0.6, hint: 'Proposed · Re-plan for a confidence' });
+  it('draws accepted names in ink and guesses on a gray-to-amber scale by confidence', () => {
+    expect(titleShade('accepted', 0.1)).toEqual({ className: 'text-ink', style: undefined, hint: 'Accepted' });
+    expect(titleShade('proposed', 1).style?.color).toContain('rgb(var(--c-maybe)) 100%');
+    expect(titleShade('proposed', 0).style?.color).toContain('rgb(var(--c-maybe)) 0%, rgb(var(--c-faint))');
+    expect(titleShade('proposed', 0.62).hint).toBe('Proposed · 62% confidence');
+    expect(titleShade('proposed', null).hint).toBe('Proposed · Re-plan for a confidence');
+    expect(titleShade('accepted', 0.4, true)).toMatchObject({ hint: 'Suggested for an applied shoot · 40% confidence' });
   });
 });

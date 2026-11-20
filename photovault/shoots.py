@@ -439,7 +439,9 @@ def _locked_shoots(conn: sqlite3.Connection, items: list[Item]) -> list[dict]:
             "centroid": ({"lat": sum(p[0] for p in located) / len(located), "lon": sum(p[1] for p in located) / len(located)}
                          if located else None),
             "points": [[round(a, 5), round(b, 5)] for a, b in _evenly(located, 50)],
-            "gaps": [], "flags": [], "locked": True, "_t0": seg[0].ts, "_t1": seg[-1].ts,
+            "gaps": [], "flags": [], "locked": True, "shoot_id": sid, "_t0": seg[0].ts, "_t1": seg[-1].ts,
+            "_w0": datetime.fromisoformat(str(seg[0].cap)[:19]), "_w1": datetime.fromisoformat(str(seg[-1].cap)[:19]),
+            "_items": seg,
             "_db_trip": r["trip_id"] if r is not None and "trip_id" in r.keys() else None,
         })
     return out
@@ -751,7 +753,10 @@ def plan(conn: sqlite3.Connection, *, gap_h: float = 8, split_km: float = 50, me
             s["name"]["value"] += f" {count[key]}"
 
     shoot_density.annotate(shoots, phone, cfg, haversine_km)
-    shoots += _locked_shoots(conn, locked_items)
+    locked_shoots = _locked_shoots(conn, locked_items)
+    for s in locked_shoots:  # applied shoots keep suggestions too, for any place or subject the user has not set
+        s["details"] = shoot_scoring.build_details(s, phone, cfg)
+    shoots += locked_shoots
     _add_volumes(conn, shoots)
     shoots.sort(key=lambda s: (s["_t0"], s["proposal_id"]))
 
