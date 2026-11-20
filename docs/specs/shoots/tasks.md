@@ -224,7 +224,7 @@ Order: sp-9 and pv-1 (independent) → sh-8 → sh-9 → sh-10; ob-1 any time; s
   - Verify: `uv run pytest tests/test_phone.py tests/test_catalog_db.py -q`; then **[user]** re-run
     `uv run photovault --json meta phone "<home>/phone/photos-20261118.json"` (no new export needed).
 
-- [ ] 9. Review thumbs: opt-in, stored in a Mac folder the user picks
+- [x] 9. Review thumbs: opt-in, stored in a Mac folder the user picks
   - ID: pv-1. _Design:_ review §2 (answer 3, narrowed by D-128).
   - A setting `review_thumbs = {"enabled": false, "folder": "~/Sandbox/PhotoVault Thumbs"}`, plus a Settings section
     (off by default) with the size estimate (frames × ~20 KB), the folder (editable, default
@@ -235,6 +235,7 @@ Order: sp-9 and pv-1 (independent) → sh-8 → sh-9 → sh-10; ob-1 any time; s
     slows or fails a hash: thumb errors are counted and reported. Drives are only read.
   - `/api/groups/<id>/thumb` looks in the review folder after the act-4 cache.
   - Verify: `uv run pytest tests/test_previews.py tests/test_hashing.py -q` (`tmp_path` stores only).
+  - Result (2026-11-19): setting `review_thumbs` (JSON in the `settings` table, default off, folder `~/Sandbox/PhotoVault Thumbs`); `previews.ThumbMaker` (Pillow, 384 px, JPEG quality stepped down toward 20 KB, temp + rename, existing thumbs skipped, errors counted never raised) is used by `index.baseline_hash` (primary files only; the job result and `result` event carry `thumbs`, plus a `thumb_errors` warning) and `previews.cache_volume` (`review_added`, `review_errors`). `/api/groups/<id>/thumb` reads the review folder after the act-4 cache; `POST /api/settings` validates the folder (refuses the mounts folder); `POST /api/settings/review-thumbs/reveal` is Show in Finder. Settings has a Review thumbs section (switch, estimate, folder, count). Measured on 5 real NEFs (168 MB, warm cache): about 54 ms per file for the thumb against about 24 ms to hash, including one ExifTool start; 5.9 KB average on the test frames (the 20 KB figure is the ceiling).
 
 - [ ] 10. **[stronger]** Planner: membership confidence and details
   - ID: sh-8 (after sp-9). _Design:_ review §6, plus the decay table above.

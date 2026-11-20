@@ -538,6 +538,8 @@ def test_places_endpoint(srv: Client) -> None:
 
 def test_settings_defaults_and_updates(srv: Client) -> None:
     status, body = srv.call("GET", "/api/settings")
+    rt = body["settings"].pop("review_thumbs")  # pv-1: off by default, in its own section
+    assert rt["enabled"] is False and rt["folder"] == "~/Sandbox/PhotoVault Thumbs"
     assert body["settings"] == {"creator": "", "copyright": "", "default_offset": "+00:00", "match_window_s": 1800,
                                 "match_reach_s": 43200,
                                 "mac_folder": "~/Sandbox"}
