@@ -49,6 +49,7 @@ describe('outline helpers (rv-47)', () => {
     expect(r.years.map((y) => y.year)).toEqual(['2024', '2023', '2022']);
     expect(r.years[1]!.entries).toMatchObject([{ key: 't1', label: 'Coast week', state: 'accepted' }]);
     expect(r.years[1]!.entries[0]!.sub).toMatch(/photo/);
+    expect(r.years[1]!.entries[0]!.children?.length).toBeGreaterThan(0); // a trip's shoots are listed under it
     expect(r.years[2]!.entries[0]).toMatchObject({ key: 's:3', label: 'Title s:3', state: 'proposed' });
     expect(r.undated).toBe('loose:undated');
   });

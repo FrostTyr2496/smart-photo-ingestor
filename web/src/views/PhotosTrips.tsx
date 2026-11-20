@@ -167,7 +167,7 @@ export function TripsView({ items, shared }: { items: OutlineItem[]; shared: Tri
  * highlighted and kept in view. */
 export function TripsRail({ items, focusId }: { items: OutlineItem[]; focusId?: number | null }) {
   const { years, undated } = useMemo(() => railOf(items), [items]);
-  const keys = useMemo(() => new Set(years.flatMap((y) => y.entries.map((e) => e.key))), [years]);
+  const keys = useMemo(() => new Set(years.flatMap((y) => y.entries.flatMap((e) => [e.key, ...(e.children ?? []).map((c) => c.key)]))), [years]);
   const [active, setActive] = useState<string | null>(null);
   const nav = useRef<HTMLElement>(null);
 
@@ -178,12 +178,14 @@ export function TripsRail({ items, focusId }: { items: OutlineItem[]; focusId?: 
     const spy = () => {
       frame = 0;
       const line = 170;
+      // The innermost section wins: a shoot inside a trip is highlighted rather than its trip.
       let hit: string | null = null;
+      let height = Infinity;
       for (const k of keys) {
         const r = document.getElementById(`sec-${k}`)?.getBoundingClientRect();
-        if (r && r.top <= line && r.bottom > line) {
+        if (r && r.top <= line && r.bottom > line && r.height < height) {
           hit = k;
-          break;
+          height = r.height;
         }
       }
       setActive(hit);
@@ -238,8 +240,8 @@ export function TripsRail({ items, focusId }: { items: OutlineItem[]; focusId?: 
               {y.year}
             </button>
             {y.entries.map((e) => (
+              <div key={e.key} className="flex flex-col">
               <button
-                key={e.key}
                 type="button"
                 data-rail={e.key}
                 aria-current={active === e.key ? 'location' : undefined}
@@ -258,6 +260,25 @@ export function TripsRail({ items, focusId }: { items: OutlineItem[]; focusId?: 
                   <span className="block truncate text-2xs text-faint">{e.sub}</span>
                 )}
               </button>
+              {e.children && e.children.length > 0 && (
+                <div className="ml-2 flex flex-col border-l border-line/60 pl-1.5">
+                  {e.children.map((c) => (
+                    <button
+                      key={c.key}
+                      type="button"
+                      data-rail={c.key}
+                      aria-current={active === c.key ? 'location' : undefined}
+                      onClick={() => goToSection(c.key)}
+                      title={`${c.label} · ${c.sub} · ${titleShade(c.state, c.confidence, c.suggested).hint}`}
+                      style={titleShade(c.state, c.confidence, c.suggested).style}
+                      className={`truncate rounded px-1 py-px text-left text-2xs leading-snug hover:bg-ink/5 ${active === c.key ? 'bg-ink/10 shadow-[inset_2px_0_0_rgb(var(--c-accent))]' : ''} ${c.state === 'accepted' && !c.suggested ? 'text-muted hover:text-ink' : 'hover:brightness-125'}`}
+                    >
+                      {c.label || c.sub}
+                    </button>
+                  ))}
+                </div>
+              )}
+              </div>
             ))}
           </div>
         ))}

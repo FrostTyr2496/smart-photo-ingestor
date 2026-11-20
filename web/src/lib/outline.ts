@@ -158,6 +158,8 @@ export interface RailEntry {
   sub: string;
   confidence: number | null;
   suggested: boolean;
+  /** A trip's shoots, listed under it in the rail (indented), so a named shoot inside a trip is findable. */
+  children?: RailEntry[];
 }
 export interface RailYear {
   year: string;
@@ -166,7 +168,13 @@ export interface RailYear {
   entries: RailEntry[];
 }
 
-/** The left rail: years (newest first), then that year's trips and lone shoots by name. Loose days are not listed. */
+const shootEntry = (s: OutlineShoot): RailEntry => ({
+  key: s.key, label: s.title, state: s.state, confidence: s.confidence ?? null, suggested: !!s.suggested,
+  sub: [s.shoot_date ?? '', plural(s.groups, 'photo')].filter(Boolean).join(' · '),
+});
+
+/** The left rail: years (newest first), then that year's trips (each with its shoots, newest first) and lone shoots by
+ * name. Loose days are not listed. */
 export function railOf(items: OutlineItem[]): { years: RailYear[]; undated: string | null } {
   const years: RailYear[] = [];
   let undated: string | null = null;
@@ -182,8 +190,13 @@ export function railOf(items: OutlineItem[]): { years: RailYear[]; undated: stri
       y = { year, first: it.key, entries: [] };
       years.push(y);
     }
-    if (it.kind === 'trip') y.entries.push({ key: it.key, label: it.name, state: it.state, confidence: it.confidence ?? null, suggested: false, sub: [dateRange(it.start_date, it.end_date), plural(it.groups, 'photo')].filter(Boolean).join(' · ') });
-    else if (it.kind === 'shoot') y.entries.push({ key: it.key, label: it.title, state: it.state, confidence: it.confidence ?? null, suggested: !!it.suggested, sub: [it.shoot_date ?? '', plural(it.groups, 'photo')].filter(Boolean).join(' · ') });
+    if (it.kind === 'trip') {
+      y.entries.push({
+        key: it.key, label: it.name, state: it.state, confidence: it.confidence ?? null, suggested: false,
+        sub: [dateRange(it.start_date, it.end_date), plural(it.groups, 'photo')].filter(Boolean).join(' · '),
+        children: [...it.shoots].reverse().map(shootEntry),
+      });
+    } else if (it.kind === 'shoot') y.entries.push(shootEntry(it));
   }
   return { years, undated };
 }
