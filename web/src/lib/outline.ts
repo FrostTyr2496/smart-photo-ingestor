@@ -10,6 +10,8 @@ export interface OutlineShoot {
   confidence?: number | null;
   /** An applied shoot showing the planner's suggestion for a place or subject the user has not set. */
   suggested?: boolean;
+  /** The rail's label (D-148): a place only. `near_s` set = the nearest named place in time, that far away. */
+  rail?: RailPlace | null;
   key: string;
   shoot_id: number | null;
   proposal_id: string | null;
@@ -34,6 +36,7 @@ export interface OutlineShoot {
 export interface OutlineTrip {
   /** 1 when accepted; for a proposal its shoots' confidence weighted by photos, or null. */
   confidence?: number | null;
+  rail?: RailPlace | null;
   key: string;
   name: string;
   state: OutlineState;
@@ -150,6 +153,22 @@ export function onlyShoot(items: OutlineItem[], shootId: number): OutlineItem[] 
 /** The date an item sits at on the timeline: a trip's end, a shoot's date, a loose day. */
 export const itemDate = (it: OutlineItem): string | null => (it.kind === 'trip' ? it.end_date : it.kind === 'shoot' ? it.shoot_date : it.day);
 
+export interface RailPlace {
+  label: string;
+  confidence: number;
+  near_s: number | null;
+}
+
+/** "40 min", "18 h", "12 d": how far in time the nearest named place is. */
+export function nearGap(sec: number): string {
+  if (sec < 3600) return `${Math.max(1, Math.round(sec / 60))} min`;
+  if (sec < 48 * 3600) return `${Math.round(sec / 3600)} h`;
+  return `${Math.round(sec / 86400)} d`;
+}
+
+/** The rail text for a place: "Point Dume", or "Near Las Vegas" when it is only the nearest place in time. */
+export const railText = (r: RailPlace | null | undefined): string => (!r ? '' : r.near_s ? `Near ${r.label}` : r.label);
+
 export interface RailEntry {
   key: string;
   label: string;
@@ -168,9 +187,17 @@ export interface RailYear {
   entries: RailEntry[];
 }
 
+/** Rail entries show a place only (D-148): never a subject, folder or date name. A place the user set or saved is
+ * ink; any other place, and every "Near …" place, is a guess shaded by its confidence. */
+function railLook(state: OutlineState, r: RailPlace | null | undefined): Pick<RailEntry, 'label' | 'state' | 'confidence' | 'suggested'> {
+  const sure = !!r && r.near_s === null && r.confidence >= 1;
+  return { label: railText(r), state: sure ? 'accepted' : state, confidence: r ? r.confidence : 0, suggested: !sure };
+}
+
 const shootEntry = (s: OutlineShoot): RailEntry => ({
-  key: s.key, label: s.title, state: s.state, confidence: s.confidence ?? null, suggested: !!s.suggested,
-  sub: [s.shoot_date ?? '', plural(s.groups, 'photo')].filter(Boolean).join(' · '),
+  ...railLook(s.state, s.rail),
+  key: s.key,
+  sub: [s.shoot_date ?? '', plural(s.groups, 'photo'), s.rail?.near_s ? `${nearGap(s.rail.near_s)} away` : ''].filter(Boolean).join(' · '),
 });
 
 /** The left rail: years (newest first), then that year's trips (each with its shoots, newest first) and lone shoots by
@@ -192,8 +219,9 @@ export function railOf(items: OutlineItem[]): { years: RailYear[]; undated: stri
     }
     if (it.kind === 'trip') {
       y.entries.push({
-        key: it.key, label: it.name, state: it.state, confidence: it.confidence ?? null, suggested: false,
-        sub: [dateRange(it.start_date, it.end_date), plural(it.groups, 'photo')].filter(Boolean).join(' · '),
+        ...railLook(it.state, it.rail),
+        key: it.key,
+        sub: [dateRange(it.start_date, it.end_date), plural(it.groups, 'photo'), it.rail?.near_s ? `${nearGap(it.rail.near_s)} away` : ''].filter(Boolean).join(' · '),
         children: [...it.shoots].reverse().map(shootEntry),
       });
     } else if (it.kind === 'shoot') y.entries.push(shootEntry(it));

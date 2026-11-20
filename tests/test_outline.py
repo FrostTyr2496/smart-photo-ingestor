@@ -151,3 +151,17 @@ def test_a_place_saved_on_photos_beats_the_plan_at_once(srv: Client, monkeypatch
     s = next(t for t in out["trips"] if t["key"] == "t:1")["shoots"][0]
     assert s["place"] == "Point Example" and s["title"] == "Point Example · Boats"
     assert s["confidence"] == 0.4  # the subject is still a guess; the place is certain
+
+
+def test_rail_labels_are_places_with_near_fallback() -> None:
+    """D-148: the rail shows places only; a shoot with none gets the nearest named place in time, faint by distance."""
+    times = ["2021-04-15T08:00:00", "2021-04-16T20:00:00"]
+    names = ["Las Vegas", "Pahrump"]
+    inside = outline._near(times, names, "2021-04-15T07:00:00", "2021-04-15T09:00:00")
+    assert inside == {"label": "Las Vegas", "confidence": 0.4, "near_s": 0}
+    near = outline._near(times, names, "2021-04-16T01:00:00", "2021-04-16T02:00:00")
+    assert near["label"] == "Las Vegas" and near["near_s"] == 17 * 3600 and near["confidence"] < 0.01
+    assert outline._near([], [], "2021-04-16T01:00:00", None) is None
+    trip = outline._trip_rail([{"groups": 5, "rail": {"label": "Point Dume", "confidence": 1.0, "near_s": None}},
+                               {"groups": 2, "rail": {"label": "Las Vegas", "confidence": 0.1, "near_s": 3600}}])
+    assert trip == {"label": "Point Dume", "confidence": 1.0, "near_s": None}

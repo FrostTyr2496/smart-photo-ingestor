@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { countsLine, dateRange, onlyShoot, railOf, sectionsOf, shootLine, titleShade, titleTone, type OutlineItem, type OutlineShoot } from './outline';
+import { countsLine, dateRange, nearGap, onlyShoot, railOf, railText, sectionsOf, shootLine, titleShade, titleTone, type OutlineItem, type OutlineShoot } from './outline';
 
 const shoot = (key: string, over: Partial<OutlineShoot> = {}): OutlineShoot => ({
   key,
@@ -23,7 +23,7 @@ const shoot = (key: string, over: Partial<OutlineShoot> = {}): OutlineShoot => (
 
 const items: OutlineItem[] = [
   { kind: 'day', key: 'loose:2024-01-02', day: '2024-01-02', groups: 3 },
-  { kind: 'trip', key: 't1', name: 'Coast week', state: 'accepted', start_date: '2023-09-07', end_date: '2023-09-10', groups: 20, shoots: [shoot('s1'), shoot('s:2')] },
+  { kind: 'trip', key: 't1', name: 'Coast week', state: 'accepted', start_date: '2023-09-07', end_date: '2023-09-10', groups: 20, shoots: [shoot('s1'), shoot('s:2')], rail: { label: 'Harbourton', confidence: 1, near_s: null } },
   { kind: 'shoot', ...shoot('s:3', { shoot_date: '2022-05-01' }) },
   { kind: 'day', key: 'loose:undated', day: 'undated', groups: 1 },
 ];
@@ -47,10 +47,11 @@ describe('outline helpers (rv-47)', () => {
   it('builds the rail: years, then trips and lone shoots', () => {
     const r = railOf(items);
     expect(r.years.map((y) => y.year)).toEqual(['2024', '2023', '2022']);
-    expect(r.years[1]!.entries).toMatchObject([{ key: 't1', label: 'Coast week', state: 'accepted' }]);
+    // the rail shows places only (D-148): the trip's place, not its name; a place the user set is ink (not a guess)
+    expect(r.years[1]!.entries).toMatchObject([{ key: 't1', label: 'Harbourton', state: 'accepted', suggested: false }]);
     expect(r.years[1]!.entries[0]!.sub).toMatch(/photo/);
     expect(r.years[1]!.entries[0]!.children?.length).toBeGreaterThan(0); // a trip's shoots are listed under it
-    expect(r.years[2]!.entries[0]).toMatchObject({ key: 's:3', label: 'Title s:3', state: 'proposed' });
+    expect(r.years[2]!.entries[0]).toMatchObject({ key: 's:3', label: '', state: 'proposed', suggested: true }); // no place known: the date line shows
     expect(r.undated).toBe('loose:undated');
   });
   it('keeps one shoot for the Shoot filter', () => {
@@ -74,5 +75,14 @@ describe('titleShade', () => {
     expect(titleShade('proposed', 0.62).hint).toBe('Proposed · 62% confidence');
     expect(titleShade('proposed', null).hint).toBe('Proposed · Re-plan for a confidence');
     expect(titleShade('accepted', 0.4, true)).toMatchObject({ hint: 'Suggested for an applied shoot · 40% confidence' });
+  });
+});
+
+describe('rail places (D-148)', () => {
+  it('shows a place, or "Near" the nearest place in time with how far', () => {
+    expect(railText({ label: 'Point Dume', confidence: 1, near_s: null })).toBe('Point Dume');
+    expect(railText({ label: 'Las Vegas', confidence: 0.01, near_s: 18 * 3600 })).toBe('Near Las Vegas');
+    expect(railText(null)).toBe('');
+    expect([nearGap(600), nearGap(18 * 3600), nearGap(12 * 86400)]).toEqual(['10 min', '18 h', '12 d']);
   });
 });

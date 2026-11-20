@@ -9,7 +9,10 @@ that). ``outline`` answers the Photos and Files views; ``resolve_key`` turns a s
 from __future__ import annotations
 
 import json
+from bisect import bisect_left, bisect_right
+import re
 import sqlite3
+from datetime import datetime, timedelta
 from collections import Counter, defaultdict
 from typing import Any
 
@@ -95,6 +98,110 @@ def _confidence(details: dict) -> float | None:
     vals = [float(d["confidence"]) for d in (details.get("place"), details.get("subject"))
             if isinstance(d, dict) and d.get("value") and isinstance(d.get("confidence"), (int, float))]
     return round(min(vals), 3) if vals else None
+
+
+def _short(name: str | None) -> str | None:
+    if not name:
+        return None
+    first = name.split(",")[0].strip()
+    return first or name.strip()
+
+
+def _wall(utc_iso: str, offset: str | None) -> str | None:
+    """The wall-clock time (``YYYY-MM-DDTHH:MM:SS``) of a UTC instant in its own offset."""
+    try:
+        t = datetime.fromisoformat(utc_iso)
+        if offset and re.fullmatch(r"[+-]\d{2}:\d{2}", offset):
+            sign = 1 if offset[0] == "+" else -1
+            t = t + sign * timedelta(hours=int(offset[1:3]), minutes=int(offset[4:6]))
+        return t.strftime("%Y-%m-%dT%H:%M:%S")
+    except (TypeError, ValueError):
+        return None
+
+
+def _named_points(conn: sqlite3.Connection) -> tuple[list[str], list[str]]:
+    """Every place name the catalog knows at a moment, sorted by wall time: phone fixes with a place (in their own
+    offset), photos with a saved place, and located photos without a name, named by the nearest named point on the map
+    (within ~25 km). Used to label a shoot with no place of its own by the nearest place in time (D-148)."""
+    named: list[tuple[str, str]] = []
+    grid: dict[tuple[int, int], list[tuple[float, float, str]]] = defaultdict(list)
+    cell = lambda lat, lon: (int(lat * 4 // 1), int(lon * 4 // 1))  # noqa: E731  (0.25 degree cells)
+    for r in conn.execute("SELECT utc_time, local_offset, lat, lon, COALESCE(city, place_name) AS name FROM geo_points "
+                          "WHERE COALESCE(city, place_name) IS NOT NULL"):
+        w = _wall(r["utc_time"], r["local_offset"])
+        name = _short(r["name"])
+        if w and name:
+            named.append((w, name))
+            if r["lat"] is not None and r["lon"] is not None:
+                grid[cell(r["lat"], r["lon"])].append((r["lat"], r["lon"], name))
+    unnamed: list[tuple[str, float, float]] = []
+    for r in conn.execute("SELECT g.capture_time, m.lat, m.lon, COALESCE(m.city, m.place_name) AS name "
+                          "FROM group_meta m JOIN capture_groups g ON g.group_id = m.group_id "
+                          "WHERE g.capture_time IS NOT NULL AND (m.lat IS NOT NULL OR COALESCE(m.city, m.place_name) IS NOT NULL)"):
+        w = str(r["capture_time"])[:19]
+        if r["name"]:
+            named.append((w, _short(r["name"]) or r["name"]))
+            if r["lat"] is not None and r["lon"] is not None:
+                grid[cell(r["lat"], r["lon"])].append((r["lat"], r["lon"], _short(r["name"]) or r["name"]))
+        elif r["lat"] is not None and r["lon"] is not None:
+            unnamed.append((w, r["lat"], r["lon"]))
+    for w, lat, lon in unnamed:
+        cy, cx = cell(lat, lon)
+        best, dist = None, 0.25 ** 2
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                for plat, plon, name in grid.get((cy + dy, cx + dx), ()):
+                    d = (plat - lat) ** 2 + (plon - lon) ** 2
+                    if d < dist:
+                        best, dist = name, d
+        if best:
+            named.append((w, best))
+    named.sort()
+    return [w for w, _ in named], [n for _, n in named]
+
+
+NEAR_HALF_LIFE_S = 3 * 3600  # a "Near" label fades: 0.35 at the shoot, half that 3 h away, and so on
+
+
+def _near(times: list[str], names: list[str], t0: str | None, t1: str | None) -> dict | None:
+    """The nearest named place in time to a span of wall times: ``{label, confidence, near_s}``."""
+    if not times or not t0:
+        return None
+    t1 = t1 or t0
+    i = bisect_left(times, t0)
+    j = bisect_right(times, t1)
+    if i < j:  # a named point inside the span
+        return {"label": Counter(names[i:j]).most_common(1)[0][0], "confidence": 0.4, "near_s": 0}
+    best = None
+    for k, ref in ((i - 1, t0), (j, t1)):
+        if 0 <= k < len(times):
+            try:
+                gap = abs((datetime.fromisoformat(times[k]) - datetime.fromisoformat(ref[:19])).total_seconds())
+            except ValueError:
+                continue
+            if best is None or gap < best[0]:
+                best = (gap, names[k])
+    if best is None:
+        return None
+    return {"label": best[1], "confidence": round(0.35 * 0.5 ** (best[0] / NEAR_HALF_LIFE_S), 3),
+            "near_s": int(best[0])}
+
+
+def _trip_rail(shoots: list[dict]) -> dict | None:
+    """A trip's rail label: the place most of its photos were at (own places), else its nearest "Near" place."""
+    own: Counter = Counter()
+    conf: dict[str, list[tuple[float, int]]] = defaultdict(list)
+    for sh in shoots:
+        r = sh.get("rail")
+        if r and r["near_s"] is None:
+            own[r["label"]] += sh["groups"]
+            conf[r["label"]].append((r["confidence"], sh["groups"]))
+    if own:
+        label = own.most_common(1)[0][0]
+        w = sum(n for _, n in conf[label])
+        return {"label": label, "confidence": round(sum(c * n for c, n in conf[label]) / w, 3), "near_s": None}
+    near = [sh["rail"] for sh in shoots if sh.get("rail")]
+    return min(near, key=lambda r: r["near_s"]) if near else None
 
 
 def _saved_place(b: dict) -> str | None:
@@ -202,6 +309,8 @@ def outline(conn: sqlite3.Connection, plan: dict | None, *, volume_id: str | Non
             if not guessed and not d["place"] and not d["subject"] and d["name_source"] == "fallback":
                 conf = 0.0  # applied with only a date-and-camera name: shown gray, as a guess
                 guessed = [{}]
+            pconf = 1.0 if (d["place"] or saved) else float((det.get("place") or {}).get("confidence") or 0)
+            t["_rail"] = (_short(place), pconf) if place else None
             shoots.append({**t, "shoot_id": sid, "proposal_id": None, "state": "accepted", "confidence": conf,
                            "suggested": bool(guessed),
                            "title": title_of(place, subject, d["name"]), "name": d["name"],
@@ -219,6 +328,8 @@ def outline(conn: sqlite3.Connection, plan: dict | None, *, volume_id: str | Non
             name = _text(ps.get("name")) or "Shoot"
             keep = set(b["gids"])
             samples = [g for g in ps.get("sample_group_ids") or [] if g in keep][:8] or _spread(sorted(keep))
+            pconf = float((det.get("place") or {}).get("confidence") or 0) if place else 0.0
+            t["_rail"] = (_short(place), pconf) if place else None
             shoots.append({**t, "shoot_id": None, "proposal_id": key, "state": "proposed",
                            "confidence": (_confidence(det) if _confidence(det) is not None
                                           else _name_confidence(ps.get("name"))),
@@ -228,6 +339,17 @@ def outline(conn: sqlite3.Connection, plan: dict | None, *, volume_id: str | Non
                            "volumes": [{"volume_id": v.get("volume_id"), "label": v.get("label") or "Drive",
                                         "frames": v.get("frames", 0)} for v in ps.get("volumes") or []],
                            "sample_group_ids": samples, "_trip": ps.get("trip_id")})
+
+    # --- the rail's label: a place, never a subject or folder name (D-148): the shoot's own place, else the nearest
+    # named place in time ("Near …"), shaded by confidence
+    times, names = _named_points(conn) if shoots else ([], [])
+    for sh in shoots:
+        own = sh.pop("_rail", None)
+        if own:
+            sh["rail"] = {"label": own[0], "confidence": round(own[1], 3), "near_s": None}
+        else:
+            w = sh.get("wall") or {}
+            sh["rail"] = _near(times, names, (w.get("start") or "")[:19] or None, (w.get("end") or "")[:19] or None)
 
     # --- trips
     plan_trips = {t["proposal_id"]: t for t in (plan or {}).get("trips") or []}
@@ -261,6 +383,7 @@ def outline(conn: sqlite3.Connection, plan: dict | None, *, volume_id: str | Non
         weight = sum(n for _, n in known)
         tr["confidence"] = (1.0 if tr["state"] == "accepted" else
                             round(sum(c * n for c, n in known) / weight, 3) if weight else None)
+        tr["rail"] = _trip_rail(tr["shoots"])
         if tr["state"] == "proposed" and (plan_trips.get(tr["key"]) or {}).get("name", {}).get("source") == "fallback":
             tr["confidence"] = 0.0  # a trip named only by its date ("2021-04-14 trip") says nothing: gray
         dates = [s["shoot_date"] for s in tr["shoots"] if s["shoot_date"]]
