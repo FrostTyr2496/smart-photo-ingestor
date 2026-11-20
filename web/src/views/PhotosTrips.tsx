@@ -160,12 +160,13 @@ export function TripsView({ items, shared }: { items: OutlineItem[]; shared: Tri
 
 /** The left rail of the trips view: years, then that year's trips and lone shoots by name. Names wrap to two lines in
  * the column; hovering (or focusing) the rail widens it into a floating pane over the grid with full names, dates and
- * photo counts, so the grid never reflows. */
+ * photo counts, so the grid never reflows. The sticky wrapper carries the z-index (sticky makes its own stacking
+ * context), above the section headers (z-10) and below the filter bar (z-20). Unnamed shoots show date · count. */
 export function TripsRail({ items }: { items: OutlineItem[] }) {
   const { years, undated } = railOf(items);
   if (!years.length && !undated) return <div className="hidden md:block" />;
   return (
-    <div className="relative hidden md:sticky md:top-[117px] md:block md:h-[calc(100vh-133px)]">
+    <div className="relative hidden md:sticky md:top-[117px] md:z-[15] md:block md:h-[calc(100vh-133px)]">
       <nav
         aria-label="Jump to a trip"
         className="group/rail no-scrollbar absolute inset-y-0 left-0 z-30 flex w-full flex-col gap-2 overflow-y-auto rounded-xl py-1 pr-1 transition-[width,background-color,box-shadow] duration-150 hover:w-80 hover:bg-surface/95 hover:px-2 hover:shadow-2xl hover:ring-1 hover:ring-line focus-within:w-80 focus-within:bg-surface/95 focus-within:px-2 focus-within:shadow-2xl focus-within:ring-1 focus-within:ring-line hover:backdrop-blur-xl"
@@ -183,8 +184,15 @@ export function TripsRail({ items }: { items: OutlineItem[] }) {
                 title={`${e.label} · ${e.sub}`}
                 className={`rounded px-1 py-0.5 text-left text-xs leading-snug hover:bg-ink/5 ${e.state === 'accepted' ? 'text-muted hover:text-ink' : 'text-maybe/70 hover:text-maybe'}`}
               >
-                <span className="line-clamp-2 break-words group-hover/rail:line-clamp-none group-focus-within/rail:line-clamp-none">{e.label}</span>
-                <span className="hidden text-2xs text-faint group-hover/rail:block group-focus-within/rail:block">{e.sub}</span>
+                {e.label ? (
+                  <>
+                    <span className="line-clamp-2 break-words group-hover/rail:line-clamp-none group-focus-within/rail:line-clamp-none">{e.label}</span>
+                    <span className="hidden text-2xs text-faint group-hover/rail:block group-focus-within/rail:block">{e.sub}</span>
+                  </>
+                ) : (
+                  // An unnamed shoot: its date and count are the label, so the row is never blank and the rail does not jump on hover.
+                  <span className="block truncate text-2xs text-faint">{e.sub}</span>
+                )}
               </button>
             ))}
           </div>
