@@ -598,7 +598,7 @@ newest plan's proposal holding the group (`shoots[].group_ids`, its `trip_id`) i
 the shoot's columns or the plan's details, falling back to the shoot name. Decisions saved after the plan are not folded
 in (Re-plan does that); say so in the legend's tooltip.
 
-- [ ] 46. **[stronger]** Outline API: trips, shoots and loose days with their state
+- [x] 46. **[stronger]** Outline API: trips, shoots and loose days with their state
   - ID: rv-46 (user ask, 2026-11-19; D-134).
   - `photovault/outline.py` `outline(conn, plan: dict | None, *, volume_id=None, missing=None) -> dict`, pure and read-only:
     `{"trips": [{key, name, state, start_date, end_date, groups, shoots: [...]}], "items": [...]}` where `items` is the
@@ -614,6 +614,10 @@ in (Re-plan does that); say so in the legend's tooltip.
   - Performance: the real catalog (65k groups) answers under 1 s; cache the plan's group → proposal map per plan id.
   - Verify: `uv run pytest tests/test_outline.py tests/test_web_api.py -q` (accepted, proposed, loose, a drive filter,
     no plan).
+  - Result (2026-11-19): `uv run pytest tests/test_outline.py tests/test_web_api.py -q` → 96 passed. `outline()` in
+    `photovault/outline.py`; `GET /api/outline`; `shoot_key` on `/api/groups`, drive files and card files (D-135). With
+    `volume_id` each entry also has `files`/`bytes` and the result has `other` (for rv-48). Real catalog (read-only,
+    68k frames, newest plan): 0.17 s overall, 0.11-0.2 s per drive. Not done: unhashed files do not match a `shoot_key`.
 
 - [ ] 47. Photos by trip
   - ID: rv-47 (after rv-46).
