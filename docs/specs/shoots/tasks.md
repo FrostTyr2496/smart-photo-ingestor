@@ -331,7 +331,7 @@ Order: sp-9 and pv-1 (independent) → sh-8 → sh-9 → sh-10; ob-1 any time; s
 
 ## Place collections (D-138, review `docs/reviews/2026-11-19-pl-0-place-collections.md`)
 
-- [ ] 15. **[stronger]** Planner: place collections
+- [x] 15. **[stronger]** Planner: place collections
   - ID: pl-1. _Design:_ review §2 and §4.
   - `shoots.plan` adds a top-level `places` list. Each spot is
     `{key, kind: "spot", name: {value, source, confidence, count, alternatives}, centroid, radius_km, area_key,
@@ -351,6 +351,7 @@ Order: sp-9 and pv-1 (independent) → sh-8 → sh-9 → sh-10; ob-1 any time; s
   - Verify: `uv run pytest tests/test_shoot_places.py tests/test_shoots.py -q`, with synthetic coordinates: a spot of 3
     visits over 2 years; a coastline chain cut at 5 km; a shoot with no GPS joined by a confirmed name; a folder join;
     home flagged. Then a read-only run on the real catalog, with the counts (aggregates only) in the Result.
+  - Result (2026-11-19): `photovault/shoot_places.py` (`build`, called from `shoots.plan`; `places: {spots, areas}` in the plan). Settings `place_spot_km` 1.5, `place_spot_max_km` 5, `place_area_km` 25, `place_min_shoots` 2 (a spot of one shoot is not listed, except home). Single-link with the diameter guard; a no-GPS shoot joins only when exactly one spot matches its confirmed name or shared human folder (a name or folder shared by several spots joins nothing). Member confidence = (1 - 0.5 x centre distance / radius) x the shoot's place confidence (0.5 when it has no place name, 0.8 near-factor for word joins). Home: `phone_analysis.hints_json` holds no `home` flag (0 of 18,995 rows), so the fallback is used: the spot with most phone points between 22:00 and 06:00 local (at least 10). Real catalog, read-only: plan 2.2 s, 193 shoots, 15 spots (10 of 2 shoots, 2 of 3, 1 of 4, 1 of 7, 1 of 9) holding 46 member rows (43 by coordinates, 3 by folder, 0 by name, 0 beyond cut-off), 14 areas (1 holds 2 spots), home detected (7 members), spot names: 9 phone place, 4 phone venue, 1 metadata, 1 unnamed. Tests: `tests/test_shoot_places.py`.
 
 - [ ] 16. Review: Group by Time · Trip · Place
   - ID: pl-2 (after pl-1). _Design:_ review §3–4.

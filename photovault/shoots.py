@@ -25,7 +25,7 @@ from typing import Any
 
 from . import naming
 from .catalog import repo
-from . import shoot_scoring
+from . import shoot_places, shoot_scoring
 from .timemodel import BodyClocks, instant_info, offset_tz
 
 PHONE_SOURCES = ("iphone", "ipad", "glasses")
@@ -803,6 +803,8 @@ def plan(conn: sqlite3.Connection, *, gap_h: float = 8, split_km: float = 50, me
             t["end_date"] = max(m["shoot_date"] for m in members)
     trips = sorted((t for t in trips if t["shoot_ids"]), key=lambda t: (t["start_date"], t["proposal_id"]))
 
+    pcfg = shoot_places.load_config(conn, cfg)
+    places = shoot_places.build(shoots, phone, pcfg, haversine_km, shoot_scoring._off_seconds)
     for s in shoots:
         for k in [k for k in s if k.startswith("_")]:
             del s[k]
@@ -818,7 +820,7 @@ def plan(conn: sqlite3.Connection, *, gap_h: float = 8, split_km: float = 50, me
                    "pretick_min": cfg.pretick, "show_min": cfg.show, "beta": cfg.beta},
         "summary": {"frames": total_frames, "shoots": len(shoots), "trips": len(trips), "unassigned": unassigned,
                     "locked": sum(1 for s in shoots if s["locked"]), "flagged": flagged},
-        "trips": trips, "shoots": shoots, "unassigned_sessions": unassigned_sessions,
+        "trips": trips, "shoots": shoots, "unassigned_sessions": unassigned_sessions, "places": places,
     }
 
 

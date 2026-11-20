@@ -249,7 +249,7 @@ def test_plan_json_has_every_spec_key_and_stable_ids(conn, b):
     p = shoots.plan(conn, now=datetime(2026, 11, 18, 21, 0, 0, tzinfo=UTC))
     assert p["plan_id"] == "shoots-20261118-210000"
     assert set(p) == {"plan_id", "created_at", "decisions_through", "params", "summary", "trips", "shoots",
-                     "unassigned_sessions"}
+                     "unassigned_sessions", "places"}
     assert set(p["params"]) == {"gap_h", "split_km", "merge_h", "region_km", "from", "to",
                                  "pretick_min", "show_min", "beta"}
     assert set(p["summary"]) == {"frames", "shoots", "trips", "unassigned", "locked", "flagged"}
