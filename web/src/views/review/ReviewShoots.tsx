@@ -20,6 +20,7 @@ import {
   type ReviewFilter,
 } from '../../lib/review';
 import { ShootCard } from './ShootCard';
+import { StackPane } from './StackPane';
 import { QUEUE_FILTERS, SORTS, fade, matchesQueueFilter, minConfidence, openCandidates, queueProgress, sortShoots, stackTitle, type QueueFilter, type SortMode } from '../../lib/stacks';
 
 /** The hatched frame in the warning hue that marks review as another mode. Rendered by App, outside any transform. */
@@ -270,8 +271,6 @@ function Review({ plan, replan }: { plan: Plan; replan: Replan }) {
   const highCount = eff.shoots.filter((s) => isHighConfidence(s) && s.state === 'undecided').length;
   const opened = openId ? (eff.shoots.find((s) => s.proposal_id === openId) ?? null) : null;
 
-  const _unused = pretick;
-  void _unused;
   const confirm = (s: EffShoot, ds: NewDecision[]) => {
     const i = flat.findIndex((x) => x.proposal_id === s.proposal_id);
     const nxt = flat.slice(i + 1).find((x) => x.state === 'undecided') ?? flat.find((x) => x.state === 'undecided' && x.proposal_id !== s.proposal_id) ?? null;
@@ -301,10 +300,17 @@ function Review({ plan, replan }: { plan: Plan; replan: Replan }) {
       <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="flex min-w-0 flex-col gap-4">
           {opened ? (
-            <div className="flex flex-col gap-2">
-              <button type="button" className={btn} onClick={() => setOpenId(null)}>Back to the queue</button>
-              <ShootCard s={opened} plan={eff} onDecide={decide} mounted={mounted} />
-            </div>
+            <StackPane
+              key={opened.proposal_id}
+              s={opened}
+              plan={eff}
+              pretick={pretick}
+              mounted={mounted}
+              position={`${Math.max(1, flat.findIndex((x) => x.proposal_id === opened.proposal_id) + 1)} of ${flat.length} in the queue`}
+              onDecide={decide}
+              onConfirm={(ds) => confirm(opened, ds)}
+              onClose={() => setOpenId(null)}
+            />
           ) : (
             <>
               {beta && <p className="text-2xs text-faint">Beta: nothing is hidden. Faint items are low confidence (opacity follows confidence; hover for the number); items below the dashed line are ones a full run would drop.</p>}

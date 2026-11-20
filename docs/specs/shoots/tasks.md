@@ -282,7 +282,7 @@ Order: sp-9 and pv-1 (independent) → sh-8 → sh-9 → sh-10; ob-1 any time; s
     `exclude`, `detail`, `confirm`), tests in `web/src/lib/stacks.test.ts`; the fixture plan has invented sh-8 fields.
     Opening a row shows the sh-3 card until sh-10 replaces it. **[user]** browser check.
 
-- [ ] 12. The stack: details, members, in question
+- [x] 12. The stack: details, members, in question
   - ID: sh-10 (after sh-9). _Design:_ review §5.
   - A focused pane in three steps:
     1. Details: chips with source and confidence; the name is composed from place · subject and editable.
@@ -293,6 +293,20 @@ Order: sp-9 and pv-1 (independent) → sh-8 → sh-9 → sh-10; ob-1 any time; s
     `subject_source` and `confirmed_at`, and Undo restores them.
   - Verify: `uv run pytest tests/test_shoots_apply.py -q`; `cd web && npm run typecheck && npm test`; **[user]** browser
     check.
+  - Result (2026-11-19): opening a queue row shows `StackPane` (`web/src/views/review/StackPane.tsx`): 1 Details (place,
+    subject, people chips with source and confidence, alternatives, type-to-edit, the composed `place · subject` name,
+    editable; the example caption), 2 Members (one tile per core session: first-frame thumb from
+    `/api/groups/<id>/thumb`, group count), 3 In question (candidates with reasons, ticked from the pre-tick cut-off,
+    phone evidence rows). Beta (D-128): beyond-cut-off items sit under a dashed "beyond cut-off (beta)" divider and
+    low-confidence chips, candidates and evidence use opacity 0.25 + 0.75 x confidence with the number on hover; phone
+    sources are labelled (iPhone caption, label, venue, area, person...). Keys: Enter next / confirm, Tab cycle
+    alternatives, J/K move, X toggle, S skip, Esc close. Edits stay in a draft; Confirm stores `exclude`, `include`,
+    `detail`, `rename` rows and then `accept` with `{confirmed: true}` (no new decision kind), and opens the next
+    undecided stack. "Split, merge, move" opens the sh-3 card inside the pane. Server: Apply sets `shoots.confirmed_at`
+    for confirmed shoots and then writes the confirmed place and subject whatever their source (`subject_source` keeps
+    phone / folder / model); Undo deletes the created shoots, so the marker goes with them. Tests:
+    `tests/test_shoots_apply_details.py`, `tests/test_shoots_api.py`, `web/src/views/review/StackPane.test.tsx`.
+    **[user]** browser check.
 
 - [ ] 13. Library checklist
   - ID: ob-1. _Design:_ review §3.
