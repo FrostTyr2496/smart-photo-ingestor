@@ -82,6 +82,18 @@ describe('StackPane (sh-10)', () => {
     expect(onConfirm.mock.calls[0]![0][1]).toMatchObject({ session: [50, 51] });
   });
 
+  it('a split suggestion sits between the tiles, faded by score, and clicking it records a split', () => {
+    const withSplit: Plan = { ...plan, shoots: [{ ...shoot, flags: ['may_split'], split_suggestions: [{ after_group_id: 11, gap_s: 5400, score: 0.8, reasons: ['phone moved 3.2 km', 'different venue'] }] }] };
+    const eff = effectivePlan(withSplit, []);
+    const onDecide = vi.fn();
+    render(<StackPane s={eff.shoots[0]!} plan={eff} pretick={0.5} mounted={new Set()} position="1 of 1" onDecide={onDecide} onConfirm={() => undefined} onClose={() => undefined} />);
+    fireEvent.keyDown(window, { key: 'Enter' }); // -> members
+    const marker = screen.getByRole('button', { name: /Split after photo 11: phone moved 3.2 km, different venue/ });
+    expect(Number(marker.style.opacity)).toBeCloseTo(0.25 + 0.75 * 0.8);
+    fireEvent.click(marker);
+    expect(onDecide).toHaveBeenCalledWith({ kind: 'split', id: 's:abc123abc123', after_group_id: 11 });
+  });
+
   it('S skips', () => {
     const { onDecide } = setup();
     fireEvent.keyDown(window, { key: 's' });

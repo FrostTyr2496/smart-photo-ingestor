@@ -72,6 +72,20 @@ export interface UnassignedSession {
   start_instant: string;
   end_instant: string;
 }
+/** sh-11: iPhone photos around a shoot (span +- 1 h), per hour and against the library median. */
+export interface PhoneDensity {
+  points: number;
+  per_hour: number;
+  ratio_to_median: number;
+}
+/** sh-11: a suggested split after a group (a gap in the shoot). Never applied by itself. */
+export interface SplitSuggestion {
+  after_group_id: number;
+  gap_s: number;
+  score: number;
+  reasons: string[];
+  beyond_cutoff?: boolean;
+}
 export interface PlanShoot {
   proposal_id: string;
   trip_id: string | null;
@@ -99,6 +113,8 @@ export interface PlanShoot {
   details?: ShootDetails;
   /** Accepted through a stack (sh-10). */
   confirmed?: boolean;
+  phone_density?: PhoneDensity;
+  split_suggestions?: SplitSuggestion[];
 }
 export interface PlanVolume {
   volume_id: string;
@@ -141,6 +157,7 @@ export interface PlaceSpot {
   first_date: string;
   last_date: string;
   home: boolean;
+  phone_density?: PhoneDensity;
 }
 export interface PlaceArea {
   key: string;
@@ -295,6 +312,7 @@ export function splitShoot(s: EffShoot, afterGroupId: number): [EffShoot, EffSho
     state: 'undecided',
     derived: true,
     name: isLeft ? s.name : { ...s.name, alternatives: [...s.name.alternatives] },
+    split_suggestions: undefined,
   });
   return [mk(leftIds, true), mk(rightIds, false)];
 }
@@ -339,6 +357,7 @@ export function mergeShoots(a: EffShoot, b: EffShoot): EffShoot {
     included: [...a.included, ...b.included],
     confirmed: false,
     locked: false,
+    split_suggestions: undefined,
   };
 }
 
@@ -672,6 +691,7 @@ export function tally(p: EffPlan): { shoots: number; trips: number; accepted: nu
 }
 
 export const FLAG_INFO: Record<string, { label: string; tip: string }> = {
+  may_split: { label: 'may be several shoots', tip: 'A gap inside this shoot looks like a break between outings (the phone moved, the labels changed, or the area is busy). Open the stack to see where.' },
   multi_place: { label: 'several places', tip: 'The frames sit in more than one place. Splitting at a gap may help.' },
   tz_change: { label: 'time zone changes', tip: 'A time-zone change is proposed for this shoot: the camera clock and the local time differ.' },
   body_clock_mismatch: { label: 'bodies disagree', tip: 'Two camera bodies show different clocks for this shoot.' },

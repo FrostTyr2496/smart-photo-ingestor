@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { sameSession, type Candidate, type Detail, type DetailChoice, type EffPlan, type EffShoot, type NewDecision, type Session } from '../../lib/review';
 import { composeName, confirmDecisions, detailSourceLabel, fade, initialDraft, pct, type StackDraft } from '../../lib/stacks';
 import { ShootCard, datesLine } from './ShootCard';
@@ -297,9 +297,22 @@ export function StackPane({
         <div className="flex flex-col gap-2">
           <p className="text-xs text-muted">Each tile is one session, in time order. Untick one to send its frames back to the pool (X). {draft.excluded.length} unticked.</p>
           <div className="flex flex-wrap gap-2">
-            {core.map((x, i) => (
-              <Tile key={`${x[0]}-${x[1]}`} id={x[0]} count={coreCount(x)} on={!draft.excluded.some((y) => sameSession(x, y))} cursor={cursor === i} onClick={() => { setCursor(i); toggleCore(x); }} caption={`Photos ${x[0]}–${x[1]}`} />
-            ))}
+            {core.map((x, i) => {
+              const sug = (s.split_suggestions ?? []).find((g) => g.after_group_id === x[1] && i < core.length - 1);
+              return (
+                <Fragment key={`${x[0]}-${x[1]}`}>
+                  <Tile id={x[0]} count={coreCount(x)} on={!draft.excluded.some((y) => sameSession(x, y))} cursor={cursor === i} onClick={() => { setCursor(i); toggleCore(x); }} caption={`Photos ${x[0]}–${x[1]}`} />
+                  {sug && (
+                    <button type="button" onClick={() => onDecide({ kind: 'split', id: s.proposal_id, after_group_id: sug.after_group_id })} style={{ opacity: fade(sug.score) }}
+                      title={`${sug.reasons.join(' · ')} (score ${sug.score.toFixed(2)}${sug.beyond_cutoff ? ', beyond cut-off' : ''}). Click to split the shoot here.`}
+                      className={`flex h-24 w-9 shrink-0 flex-col items-center justify-center rounded-lg border text-maybe hover:bg-maybe/15 ${sug.beyond_cutoff ? 'border-dashed border-line-strong' : 'border-maybe/50'}`} aria-label={`Split after photo ${sug.after_group_id}: ${sug.reasons.join(', ')}`}>
+                      <span aria-hidden="true">✂</span>
+                      <span className="text-2xs">split</span>
+                    </button>
+                  )}
+                </Fragment>
+              );
+            })}
             {core.length === 0 && <p className="text-xs text-muted">This plan has no session data (older plan): re-plan to see members.</p>}
           </div>
         </div>

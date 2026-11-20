@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { EffPlan, EffShoot, NewDecision, PlaceArea, PlaceMember, PlaceSpot, Plan } from '../../lib/review';
+import type { EffPlan, EffShoot, NewDecision, PlaceArea, PhoneDensity, PlaceMember, PlaceSpot, Plan } from '../../lib/review';
 import { DETAIL_SOURCE_LABEL, fade, stackTitle } from '../../lib/stacks';
 import { MiniMap } from './MiniMap';
 
@@ -7,6 +7,9 @@ const btn = 'inline-flex h-7 items-center rounded-full border border-line px-2.5
 const primary = 'inline-flex h-7 items-center rounded-full border border-maybe/50 bg-maybe/15 px-3 text-xs font-medium text-maybe hover:bg-maybe/25 disabled:opacity-40';
 
 const years = (a: string, b: string): string => (a.slice(0, 4) === b.slice(0, 4) ? a.slice(0, 4) : `${a.slice(0, 4)}–${b.slice(0, 4)}`);
+
+/** "iPhone: 340 photos · 4× usual". */
+export const densityLine = (d: PhoneDensity): string => `iPhone: ${d.points.toLocaleString()} photos${d.ratio_to_median > 0 ? ` · ${d.ratio_to_median.toFixed(1)}× usual` : ''}`;
 
 /** "iPhone venue · 4 of 7": the name's source and how many of the shoots carry it. */
 export function nameSourceLine(spot: Pick<PlaceSpot, 'name' | 'members'>): string {
@@ -52,6 +55,7 @@ function SpotCard({ spot, shoots, pretick, beta, decide, onOpen }: { spot: Place
           <h3 className="text-lg font-semibold">{spot.name.value ?? <em className="font-normal text-faint">No name yet</em>}</h3>
           <p className="text-xs text-muted">
             {spot.members.length} shoots · {years(spot.first_date, spot.last_date)} · {spot.frames.toLocaleString()} frames · {nameSourceLine(spot)}
+            {spot.phone_density && spot.phone_density.points > 0 && <> · {densityLine(spot.phone_density)}</>}
           </p>
           {spot.name.alternatives.length > 0 && (
             <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted">

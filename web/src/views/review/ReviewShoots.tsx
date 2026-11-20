@@ -22,7 +22,7 @@ import {
 import { ShootCard } from './ShootCard';
 import { StackPane } from './StackPane';
 import { PlacesPane } from './PlacesPane';
-import { QUEUE_FILTERS, SORTS, fade, matchesQueueFilter, minConfidence, openCandidates, planIsStale, queueProgress, sortShoots, stackTitle, type QueueFilter, type SortMode } from '../../lib/stacks';
+import { QUEUE_FILTERS, SORTS, fade, matchesQueueFilter, minConfidence, openCandidates, planIsStale, possibleSplits, queueProgress, sortShoots, stackTitle, type QueueFilter, type SortMode } from '../../lib/stacks';
 import { Thumbs, datesLine } from './ShootCard';
 
 /** The hatched frame in the warning hue that marks review as another mode. Rendered by App, outside any transform. */
@@ -445,6 +445,7 @@ function QueueRow({ s, trip, onOpen, mounted }: { s: EffShoot; trip: string | nu
   const t = stackTitle(s);
   const conf = minConfidence(s);
   const q = openCandidates(s).length;
+  const splits = possibleSplits(s).length;
   const online = (s.volumes ?? []).some((v) => mounted.has(v.volume_id));
   const state = s.state === 'accepted' ? (s.confirmed ? '✓ confirmed' : '✓ accepted') : s.state === 'skipped' ? 'skipped' : '';
   const bodies = Object.entries(s.counts.by_body).map(([b, n]) => `${b} ${n.toLocaleString()}`).join(' · ');
@@ -472,7 +473,8 @@ function QueueRow({ s, trip, onOpen, mounted }: { s: EffShoot; trip: string | nu
         )}
         <span className="text-xs text-muted">{s.counts.frames.toLocaleString()} frames</span>
         {q > 0 && <span className="rounded-full border border-maybe/40 bg-maybe/10 px-2 py-0.5 text-xs text-maybe">{q} in question</span>}
-        {s.flags.map((f) => <span key={f} className="text-xs text-maybe">⚑ {f.replace(/_/g, ' ')}</span>)}
+        {splits > 0 && <span className="text-xs text-maybe" title="Suggested split points inside this shoot">{splits} possible {splits === 1 ? 'split' : 'splits'}</span>}
+        {s.flags.filter((f) => f !== 'may_split').map((f) => <span key={f} className="text-xs text-maybe">⚑ {f.replace(/_/g, ' ')}</span>)}
         {state && <span className="text-xs text-go">{state}</span>}
       </span>
       <span className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 pl-5 text-xs text-faint">
