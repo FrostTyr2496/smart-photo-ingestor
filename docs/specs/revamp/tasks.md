@@ -641,7 +641,7 @@ in (Re-plan does that); say so in the legend's tooltip.
     `views/PhotoTile.tsx`; trips UI in `views/PhotosTrips.tsx`; helpers in `lib/outline.ts`. Not seen in a browser.
     Left out: the month rail is replaced by years + trip names in Trips; loose days are not in the rail.
 
-- [ ] 48. Files by trip
+- [x] 48. Files by trip
   - ID: rv-48 (after rv-46).
   - The drive/card Files list (`web/src/components/FileList.tsx`) gains a third view: **Trips | Folders | List**. Trips is
     a tree: trip → shoot → files (each group's primary plus its sidecars and pairs), with the same title shading and
@@ -649,3 +649,6 @@ in (Re-plan does that); say so in the legend's tooltip.
     (non-photo) under "Other files". The filter bar (Show · Copies · Camera) applies inside.
   - Expanding a shoot loads its files via `shoot_key`. The hover preview, right-click and Show in Photos keep working.
   - Verify: `cd web && npm run typecheck && npm test && npm run build`; **[user]** browser check on X9 Pro.
+  - Result (2026-11-19): typecheck, `npm test` (268), `npm run build` and full `uv run pytest -q` (824 passed, 9 skipped)
+    pass (D-137). Added `shoot_key=other` on drive and card files (backend, in `tests/test_outline.py`). Not seen in a
+    browser. Files not hashed yet fall under "Other files"; a shoot shows at most its first 1000 files.

@@ -1340,11 +1340,11 @@ def _volume_route(app: WebApp, conn, method: str, volume_id: str, sub: str | Non
         shoot_key = _opt_param(query, "shoot_key")
         try:
             group_ids = (outline.resolve_key(conn, _plan_cached(app), shoot_key, volume_id=volume_id)
-                         if shoot_key is not None else None)
+                         if shoot_key not in (None, outline.OTHER_KEY) else None)
         except ValueError as exc:
             raise BadRequest(str(exc)) from exc
         filters = {"state": state, "copies": copies, "other_volume_id": other, "camera": camera,
-                   "group_ids": group_ids}
+                   "group_ids": group_ids, "ungrouped": shoot_key == outline.OTHER_KEY}
         rows = repo.volume_files(conn, volume_id, limit=limit, offset=offset, **filters)
         names = cards.camera_names(conn)
         return 200, {"files": [_file_row(r, names) for r in rows], "limit": limit, "offset": offset,
@@ -1427,14 +1427,21 @@ def _card_files(app: WebApp, conn, volume_id: str, query: dict) -> dict:
     if other is not None:
         files = [f for f in files if any(c["volume_id"] == other for c in f["copies"])]
     shoot_key = _opt_param(query, "shoot_key")
-    if shoot_key is not None:  # the files of one shoot (rv-48): every asset of its frames
-        try:
-            gids = outline.resolve_key(conn, _plan_cached(app), shoot_key)
-        except ValueError as exc:
-            raise BadRequest(str(exc)) from exc
-        keep = {r[0] for r in conn.execute(
-            "SELECT asset_id FROM assets WHERE group_id IN (SELECT value FROM json_each(?))", (json.dumps(gids),))}
-        files = [f for f in files if f["asset_id"] in keep]
+    if shoot_key is not None:  # the files of one shoot (rv-48): every asset of its frames; `other` = no photo group
+        ids = json.dumps([f["asset_id"] for f in files if f["asset_id"] is not None])
+        if shoot_key == outline.OTHER_KEY:
+            grouped = {r[0] for r in conn.execute(
+                "SELECT asset_id FROM assets WHERE group_id IS NOT NULL AND asset_id IN (SELECT value FROM json_each(?))",
+                (ids,))}
+            files = [f for f in files if f["asset_id"] not in grouped]
+        else:
+            try:
+                gids = outline.resolve_key(conn, _plan_cached(app), shoot_key)
+            except ValueError as exc:
+                raise BadRequest(str(exc)) from exc
+            keep = {r[0] for r in conn.execute(
+                "SELECT asset_id FROM assets WHERE group_id IN (SELECT value FROM json_each(?))", (json.dumps(gids),))}
+            files = [f for f in files if f["asset_id"] in keep]
     return {"card": {"volume_id": volume_id, "label": vol["label"], "mounted": mount is not None,
                      "mount": str(mount) if mount else None, "last_seen_at": vol["last_seen_at"],
                      "cleared_at": cleared_at(conn, volume_id),

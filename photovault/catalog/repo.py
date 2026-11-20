@@ -558,7 +558,8 @@ _FILE_BODY = """(SELECT g.body_id FROM assets a JOIN capture_groups g ON g.group
 
 
 def _volume_file_filter(volume_id: str, *, state: str | None, copies: str | None, other_volume_id: str | None,
-                        camera: str | None, group_ids: list[int] | None = None) -> tuple[str, list]:
+                        camera: str | None, group_ids: list[int] | None = None,
+                        ungrouped: bool = False) -> tuple[str, list]:
     """The ``FROM … WHERE …`` shared by a page of a volume's files and their count."""
     sql = " FROM instances i WHERE i.volume_id = ?"
     args: list = [volume_id]
@@ -583,6 +584,9 @@ def _volume_file_filter(volume_id: str, *, state: str | None, copies: str | None
         sql += (" AND i.asset_id IN (SELECT a.asset_id FROM assets a WHERE a.group_id IN "
                 "(SELECT value FROM json_each(?)))")
         args.append(json.dumps(list(group_ids)))
+    if ungrouped:  # files with no photo group: non-photo, or not hashed yet (the outline's "other", rv-48)
+        sql += (" AND i.state IN ('indexed', 'verified') AND (i.asset_id IS NULL OR i.asset_id IN "
+                "(SELECT a.asset_id FROM assets a WHERE a.group_id IS NULL))")
     if camera == UNKNOWN_CAMERA:
         sql += f" AND {_FILE_BODY} IS NULL"
     elif camera is not None:
@@ -593,13 +597,14 @@ def _volume_file_filter(volume_id: str, *, state: str | None, copies: str | None
 
 def volume_files(conn: sqlite3.Connection, volume_id: str, *, state: str | None, limit: int, offset: int,
                  copies: str | None = None, other_volume_id: str | None = None,
-                 camera: str | None = None, group_ids: list[int] | None = None) -> list[Row]:
+                 camera: str | None = None, group_ids: list[int] | None = None,
+                 ungrouped: bool = False) -> list[Row]:
     """One page of a volume's files. Each row has ``copies`` (other non-CARD volumes with a verified copy),
     ``dup_here`` (other verified copies on this volume) and ``body_id`` (its camera, or None). ``copies`` filters
     by one of ``COPY_FILTERS``; ``other_volume_id`` keeps files with a verified copy on that volume (both imply
     ``verified``); ``camera`` is a body_id as text, or ``UNKNOWN_CAMERA``."""
     where, args = _volume_file_filter(volume_id, state=state, copies=copies, other_volume_id=other_volume_id,
-                                      camera=camera, group_ids=group_ids)
+                                      camera=camera, group_ids=group_ids, ungrouped=ungrouped)
     sql = ("SELECT i.rel_path, i.size, i.mtime_ns, i.kind, i.state, i.asset_id, i.asset_id IS NOT NULL AS hashed, "
            f"i.verified_sha256, {_COPIES_ELSEWHERE} AS copies, {_COPIES_HERE} AS dup_here, {_FILE_BODY} AS body_id, "
            f"{_COPY_NAMES} AS copy_names"
@@ -609,10 +614,11 @@ def volume_files(conn: sqlite3.Connection, volume_id: str, *, state: str | None,
 
 def volume_files_count(conn: sqlite3.Connection, volume_id: str, *, state: str | None = None,
                        copies: str | None = None, other_volume_id: str | None = None,
-                       camera: str | None = None, group_ids: list[int] | None = None) -> int:
+                       camera: str | None = None, group_ids: list[int] | None = None,
+                       ungrouped: bool = False) -> int:
     """How many files `volume_files` would list across all pages, with the same filters."""
     where, args = _volume_file_filter(volume_id, state=state, copies=copies, other_volume_id=other_volume_id,
-                                      camera=camera, group_ids=group_ids)
+                                      camera=camera, group_ids=group_ids, ungrouped=ungrouped)
     return conn.execute("SELECT COUNT(*)" + where, args).fetchone()[0]
 
 

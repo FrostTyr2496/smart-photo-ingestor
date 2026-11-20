@@ -119,3 +119,16 @@ def test_proposal_index_is_cached_per_plan(srv: Client, tmp_path) -> None:
     assert outline.proposal_index(plan) is a
     assert a[srv.ids["b"]] == "s:1"
     assert outline.proposal_index(None) == {}
+
+
+def test_other_files_have_no_photo_group(srv: Client) -> None:
+    conn = db.connect(load_config().catalog_path)
+    from photovault.catalog import repo
+    repo.upsert_instance(conn, volume_id="vol-work", rel_path="Docs/notes.txt", size=5, mtime_ns=1, kind="other",
+                         state="indexed", asset_id=None)
+    conn.commit()
+    conn.close()
+    out = srv.call("GET", "/api/outline?volume_id=vol-work")[1]
+    assert out["other"] == {"files": 1, "bytes": 5}
+    got = srv.call("GET", "/api/volumes/vol-work/files?shoot_key=other")[1]
+    assert [f["rel_path"] for f in got["files"]] == ["Docs/notes.txt"] and got["total"] == 1

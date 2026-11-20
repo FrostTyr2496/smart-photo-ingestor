@@ -17,6 +17,7 @@ from photovault.catalog import repo
 
 UNDATED = repo.UNDATED
 LOOSE_PREFIX = "loose:"
+OTHER_KEY = "other"  # files with no photo group (non-photo or not hashed), on the drive-files endpoints
 
 _INDEX_CACHE: dict[str, tuple[dict, dict]] = {}
 
