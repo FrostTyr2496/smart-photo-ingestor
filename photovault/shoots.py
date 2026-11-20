@@ -845,6 +845,9 @@ def _add_volumes(conn: sqlite3.Connection, shoots: list[dict]) -> None:
         s["volumes"] = [{"volume_id": v, "label": labels.get(v, v), "frames": n} for v, n in c.most_common()]
 
 
+KEEP_PLANS = 10
+
+
 def write_plan(conn: sqlite3.Connection, home: Path, **kw: Any) -> Path:
     """Run `plan` and write it to ``<home>/plans/<plan_id>.json``. The only writer here."""
     result = plan(conn, **kw)
@@ -852,6 +855,12 @@ def write_plan(conn: sqlite3.Connection, home: Path, **kw: Any) -> Path:
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"{result['plan_id']}.json"
     path.write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
+    # automatic re-plans after edits (D-147) would pile up: keep the newest few
+    for old in sorted(folder.glob("shoots-*.json"))[:-KEEP_PLANS]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
     return path
 
 

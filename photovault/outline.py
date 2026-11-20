@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections import defaultdict
+from collections import Counter, defaultdict
 from typing import Any
 
 from photovault.catalog import repo
@@ -63,7 +63,8 @@ def _spread(ids: list[int], n: int = 8) -> list[int]:
 def _scope(conn: sqlite3.Connection, volume_id: str | None, missing: str | None) -> list[sqlite3.Row]:
     where, params = repo._group_filter_sql(volume_id=volume_id, shoot_id=None, missing=missing)
     return conn.execute(
-        f"""SELECT g.group_id, g.shoot_id, g.capture_time, b.nickname AS body
+        f"""SELECT g.group_id, g.shoot_id, g.capture_time, b.nickname AS body, m.place_name AS saved_place,
+                  m.city AS saved_city
             FROM capture_groups g
             LEFT JOIN group_meta m ON m.group_id = g.group_id
             LEFT JOIN bodies b ON b.body_id = g.body_id
@@ -94,6 +95,13 @@ def _confidence(details: dict) -> float | None:
     vals = [float(d["confidence"]) for d in (details.get("place"), details.get("subject"))
             if isinstance(d, dict) and d.get("value") and isinstance(d.get("confidence"), (int, float))]
     return round(min(vals), 3) if vals else None
+
+
+def _saved_place(b: dict) -> str | None:
+    """The place the user saved on this shoot's photos (live from the catalog, D-147), most photos first: it beats the
+    plan's suggestion at once, before the next re-plan."""
+    c = b.get("saved")
+    return c.most_common(1)[0][0] if c else None
 
 
 # How much a shoot or trip name says when the plan has no place or subject confidence (D-146): a name built from the
@@ -150,8 +158,12 @@ def outline(conn: sqlite3.Connection, plan: dict | None, *, volume_id: str | Non
             loose[day] += 1
             loose_gids[day].append(gid)
             continue
-        b = buckets.setdefault(key, {"gids": [], "days": defaultdict(int), "bodies": set(), "times": []})
+        b = buckets.setdefault(key, {"gids": [], "days": defaultdict(int), "bodies": set(), "times": [],
+                                     "saved": Counter()})
         b["gids"].append(gid)
+        saved = r["saved_place"] or r["saved_city"]
+        if saved:
+            b["saved"][saved] += 1
         b["days"][day] += 1
         if r["body"]:
             b["bodies"].add(r["body"])
@@ -181,9 +193,10 @@ def outline(conn: sqlite3.Connection, plan: dict | None, *, volume_id: str | Non
             # shaded by its confidence; set fields count as confidence 1
             det = next((x.get("details") or {} for x in (plan or {}).get("shoots") or []
                         if x.get("locked") and x.get("shoot_id") == sid), {})
-            place = d["place"] or _text(det.get("place"))
+            saved = _saved_place(b)
+            place = d["place"] or saved or _text(det.get("place"))
             subject = d["subject"] or _text(det.get("subject"))
-            guessed = [det[k] for k, own in (("place", d["place"]), ("subject", d["subject"]))
+            guessed = [det[k] for k, own in (("place", d["place"] or saved), ("subject", d["subject"]))
                        if not own and isinstance(det.get(k), dict) and det[k].get("value")]
             conf = round(min(float(g.get("confidence") or 0) for g in guessed), 3) if guessed else 1.0
             if not guessed and not d["place"] and not d["subject"] and d["name_source"] == "fallback":
@@ -199,7 +212,10 @@ def outline(conn: sqlite3.Connection, plan: dict | None, *, volume_id: str | Non
         else:
             ps = _plan_shoot(plan, key)
             det = ps.get("details") or {}
-            place, subject = _text(det.get("place")), _text(det.get("subject"))
+            saved = _saved_place(b)
+            place, subject = saved or _text(det.get("place")), _text(det.get("subject"))
+            if saved:  # the user's saved place is certain; the subject still carries its own confidence
+                det = {**det, "place": {"value": saved, "confidence": 1.0}}
             name = _text(ps.get("name")) or "Shoot"
             keep = set(b["gids"])
             samples = [g for g in ps.get("sample_group_ids") or [] if g in keep][:8] or _spread(sorted(keep))

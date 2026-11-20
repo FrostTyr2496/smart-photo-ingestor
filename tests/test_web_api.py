@@ -120,7 +120,7 @@ def srv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     conn.close()
 
     app = web.WebApp(catalog_path=catalog, home=home, volumes_root=root,
-                     runner=web.TaskRunner([sys.executable, "-c", CHILD]))
+                     runner=web.TaskRunner([sys.executable, "-c", CHILD]), auto_replan=False)
     httpd = web.make_server(app, port=0)
     port = httpd.server_address[1]
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
@@ -1384,3 +1384,24 @@ def test_pause_by_pid_only_signals_a_listed_photovault_run(srv: Client) -> None:
     assert status == 404 and "no PhotoVault run" in body["error"]
     status, _ = srv.call("GET", f"/api/activity/{os.getpid()}/pause")
     assert status == 405
+
+
+def test_saving_photo_metadata_schedules_one_replan(monkeypatch) -> None:
+    """D-147: edits re-plan shoots once, a few seconds after the last save (debounced)."""
+    started: list[list[str]] = []
+
+    class FakeRunner:
+        def start(self, args: list[str]) -> int:
+            started.append(args)
+            return 1
+
+    monkeypatch.setattr(web, "REPLAN_DELAY_S", 0.2)
+    app = web.WebApp(catalog_path=Path("x"), home=Path("x"), volumes_root=Path("x"), runner=FakeRunner())  # type: ignore[arg-type]
+    for _ in range(3):
+        app.schedule_replan()
+    time.sleep(0.6)
+    assert len(started) == 1 and started[0][:2] == ["shoots", "plan"]
+    app.auto_replan = False
+    app.schedule_replan()
+    time.sleep(0.4)
+    assert len(started) == 1

@@ -549,6 +549,9 @@ class VolumeWatcher:
                 self._bump()
 
 
+REPLAN_DELAY_S = 8.0  # after the last photo edit, re-plan shoots once (D-147)
+
+
 @dataclass
 class WebApp:
     catalog_path: Path
@@ -556,6 +559,27 @@ class WebApp:
     volumes_root: Path
     runner: TaskRunner
     watcher: VolumeWatcher | None = None
+    auto_replan: bool = True
+    _replan_timer: threading.Timer | None = None
+
+    def schedule_replan(self) -> None:
+        """Re-plan shoots a few seconds after the last edit (debounced), so names and suggestions follow what the user
+        saved. Runs as an ordinary task; the Photos and Review views reload when it finishes."""
+        if not self.auto_replan:
+            return
+        if self._replan_timer is not None:
+            self._replan_timer.cancel()
+
+        def fire() -> None:
+            self._replan_timer = None
+            try:
+                self.runner.start(build_argv("shoots_plan", {}))
+            except Exception as exc:  # noqa: BLE001  (a failed re-plan must never break a save)
+                logger.warning("automatic re-plan did not start: %s", exc)
+
+        self._replan_timer = threading.Timer(REPLAN_DELAY_S, fire)
+        self._replan_timer.daemon = True
+        self._replan_timer.start()
 
 
 class _NullEmitter:
@@ -1095,7 +1119,7 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
         ("GET", "/api/groups"): lambda: _groups(conn, query, app),
         ("GET", "/api/photo-days"): lambda: _photo_days(conn, query),
         ("GET", "/api/outline"): lambda: _outline(conn, app, query),
-        ("POST", "/api/groups/meta"): lambda: _groups_meta(conn, body),
+        ("POST", "/api/groups/meta"): lambda: _replan_after(app, _groups_meta(conn, body)),
         ("GET", "/api/clock-suggestions"): lambda: {"suggestions": clock.suggest_offsets(conn)},
         ("GET", "/api/body-clock"): lambda: {"rows": [dict(r) for r in repo.list_body_clock(conn)]},
         ("POST", "/api/body-clock"): lambda: _post_body_clock(conn, body),
@@ -1803,6 +1827,11 @@ def _photo_days(conn, query: dict) -> dict:
     except ValueError as exc:
         raise BadRequest(str(exc)) from exc
     return {"days": days, "missing_counts": counts}
+
+
+def _replan_after(app: WebApp, result: Any) -> Any:
+    app.schedule_replan()
+    return result
 
 
 def _groups_meta(conn, body: Any) -> dict:

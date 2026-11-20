@@ -39,6 +39,7 @@ SPOT_MAX_S = 3600                # beyond this a location hints at the area only
 REACH_S = 24 * 3600              # phone points looked at around the core (beta shows the ones beyond the limits)
 STRENGTH_K = 1.6                 # strength of weighted evidence W: 1 - exp(-K W)
 MAX_CANDIDATES = 40
+META_PLACE_WEIGHT = 5.0           # a place saved on the shoot's photos counts as this many in-range phone points
 # sh-11 split suggestions: terms 0..1 combined like WEIGHTS (an unknown term drops out); the gap term is always known.
 SPLIT_WEIGHTS = {"place": 0.40, "subject": 0.25, "gap": 0.35}
 SPLIT_MIN_GAP_S = 20 * 60        # setting shoot_split_min_gap_s
@@ -57,7 +58,7 @@ DEFAULT_LABEL_STOPLIST = ["sky", "outdoor", "outdoors", "indoor", "plant", "tree
 # Folder and album names that describe storage, not a shoot (D-146). Used for shoot names (via `shoots`), folder
 # subjects and phone albums.
 GENERIC_NAME_RES = [re.compile(p, re.I) for p in (
-    r"^photography$", r"^(my )?photos?( library)?$", r"^archived?( raw)?( photos)?$", r"^raw photos$",
+    r"^photography$", r"^organi[sz]ed( raw)?( photos)?$", r"^(my )?photos?( library)?$", r"^archived?( raw)?( photos)?$", r"^raw photos$",
     r"^\d+(st|nd|rd|th)\s+card$", r"^(first|second|third)\s+card$", r".*\b\d+(\.\d+)?\s*[gt]b\b.*",
     r"^(jpe?g|nef|arw|cr[23]|dng|heic)s?$", r"^lightroom\b.*", r"^(un)?sorted$", r"^to (sort|edit)$",
     r"^downloads?$", r"^desktop$", r"^recents?$", r"^favou?rites$", r"^camera roll$", r"^instagram$",
@@ -390,13 +391,13 @@ def build_details(s: dict, phone, cfg: Config) -> dict:
     offs: dict = {}
     place, subject, people = _Acc(), _Acc(), _Acc()
 
-    # the frames' own metadata: one point-equivalent in all
+    # the frames' own metadata (places the user saved on photos): strong evidence, worth several phone points (D-147)
     for kind, attr in (("spot", "place"), ("area", "city")):
         c = Counter(getattr(i, attr) for i in items if getattr(i, attr))
         if c:
             place.begin()
             for v, n in c.items():
-                place.add(kind, v, "meta", n / sum(c.values()), False)
+                place.add(kind, v, "meta", META_PLACE_WEIGHT * n / sum(c.values()), False)
                 place.entries[(kind, v.lower())]["n_in"] += n - 1
             place.end()
 

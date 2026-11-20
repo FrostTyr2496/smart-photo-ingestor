@@ -135,3 +135,19 @@ def test_other_files_have_no_photo_group(srv: Client) -> None:
     assert out["other"] == {"files": 1, "bytes": 5}
     got = srv.call("GET", "/api/volumes/vol-work/files?shoot_key=other")[1]
     assert [f["rel_path"] for f in got["files"]] == ["Docs/notes.txt"] and got["total"] == 1
+
+
+def test_a_place_saved_on_photos_beats_the_plan_at_once(srv: Client, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """D-147: the outline reads saved places live from the catalog, so a save shows before the next re-plan."""
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps(_plan(srv.ids)))
+    monkeypatch.setenv("PHOTOVAULT_DEV_PLAN", str(plan))
+    conn = _conn()
+    conn.execute("INSERT INTO group_meta (group_id, place_name, updated_at) VALUES (?, 'Point Example', 'x') "
+                 "ON CONFLICT(group_id) DO UPDATE SET place_name = excluded.place_name", (srv.ids["b"],))
+    conn.commit()
+    conn.close()
+    out = srv.call("GET", "/api/outline")[1]
+    s = next(t for t in out["trips"] if t["key"] == "t:1")["shoots"][0]
+    assert s["place"] == "Point Example" and s["title"] == "Point Example · Boats"
+    assert s["confidence"] == 0.4  # the subject is still a guess; the place is certain
