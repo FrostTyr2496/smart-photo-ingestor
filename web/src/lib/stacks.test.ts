@@ -86,6 +86,11 @@ describe('queue', () => {
     expect(ids(sortShoots(e.shoots, 'biggest', mounted))).toEqual(['s:d', 's:c', 's:b', 's:a']);
     expect(ids(sortShoots(e.shoots, 'newest', mounted))).toEqual(['s:d', 's:c', 's:b', 's:a']);
   });
+  it('sorts oldest first, and reverse flips any order', () => {
+    expect(ids(sortShoots(e.shoots, 'oldest', mounted))).toEqual(['s:a', 's:b', 's:c', 's:d']);
+    expect(ids(sortShoots(e.shoots, 'newest', mounted, true))).toEqual(['s:a', 's:b', 's:c', 's:d']);
+    expect(ids(sortShoots(e.shoots, 'easiest', mounted, true))).toEqual(['s:d', 's:b', 's:c', 's:a']);
+  });
   it('sorts connected first', () => {
     const v = shoot('s:v', 5, { volumes: [{ volume_id: 'v1', label: 'X', frames: 9 }] });
     const l = eff(plan([a, v])).shoots;

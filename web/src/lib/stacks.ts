@@ -31,11 +31,12 @@ export const pct = (c: number): string => `${Math.round(c * 100)}%`;
 
 // ---- the queue ----
 
-export type SortMode = 'easiest' | 'biggest' | 'newest' | 'connected';
+export type SortMode = 'easiest' | 'biggest' | 'newest' | 'oldest' | 'connected';
 export const SORTS: { key: SortMode; label: string }[] = [
   { key: 'easiest', label: 'Easiest first' },
   { key: 'biggest', label: 'Biggest' },
-  { key: 'newest', label: 'Newest' },
+  { key: 'newest', label: 'Newest first' },
+  { key: 'oldest', label: 'Oldest first' },
   { key: 'connected', label: 'Connected first' },
 ];
 
@@ -72,16 +73,19 @@ export function matchesQueueFilter(s: EffShoot, f: QueueFilter, mounted: Readonl
 
 const newestKey = (s: EffShoot): string => s.start_instant || s.end_instant || s.shoot_date;
 
-/** Order for the queue. Easiest: highest minimum confidence, then fewest candidates, then time. Stable. */
-export function sortShoots(list: EffShoot[], mode: SortMode, mounted: ReadonlySet<string>): EffShoot[] {
+/** Order for the queue. Easiest: highest minimum confidence, then fewest candidates, then time. Stable. `reverse` flips
+ * any order (so Easiest reversed puts the hardest first). */
+export function sortShoots(list: EffShoot[], mode: SortMode, mounted: ReadonlySet<string>, reverse = false): EffShoot[] {
   const time = (a: EffShoot, b: EffShoot) => (newestKey(a) < newestKey(b) ? -1 : newestKey(a) > newestKey(b) ? 1 : 0);
   const cmp: Record<SortMode, (a: EffShoot, b: EffShoot) => number> = {
     easiest: (a, b) => minConfidence(b) - minConfidence(a) || openCandidates(a).length - openCandidates(b).length || time(a, b),
     biggest: (a, b) => b.counts.frames - a.counts.frames || time(a, b),
     newest: (a, b) => time(b, a),
+    oldest: (a, b) => time(a, b),
     connected: (a, b) => connectedFrames(b, mounted) - connectedFrames(a, mounted) || time(a, b),
   };
-  return [...list].sort(cmp[mode]);
+  const sorted = [...list].sort(cmp[mode] ?? cmp.easiest);
+  return reverse ? sorted.reverse() : sorted;
 }
 
 /** "N of M confirmed · K frames unassigned" counts. Confirmed = accepted; locked shoots are not in the count. */

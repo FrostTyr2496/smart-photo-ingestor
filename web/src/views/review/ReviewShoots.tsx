@@ -256,6 +256,7 @@ function Review({ plan, replan }: { plan: Plan; replan: Replan }) {
       commit(decRef.current.filter((x) => x.seq !== seq));
     });
   const [sort, setSort] = usePref<SortMode>('review.shoots.sort', 'easiest');
+  const [reverse, setReverse] = usePref<boolean>('review.shoots.sortReverse', false);
   const [chips, setChips] = useState<QueueFilter[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
   const { drives } = useStore();
@@ -264,7 +265,7 @@ function Review({ plan, replan }: { plan: Plan; replan: Replan }) {
   const pretick = typeof plan.params.pretick_min === 'number' ? plan.params.pretick_min : 0.5;
   const beta = plan.params.beta !== false;
   const visible = (s: EffShoot) => matchesFilter(s, filter) && chips.every((c) => matchesQueueFilter(s, c, mounted));
-  const flat = sortShoots(eff.shoots.filter((s) => !s.locked && visible(s)), sort, mounted);
+  const flat = sortShoots(eff.shoots.filter((s) => !s.locked && visible(s)), sort, mounted, reverse);
   const sections = useMemo(() => (sort === 'connected' ? reviewSections(eff, mounted, true) : []), [eff, mounted, sort]);
   const locked = eff.shoots.filter((s) => s.locked);
   const prog = queueProgress(eff.shoots, (plan.unassigned_sessions ?? []).reduce((n, x) => n + x.frames, 0));
@@ -345,9 +346,16 @@ function Review({ plan, replan }: { plan: Plan; replan: Replan }) {
         <aside className="flex flex-col gap-4 rounded-2xl border border-maybe/30 bg-surface/70 p-4 lg:sticky lg:top-32" aria-label="Decisions">
           <div>
             <label className="text-2xs text-faint" htmlFor="queue-sort">Sort</label>
-            <select id="queue-sort" value={sort} onChange={(e) => setSort(e.target.value as SortMode)} className="mt-1 h-7 w-full rounded-full text-xs">
-              {SORTS.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}
-            </select>
+            <div className="mt-1 flex gap-1">
+              <select id="queue-sort" value={sort} onChange={(e) => setSort(e.target.value as SortMode)} className="h-7 min-w-0 flex-1 rounded-full text-xs">
+                {SORTS.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}
+              </select>
+              <button type="button" aria-pressed={reverse} disabled={sort === 'connected'} onClick={() => setReverse(!reverse)}
+                title={sort === 'connected' ? 'Connected first keeps trips in time order' : reverse ? 'Reversed: click for the normal order' : 'Reverse the order'}
+                className={`h-7 rounded-full border px-2.5 text-xs disabled:opacity-40 ${reverse ? 'border-maybe bg-maybe/20 text-maybe' : 'border-line text-muted hover:text-ink'}`}>
+                ⇅ Reverse
+              </button>
+            </div>
           </div>
           <div className="flex flex-wrap gap-1" role="group" aria-label="Filter stacks">
             {QUEUE_FILTERS.map((f) => {
