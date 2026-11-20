@@ -123,11 +123,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-128 (user): beta review shows everything beyond the cut-offs, faded by confidence; review thumbs Mac-only, default `~/Sandbox/PhotoVault Thumbs`.
 - D-127 (user): Shoots to confirm: bands 0.5 / 0.1, phone analysis with time-decayed confidence, opt-in thumbs on a chosen device, local+API models behind a setting, `place`/`subject` columns, phone = context only.
 - D-126 (user+agent): rv-43 Eject (`diskutil eject`) from the sidebar ⏏, its menu, and drive/card pages; refused while a task uses the drive.
 - D-125 (user+agent): rv-42 no Rename/Ignore buttons in sidebar rows; Ignore via right-click or a hover ⋯ menu.
 - D-124 (user+agent): rv-41 "Recently used" counts plug-in, tasks and step runs only; opening or clicking a drive just clears New.
-- D-123 (user+agent): rv-40 Rename button on drive and card pages, hover Rename in the sidebar; cards keep their `card:` prefix.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

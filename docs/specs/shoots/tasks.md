@@ -201,6 +201,13 @@ Order: sp-9 and pv-1 (independent) → sh-8 → sh-9 → sh-10; ob-1 any time; s
   the value × its share of all weighted evidence. Every detail chip shows it.
 - Membership bands (answer 1): pre-ticked at score ≥ 0.5, unticked from 0.1 to 0.5, hidden below 0.1. Both cut-offs
   are settings (`shoot_pretick_min`, `shoot_show_min`).
+- **Beta mode (D-128), on by default:** a setting `shoot_review_beta = true`. Nothing is hidden or dropped: candidates
+  below `shoot_show_min`, phone evidence beyond the decay table's "dropped beyond" limits, and detail alternatives a
+  full run would discard are all kept in the plan, flagged `"beyond_cutoff": true` with their computed confidence. The
+  UI shows them with **opacity that falls with confidence** (for example `0.25 + 0.75 × confidence`, so 1.0 at full
+  confidence and 0.25 at zero), and each one shows its number on hover. Everything a full run would exclude sits below a
+  dashed "beyond cut-off (beta)" divider. This lets the user see what the iOS data contributes and check the confidence
+  ranges. With beta off, the cut-offs apply as written above.
 
 - [ ] 8. **[stronger]** Schema V9 and the phone analysis import
   - ID: sp-9. _Design:_ review §2, §8 (approved, D-127).
@@ -217,18 +224,16 @@ Order: sp-9 and pv-1 (independent) → sh-8 → sh-9 → sh-10; ob-1 any time; s
   - Verify: `uv run pytest tests/test_phone.py tests/test_catalog_db.py -q`; then **[user]** re-run
     `uv run photovault --json meta phone "<home>/phone/photos-20261118.json"` (no new export needed).
 
-- [ ] 9. Review thumbs: opt-in, stored on a device the user picks
-  - ID: pv-1. _Design:_ review §2 (answer 3).
-  - A setting `review_thumbs = {"enabled": false, "store": "mac" | <volume_id>}`, and a Settings section (off by
-    default) showing the size estimate (frames × ~20 KB) and the device picker.
-  - Allowed stores: the Mac (any folder, default `<home>/thumbs-384`), or a **WORKING or MASTER** drive, never CARD or
-    LEGACY (rule 1). Writing them to a drive is a new kind of write. The task's first step is to propose the exact
-    vault-rules exception text to the user (like D-052); no drive write is coded until it is approved.
+- [ ] 9. Review thumbs: opt-in, stored in a Mac folder the user picks
+  - ID: pv-1. _Design:_ review §2 (answer 3, narrowed by D-128).
+  - A setting `review_thumbs = {"enabled": false, "folder": "~/Sandbox/PhotoVault Thumbs"}`, plus a Settings section
+    (off by default) with the size estimate (frames × ~20 KB), the folder (editable, default
+    `~/Sandbox/PhotoVault Thumbs`) and Show in Finder. **Mac only (D-128)**: the server refuses a folder on a mounted
+    drive (the mounts folder), so no vault-rules exception is needed.
   - When enabled, `hash` (and `cache_volume`) extracts the embedded preview of each primary file it reads, scales it to
-    384 px on the long edge with Pillow (approved, rule 11), and writes `<store>/<group_id>.jpg` atomically. It never
-    slows or fails a hash: thumb errors are counted and reported.
-  - `/api/groups/<id>/thumb` looks in the review store after the act-4 cache. When the store's drive is unplugged,
-    the tile shows "Thumbs on <drive>".
+    384 px on the long edge with Pillow (approved, rule 11), and writes `<folder>/<group_id>.jpg` atomically. It never
+    slows or fails a hash: thumb errors are counted and reported. Drives are only read.
+  - `/api/groups/<id>/thumb` looks in the review folder after the act-4 cache.
   - Verify: `uv run pytest tests/test_previews.py tests/test_hashing.py -q` (`tmp_path` stores only).
 
 - [ ] 10. **[stronger]** Planner: membership confidence and details
