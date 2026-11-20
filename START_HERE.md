@@ -68,7 +68,7 @@ task's commit:
 ```
 
 ## Next
-0. **[user] browser check (rv-31 seen working 2026-11-19)** of right-click on a thumbnail in the Photos inspector's Applies to grid → full screen, ←/→ steps, selection unchanged (rv-49), the Tasks page's side-by-side runs with stat tiles and latest/recent file names (rv-34), clickable drive chips and the sidebar's shading of drives being read/written (rv-35), Make green's drive header and stat tiles (rv-36), clicking a running task on a card/drive page or the sidebar to land on it in Tasks (rv-37), unplugging a drive while on its page (popup, sidebar, amber edge, Last seen strip; rv-38) and the sidebar's new colours and Key (rv-39), Rename on card and drive pages (rv-40), the sidebar's right-click / ⋯ menu for Ignore (rv-42), Eject from the sidebar ⏏ and drive/card pages after a `serve` restart (rv-43), "Recently used" moving only on plug-in or a task (rv-41), of the sidebar's "New device detected" glow (plug a card in; it fades once you open or use it) and its Sort / Filter (rv-33), Minimize on Clear/Import/Make green and the done popup + notification (rv-32, Settings switch), of the Clear dialog's "Re-read every copy" option, its bypass warning and per-drive summary (cc-2), of one block per run on Tasks, with the follow copy nested (rv-31), the Import dialog's folder tree and Show in Finder after Apply (im-7), of Recently run on Tasks (rv-30), right-click (rv-28), Show in Photos landing on the photo (rv-27 fix 2) and the file-list
+0. **[user] browser check (rv-31 seen working 2026-11-19)** of the Tasks card's stall warning (rv-50: a copy with no file for 3 min), of right-click on a thumbnail in the Photos inspector's Applies to grid → full screen, ←/→ steps, selection unchanged (rv-49), the Tasks page's side-by-side runs with stat tiles and latest/recent file names (rv-34), clickable drive chips and the sidebar's shading of drives being read/written (rv-35), Make green's drive header and stat tiles (rv-36), clicking a running task on a card/drive page or the sidebar to land on it in Tasks (rv-37), unplugging a drive while on its page (popup, sidebar, amber edge, Last seen strip; rv-38) and the sidebar's new colours and Key (rv-39), Rename on card and drive pages (rv-40), the sidebar's right-click / ⋯ menu for Ignore (rv-42), Eject from the sidebar ⏏ and drive/card pages after a `serve` restart (rv-43), "Recently used" moving only on plug-in or a task (rv-41), of the sidebar's "New device detected" glow (plug a card in; it fades once you open or use it) and its Sort / Filter (rv-33), Minimize on Clear/Import/Make green and the done popup + notification (rv-32, Settings switch), of the Clear dialog's "Re-read every copy" option, its bypass warning and per-drive summary (cc-2), of one block per run on Tasks, with the follow copy nested (rv-31), the Import dialog's folder tree and Show in Finder after Apply (im-7), of Recently run on Tasks (rv-30), right-click (rv-28), Show in Photos landing on the photo (rv-27 fix 2) and the file-list
    hover preview (rv-29)**, after restarting `serve`. Also the **[user] visual check of the new UI (rv-1..rv-7, rv-12..15)**: restart `serve` (it picks up drive rename and the
    faster drive list). In Photos, connect a drive, check that thumbnails load, then save a location and keywords on a few photos. Also the older
    **[user] visual check (ui-5..15, card-3):** restart `uv run photovault serve` (it picks up ui-11..15), try the
@@ -125,11 +125,11 @@ task's commit:
   closed while you do.
 
 ## Recent decisions
+- D-150 (user+agent): rv-50 stall check on Tasks: no file for 3 min → warning; `ps` state says if it waits on the drive.
 - D-148 (user+agent): right-click an inspector preview thumbnail → full screen over that list; selection unchanged.
 - D-142 (agent): sh-11 density splits; `may_split` counts as a flag, so bulk accepts skip those shoots.
 - D-141 (user+agent): phone-density split suggestions, never automatic.
 - D-140 (agent): pl-2 Name this place = `detail` rows sharing one batch (one undo).
-- D-139 (agent): pl-1 spots need 2+ shoots; no-GPS shoots join only an unambiguous name/folder match; home = most night phone points.
 
 ## Execution rules
 Follow `docs/steering/task-execution.md`. Run `/close-the-loop` before each commit.

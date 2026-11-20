@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion';
 import { useState } from 'react';
 import { fmtElapsed, fmtInt, relTime } from '../lib/format';
-import { argvWords, commandKey, fileState, mountName, runMounts, taskMounts, hashOverall, isHash, longLine, pace, shortLine, splitMessage, splitPath, statTiles, summarize, taskTitle, unitFor, type Pace } from '../lib/labels';
+import { argvWords, commandKey, fileState, mountName, runMounts, taskMounts, hashOverall, isHash, longLine, pace, shortLine, splitMessage, splitPath, stallNote, statTiles, summarize, taskTitle, unitFor, type Pace } from '../lib/labels';
 import { useStore } from '../lib/store';
 import type { Drive, ExtRun, FileEvt, TaskRec } from '../lib/types';
 import { Disclosure, Icon, StatePill } from './bits';
@@ -32,6 +32,12 @@ export interface TaskVM {
   route: { from: string; to: string } | null;
 }
 
+/** The newest handled file's name, for the stall note (rv-50). */
+function lastName(files: FileEvt[] | undefined): string | undefined {
+  const f = files?.[files.length - 1];
+  return f ? splitPath(f.src).name : undefined;
+}
+
 /** A copy's source and target names: from the command words, or a make-green run's reported route. */
 function copyRoute(kind: string, mounts: string[], drives: Drive[]): TaskVM['route'] {
   if ((kind !== 'ingest' && kind !== 'backup') || mounts.length < 2) return null;
@@ -51,7 +57,9 @@ export function taskVM(t: TaskRec, drives: Drive[], now: number, driveFiles: Rec
     unit: unitFor(t.argv),
     stats: isProgressMsg ? msg.stats : '',
     path: isProgressMsg ? msg.path : '',
-    note: !isProgressMsg && t.note ? { text: t.note, warn: true } : null,
+    note:
+      (t.state === 'running' && !t.final && stallNote(commandKey(words), t.lastActMs, now, { file: lastName(t.files) })) ||
+      (!isProgressMsg && t.note ? { text: t.note, warn: true } : null),
     keepAwake: t.keepAwake,
     origin: null,
     tech: `task ${t.id} · exit ${t.exitCode ?? '–'}\n${t.argv.length ? t.argv.join(' ') : '(not started yet)'}`,
@@ -72,6 +80,10 @@ export function extVM(e: ExtRun, drives: Drive[], now: number, driveFiles: Recor
   const msg = splitMessage(e.progress?.message);
   let note: TaskVM['note'] = null;
   if (fromFile && e.warning) note = { text: `${e.warnings} warning(s), last: ${e.warning}`, warn: true };
+  if (fromFile && e.updated_at) {
+    const stall = stallNote(commandKey(words), Date.parse(e.updated_at) || null, now, { diskWait: e.disk_wait, file: lastName(e.files) });
+    if (stall) note = stall;
+  }
   if (!fromFile && j) {
     if (!j.last_write_at) {
       note = { text: j.kind === 'index_volume' ? 'No files recorded yet. It is probably still walking the drive.' : 'No catalog writes yet.', warn: false };

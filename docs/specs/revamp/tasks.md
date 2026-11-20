@@ -660,3 +660,17 @@ in (Re-plan does that); say so in the legend's tooltip.
     browser's menu (as rv-28). Thumbnails with no drive (unplugged, no volume) are skipped.
   - Verify: `cd web && npm run typecheck && npm test && npm run build`; **[user]** browser check.
   - Result (2026-11-19): typecheck, `npm test` (274 passed) and `npm run build` pass. Not seen in a browser.
+
+- [x] 50. Stall check on Tasks
+  - ID: rv-50 (user ask, 2026-11-20; D-150). A backup from a failing HDD hung on one read with no sign in the UI.
+  - A running copy or hash (`ingest`, `backup`, `resume`, `hash`, `cards check`) that reports no file or progress for
+    3 minutes (`STALL_S`) gets a warning on its Tasks card: how long, the last file it finished, and what to do. For
+    UI tasks the clock is the newest `progress`/`item` event; for terminal runs, the progress file's `updated_at`.
+    The server reads each engine process's `ps` state; `disk_wait` (U on macOS, D on Linux) adds "it is waiting on
+    the drive". No warning before a run's first report.
+  - Files: `photovault/activity.py`, `tests/test_activity.py`, `web/src/lib/{labels,store,types}.ts(x)`,
+    `web/src/lib/labels.test.ts`, `web/src/components/TaskCard.tsx`.
+  - Verify: `uv run pytest tests/test_activity.py -q`; `cd web && npm run typecheck && npm test && npm run build`;
+    **[user]** browser check.
+  - Result (2026-11-20): activity tests 29 passed; `npm test` 277 passed; build done; `uv run pytest -q` 860 passed,
+    4 skipped. Not seen in a browser.

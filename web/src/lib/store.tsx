@@ -108,6 +108,7 @@ export function absorb(t: TaskRec, d: TaskDetail): TaskRec {
   if (d.latest_progress) n.progress = d.latest_progress;
   for (const e of d.events) {
     if (n.startMs === null && e.ts) n.startMs = Date.parse(e.ts) || null;
+    if ((e.event === 'progress' || e.event === 'item') && e.ts) n.lastActMs = Date.parse(e.ts) || n.lastActMs;
     if (e.event === 'result') {
       n.result = e as Record<string, unknown>;
       if (n.jobId === null && typeof e.job_id === 'number') n.jobId = e.job_id;

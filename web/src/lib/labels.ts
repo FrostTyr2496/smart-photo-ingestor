@@ -558,3 +558,32 @@ export function setupProblem(t: Pick<TaskRec, 'error' | 'exitCode'>, fs: string 
   }
   return { readOnly: false, lines: [msg], msg };
 }
+
+/** rv-50: a copy or hash finishes a file every few seconds; this long with none means the drive may be stuck. */
+export const STALL_S = 180;
+const STALL_KINDS = new Set(['ingest', 'backup', 'resume', 'hash', 'card_check']);
+
+/**
+ * A warning when a running copy or hash has reported nothing for `STALL_S` (rv-50). `lastMs` is its last file or
+ * progress report (null before the first: no warning). `diskWait` is the process waiting on a drive right now.
+ */
+export function stallNote(
+  kind: string,
+  lastMs: number | null | undefined,
+  now: number,
+  opts: { diskWait?: boolean; file?: string } = {},
+): { text: string; warn: true } | null {
+  if (!STALL_KINDS.has(kind) || lastMs == null) return null;
+  const quiet = (now - lastMs) / 1000;
+  if (quiet < STALL_S) return null;
+  const after = opts.file ? ` (last finished: ${opts.file})` : '';
+  const why = opts.diskWait
+    ? 'It is waiting on the drive, which usually means a damaged spot the drive keeps retrying.'
+    : 'The drive may be stuck on a damaged spot, or asleep.';
+  return {
+    text:
+      `Stalled: no progress for ${fmtElapsed(quiet)}${after}. ${why} ` +
+      'Pause takes effect only once the read gives up; if it stays stuck, eject or unplug the drive it reads from (never the target).',
+    warn: true,
+  };
+}

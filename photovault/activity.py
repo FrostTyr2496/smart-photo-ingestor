@@ -36,7 +36,7 @@ ACTIVITY_DIR = "activity"
 WRITE_EVERY_S = 1.0      # newest progress is written at most this often (and on every phase change)
 UNTRACKED = frozenset({"serve"})
 FILES_KEPT = 6           # last `item` events kept in the progress file, newest last (rv-34)
-PS_ARGV = ("ps", "-axww", "-o", "pid=,ppid=,etime=,command=")
+PS_ARGV = ("ps", "-axww", "-o", "pid=,ppid=,etime=,stat=,command=")
 # Commands with a sub-command: their first two words name the command, then the positional path follows.
 GROUP_COMMANDS = frozenset({"cards", "volumes", "meta", "lrcat", "report", "catalog"})
 HISTORY_NAME = "history.jsonl"
@@ -229,6 +229,7 @@ class EngineProcess:
     elapsed_s: int
     words: list[str]   # best guess from the `ps` command line (paths with spaces are rejoined)
     text: str          # the command line after `photovault`, for matching a job's mount
+    stat: str = ""     # `ps` state; "U" (macOS) or "D" (Linux) = waiting on a disk read or write (rv-50)
 
 
 def parse_etime(value: str) -> int:
@@ -266,13 +267,13 @@ def guess_words(text: str) -> list[str]:
 
 
 def parse_ps(output: str) -> list[EngineProcess]:
-    """Engine processes from `ps -o pid=,ppid=,etime=,command=` output; `uv` wrappers are left out."""
+    """Engine processes from `ps -o pid=,ppid=,etime=,stat=,command=` output; `uv` wrappers are left out."""
     procs = []
     for line in output.splitlines():
-        m = re.match(r"\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)$", line)
+        m = re.match(r"\s*(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(.*)$", line)
         if not m:
             continue
-        command = m.group(4)
+        command = m.group(5)
         tokens = command.split()
         if not tokens or Path(tokens[0]).name in ("uv", "uvx"):
             continue
@@ -288,7 +289,7 @@ def parse_ps(output: str) -> list[EngineProcess]:
         except ValueError:
             elapsed = 0
         procs.append(EngineProcess(pid=int(m.group(1)), ppid=int(m.group(2)), elapsed_s=elapsed,
-                                   words=guess_words(text), text=text))
+                                   words=guess_words(text), text=text, stat=m.group(4)))
     return procs
 
 
@@ -463,6 +464,7 @@ def snapshot(conn: sqlite3.Connection, home: Path, *, server_pid: int,
             "warning": f.get("warning") if f else None,
             "warnings": f.get("warnings", 0) if f else 0,
             "files": f.get("files") or [] if f else [],
+            "disk_wait": p.stat[:1] in ("U", "D"),
             "job": None,
         }
         if job is not None:

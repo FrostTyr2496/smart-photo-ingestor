@@ -16,6 +16,8 @@ import {
   parseRoute,
   runMounts,
   liveTaskKey,
+  STALL_S,
+  stallNote,
   statTiles,
   fileState,
   stepView,
@@ -366,5 +368,25 @@ describe('liveTaskKey (rv-37)', () => {
     expect(liveTaskKey(ssd, [imp], [ext], [ssd])).toBe('t7');
     expect(liveTaskKey(ssd, [{ ...imp, final: true }], [ext], [ssd])).toBe('p55');
     expect(liveTaskKey(other, [imp], [ext], [ssd, other])).toBeNull();
+  });
+});
+
+describe('stallNote (rv-50)', () => {
+  const now = Date.parse('2026-11-20T06:00:00Z');
+  const ago = (s: number) => now - s * 1000;
+
+  it('stays quiet for a run that reported recently, before its first report, or for other commands', () => {
+    expect(stallNote('backup', ago(60), now)).toBeNull();
+    expect(stallNote('backup', null, now)).toBeNull();
+    expect(stallNote('index', ago(3600), now)).toBeNull();
+  });
+
+  it('warns a copy or hash quiet for 3 minutes, naming the last file and the disk wait', () => {
+    const n = stallNote('backup', ago(STALL_S + 60), now, { diskWait: true, file: 'DSC_1611.NEF' });
+    expect(n?.warn).toBe(true);
+    expect(n?.text).toContain('no progress for 4m');
+    expect(n?.text).toContain('DSC_1611.NEF');
+    expect(n?.text).toContain('waiting on the drive');
+    expect(stallNote('hash', ago(STALL_S), now)?.text).toContain('may be stuck');
   });
 });

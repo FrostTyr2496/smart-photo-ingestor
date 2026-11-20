@@ -83,6 +83,8 @@ export interface TaskRec {
   jobId: number | null;
   /** The last files the run handled, newest last (rv-34). */
   files?: FileEvt[];
+  /** When the run last reported a file or progress (ms), for the stall check (rv-50). */
+  lastActMs?: number | null;
   /** The drive pair (labels) a make-green run is copying between right now (rv-36). */
   route?: { from: string; to: string } | null;
 }
@@ -110,6 +112,10 @@ export interface ExtRun {
   warnings?: number;
   /** The last files the run handled, newest last, from its progress file (rv-34). */
   files?: FileEvt[];
+  /** When the progress file was last written (rv-50). */
+  updated_at?: string | null;
+  /** The process is waiting on a disk read or write right now (`ps` state U/D, rv-50). */
+  disk_wait?: boolean;
 }
 
 /** One finished engine run, UI or terminal, from `<home>/activity/history.jsonl` (rv-30). */

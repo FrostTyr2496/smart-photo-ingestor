@@ -19,8 +19,8 @@ from photovault.catalog import db, repo
 SERVER = 999_001
 
 
-def proc(pid: int, text: str, *, ppid: int = 1, elapsed: int = 120) -> EngineProcess:
-    return EngineProcess(pid=pid, ppid=ppid, elapsed_s=elapsed, words=guess_words(text), text=text)
+def proc(pid: int, text: str, *, ppid: int = 1, elapsed: int = 120, stat: str = "S+") -> EngineProcess:
+    return EngineProcess(pid=pid, ppid=ppid, elapsed_s=elapsed, words=guess_words(text), text=text, stat=stat)
 
 
 # --------------------------------------------------------------------------- ps parsing
@@ -42,12 +42,12 @@ def test_guess_words_rejoins_paths_with_spaces(text: str, words: list[str]) -> N
 
 def test_parse_ps_keeps_engine_processes_only() -> None:
     out = "\n".join([
-        "  101     1   01:00 uv run photovault --json index /Volumes/Big Drive",
-        "  102   101   01:00 /opt/py/Python /repo/.venv/bin/photovault --json index /Volumes/Big Drive",
-        "  103     1   05:00 /opt/py/Python /repo/.venv/bin/photovault serve",
-        "  104   103   00:10 /opt/py/python -m photovault --json hash /Volumes/X",
-        "  105     1   00:01 grep photovault",
-        "  106     1   00:01 vim photovault/activity.py",
+        "  101     1   01:00 S+   uv run photovault --json index /Volumes/Big Drive",
+        "  102   101   01:00 U+   /opt/py/Python /repo/.venv/bin/photovault --json index /Volumes/Big Drive",
+        "  103     1   05:00 Ss   /opt/py/Python /repo/.venv/bin/photovault serve",
+        "  104   103   00:10 R    /opt/py/python -m photovault --json hash /Volumes/X",
+        "  105     1   00:01 S    grep photovault",
+        "  106     1   00:01 S    vim photovault/activity.py",
         "garbage",
     ])
     procs = parse_ps(out)
@@ -57,6 +57,7 @@ def test_parse_ps_keeps_engine_processes_only() -> None:
         (104, 103, ["hash", "/Volumes/X"]),
     ]
     assert procs[0].elapsed_s == 60
+    assert [p.stat for p in procs] == ["U+", "Ss", "R"]
 
 
 # --------------------------------------------------------------------------- the progress file
@@ -175,6 +176,13 @@ def test_index_run_without_file_gets_catalog_counts(conn, tmp_path: Path) -> Non
     assert (entry["job"]["current"], entry["job"]["total"]) == (2, None)
     assert entry["job"]["last_write_at"] == "2026-01-01T00:09:00Z"
     assert snap["stale_jobs"] == []
+
+
+def test_disk_wait_from_ps_state(conn, tmp_path: Path) -> None:
+    """rv-50: a run whose process waits on the disk (`ps` state U or D) says so; the Tasks page uses it."""
+    snap = snapshot(conn, tmp_path, server_pid=SERVER, processes=[
+        proc(200, "hash /x", stat="U+"), proc(201, "hash /y", stat="D"), proc(202, "hash /z", stat="R+")])
+    assert [e["disk_wait"] for e in snap["activity"]] == [True, True, False]
 
 
 def test_hash_run_counts_hashed_and_left(conn, tmp_path: Path) -> None:
