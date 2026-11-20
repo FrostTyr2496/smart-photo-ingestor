@@ -1,4 +1,4 @@
-import { useEffect, useRef, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { fmtInt } from '../lib/format';
 import { countsLine, railOf, shootLine, titleShade, tripLine, type OutlineItem, type OutlineShoot, type OutlineTrip } from '../lib/outline';
 import { dayLabel, dayOf, fullOffline, type PhotoGroup } from '../lib/photos';
@@ -162,13 +162,73 @@ export function TripsView({ items, shared }: { items: OutlineItem[]; shared: Tri
  * photo count. Every row is one line (two for a named trip) in both states, so hovering (or focusing) only widens the
  * rail into a floating pane over the grid that shows more of each name (keyboard focus too, not a mouse click's focus): nothing moves up or down, and the grid never
  * reflows. The sticky wrapper carries the z-index (sticky makes its own stacking
- * context), above the section headers (z-10) and below the filter bar (z-20). Unnamed shoots show date · count. */
-export function TripsRail({ items }: { items: OutlineItem[] }) {
-  const { years, undated } = railOf(items);
+ * context), above the section headers (z-10) and below the filter bar (z-20). Unnamed shoots show date · count.
+ * The rail follows the grid: the entry holding the selected photo, or else the one under the sticky headers, is
+ * highlighted and kept in view. */
+export function TripsRail({ items, focusId }: { items: OutlineItem[]; focusId?: number | null }) {
+  const { years, undated } = useMemo(() => railOf(items), [items]);
+  const keys = useMemo(() => new Set(years.flatMap((y) => y.entries.map((e) => e.key))), [years]);
+  const [active, setActive] = useState<string | null>(null);
+  const nav = useRef<HTMLElement>(null);
+
+  // Scroll spy: the entry whose section spans the line just under the sticky headers. A loose day between entries
+  // highlights nothing.
+  useEffect(() => {
+    let frame = 0;
+    const spy = () => {
+      frame = 0;
+      const line = 170;
+      let hit: string | null = null;
+      for (const k of keys) {
+        const r = document.getElementById(`sec-${k}`)?.getBoundingClientRect();
+        if (r && r.top <= line && r.bottom > line) {
+          hit = k;
+          break;
+        }
+      }
+      setActive(hit);
+    };
+    const on = () => {
+      if (!frame) frame = requestAnimationFrame(spy);
+    };
+    spy();
+    window.addEventListener('scroll', on, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', on);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [keys]);
+
+  // A selected photo wins: its trip, or its lone shoot.
+  useEffect(() => {
+    if (focusId == null) return;
+    let el: HTMLElement | null = document.querySelector<HTMLElement>(`[data-gid="${focusId}"]`);
+    while (el) {
+      if (el.id.startsWith('sec-') && keys.has(el.id.slice(4))) {
+        setActive(el.id.slice(4));
+        return;
+      }
+      el = el.parentElement;
+    }
+  }, [focusId, keys]);
+
+  // Keep the active entry in view in the rail, unless the pointer is browsing the rail.
+  useEffect(() => {
+    const box = nav.current;
+    if (!active || !box || box.matches(':hover')) return;
+    const btn = box.querySelector<HTMLElement>(`[data-rail="${CSS.escape(active)}"]`);
+    if (!btn) return;
+    const top = btn.offsetTop;
+    if (top < box.scrollTop + 24 || top + btn.offsetHeight > box.scrollTop + box.clientHeight - 24) {
+      box.scrollTo({ top: top - box.clientHeight / 3, behavior: 'smooth' });
+    }
+  }, [active]);
+
   if (!years.length && !undated) return <div className="hidden md:block" />;
   return (
     <div className="relative hidden md:sticky md:top-[117px] md:z-[15] md:block md:h-[calc(100vh-133px)]">
       <nav
+        ref={nav}
         aria-label="Jump to a trip"
         className="group/rail no-scrollbar absolute inset-y-0 left-0 z-30 flex w-full flex-col gap-2 overflow-y-auto rounded-xl px-1 py-1 transition-[width,background-color,box-shadow] duration-150 hover:w-96 hover:bg-surface/95 hover:shadow-2xl hover:ring-1 hover:ring-line has-[:focus-visible]:w-96 has-[:focus-visible]:bg-surface/95 has-[:focus-visible]:shadow-2xl has-[:focus-visible]:ring-1 has-[:focus-visible]:ring-line hover:backdrop-blur-xl"
       >
@@ -181,10 +241,12 @@ export function TripsRail({ items }: { items: OutlineItem[] }) {
               <button
                 key={e.key}
                 type="button"
+                data-rail={e.key}
+                aria-current={active === e.key ? 'location' : undefined}
                 onClick={() => goToSection(e.key)}
                 title={`${e.label} · ${e.sub} · ${titleShade(e.state, e.confidence, e.suggested).hint}`}
                 style={titleShade(e.state, e.confidence, e.suggested).style}
-                className={`rounded px-1 py-0.5 text-left text-xs leading-snug hover:bg-ink/5 ${e.state === 'accepted' && !e.suggested ? 'text-muted hover:text-ink' : 'hover:brightness-125'}`}
+                className={`rounded px-1 py-0.5 text-left text-xs leading-snug hover:bg-ink/5 ${active === e.key ? 'bg-ink/10 shadow-[inset_2px_0_0_rgb(var(--c-accent))]' : ''} ${e.state === 'accepted' && !e.suggested ? 'text-muted hover:text-ink' : 'hover:brightness-125'}`}
               >
                 {e.label ? (
                   <>
