@@ -6,6 +6,8 @@ import { PULLED_MS } from '../components/Unplugged';
 import { openMenu } from '../lib/menu';
 import { EjectButton, useEjectBlock } from '../components/Eject';
 import { ProgressBar } from '../components/ProgressBar';
+import { TIER, TIER_ORDER, TIER_TONE } from '../lib/tiers';
+import type { CardInfo } from '../lib/types';
 import { extVM, FinishedRow, RunningCard, taskVM } from '../components/TaskCard';
 import { useDriveActivity } from '../lib/driveActivity';
 import {
@@ -57,7 +59,8 @@ function DriveRow({
   pulled?: boolean;
   onSeen: () => void;
 }) {
-  const { tasks, elsewhere, setIgnored, drives, ejectDrive } = useStore();
+  const { tasks, elsewhere, setIgnored, drives, ejectDrive, cards } = useStore();
+  const card = d.volume_id ? cards.find((c) => c.volume_id === d.volume_id) : undefined;
   const isNew = !d.volume_id && !isCardDrive(d);
   const live = d.mounted ? liveStep(d, tasks, elsewhere) : null;
   // Being read or written right now (rv-35): the row is shaded with a moving sheen, and says what is happening.
@@ -178,7 +181,9 @@ function DriveRow({
       {d.mounted && (used !== null || canEject) && (
         <div className="mt-2 flex items-center gap-2 pl-4">
           {/* A full card is normal; a full drive is not. */}
-          {used !== null ? (
+          {used !== null && key === 'card' && card?.counts ? (
+            <CardSpaceBar used={used} counts={card.counts} />
+          ) : used !== null ? (
             <ProgressBar
               value={used}
               size="xs"
@@ -194,6 +199,23 @@ function DriveRow({
         </div>
       )}
     </a>
+  );
+}
+
+/** A card's space bar: the used part split by tier in the same proportions as the card page's bar (by files), so a
+ *  card's safety shows in the sidebar too. */
+function CardSpaceBar({ used, counts }: { used: number; counts: NonNullable<CardInfo['counts']> }) {
+  const total = TIER_ORDER.reduce((n, t) => n + counts[t].files, 0);
+  const pct = Math.max(0, Math.min(1, used)) * 100;
+  const label = `Space used ${Math.round(pct)} %: ${TIER_ORDER.filter((t) => counts[t].files).map((t) => `${counts[t].files} ${TIER[t].label.toLowerCase()}`).join(', ')}`;
+  return (
+    <div role="img" aria-label={label} title={label} className="relative h-1 w-full overflow-hidden rounded-full bg-ink/[0.07]">
+      <motion.div className="flex h-full gap-px overflow-hidden rounded-full" initial={false} animate={{ width: `${pct > 0 ? Math.max(pct, 1.5) : 0}%` }} transition={springs.glide}>
+        {total > 0
+          ? TIER_ORDER.filter((t) => counts[t].files).map((t) => <span key={t} className={`h-full ${TIER_TONE[t].solid}`} style={{ width: `${(counts[t].files / total) * 100}%` }} />)
+          : <span className="h-full w-full bg-ink/25" />}
+      </motion.div>
+    </div>
   );
 }
 
