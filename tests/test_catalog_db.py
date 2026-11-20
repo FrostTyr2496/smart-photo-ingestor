@@ -15,7 +15,7 @@ EXPECTED_TABLES = {
     "volumes", "bodies", "shoots", "sequences", "capture_groups",
     "assets", "instances", "sidecars", "jobs", "job_items",
     "group_meta", "geo_points", "settings", "volume_usage",
-    "trips", "shoot_plan_decisions", "shoot_apply_log", "body_clock",
+    "trips", "shoot_plan_decisions", "shoot_apply_log", "body_clock", "phone_analysis",
 }
 
 
@@ -55,7 +55,7 @@ def test_connect_creates_parent_dirs_and_pragmas(tmp_path: Path) -> None:
 
 def test_fresh_db_migrates_to_1_with_all_tables(conn: sqlite3.Connection) -> None:
     assert conn.execute("PRAGMA user_version").fetchone()[0] == 0
-    assert db.migrate(conn) == len(migrations.MIGRATIONS) == 8
+    assert db.migrate(conn) == len(migrations.MIGRATIONS) == 9
     assert _tables(conn) == EXPECTED_TABLES
 
 
@@ -135,7 +135,7 @@ def test_v8_rebuilds_jobs_for_card_clear_and_keeps_every_row(conn: sqlite3.Conne
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute("INSERT INTO jobs (kind, state, created_at) VALUES ('card_clear','planned','now')")
     monkeypatch.setattr(migrations, "MIGRATIONS", full)
-    assert db.migrate(conn) == 8
+    assert db.migrate(conn) == 9
     assert conn.execute("SELECT job_id, kind, source_volume_id, state FROM jobs").fetchall()[0][:] == (5, "card_ingest", "v1", "done")
     assert conn.execute("SELECT COUNT(*) FROM job_items WHERE job_id = 5").fetchone()[0] == 1
     conn.execute("INSERT INTO jobs (kind, source_volume_id, state, created_at) VALUES ('card_clear','v1','planned','now')")
@@ -145,3 +145,15 @@ def test_v8_rebuilds_jobs_for_card_clear_and_keeps_every_row(conn: sqlite3.Conne
         conn.execute("INSERT INTO job_items VALUES (99,1,'x',NULL,NULL,NULL,NULL,'planned',NULL,'now')")
     with pytest.raises(sqlite3.IntegrityError):
         conn.execute("INSERT INTO jobs (kind, state, created_at) VALUES ('bogus','planned','now')")
+
+
+def test_v9_widens_decision_kinds_and_adds_shoot_columns(conn: sqlite3.Connection) -> None:
+    db.migrate(conn)
+    for kind in ("include", "exclude", "detail"):
+        conn.execute("INSERT INTO shoot_plan_decisions (proposal_id, kind, payload_json, decided_at) VALUES ('p',?,'{}','now')", (kind,))
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute("INSERT INTO shoot_plan_decisions (proposal_id, kind, payload_json, decided_at) VALUES ('p','bogus','{}','now')")
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(shoots)")}
+    assert {"place", "subject", "subject_source", "confirmed_at"} <= cols
+    idx = {r["name"] for r in conn.execute("PRAGMA index_list(shoot_plan_decisions)")}
+    assert "shoot_plan_decisions_proposal" in idx

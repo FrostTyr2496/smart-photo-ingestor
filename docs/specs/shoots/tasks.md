@@ -209,7 +209,7 @@ Order: sp-9 and pv-1 (independent) → sh-8 → sh-9 → sh-10; ob-1 any time; s
   dashed "beyond cut-off (beta)" divider. This lets the user see what the iOS data contributes and check the confidence
   ranges. With beta off, the cut-offs apply as written above.
 
-- [ ] 8. **[stronger]** Schema V9 and the phone analysis import
+- [x] 8. **[stronger]** Schema V9 and the phone analysis import
   - ID: sp-9. _Design:_ review §2, §8 (approved, D-127).
   - Migration V9 (the next free version; cu-0 moves after it), with `system-design.md` §5:
     - `shoots`: `place`, `subject`, `subject_source` (`user|phone|folder|model`), `confirmed_at`;
@@ -223,6 +223,7 @@ Order: sp-9 and pv-1 (independent) → sh-8 → sh-9 → sh-10; ob-1 any time; s
     names).
   - Verify: `uv run pytest tests/test_phone.py tests/test_catalog_db.py -q`; then **[user]** re-run
     `uv run photovault --json meta phone "<home>/phone/photos-20261118.json"` (no new export needed).
+  - Result (2026-11-19): migration V9 (`shoots.place/subject/subject_source/confirmed_at`, `shoot_plan_decisions.kind` widened by rebuild, `phone_analysis`); `system-design.md` §5i. `phone.import_phone` upserts `phone_analysis` for kept rows (`analysis_fields`: caption, labels, people minus `_UNKNOWN_`, hints from `search_info` plus albums) and its result gains `with_caption`, `with_labels`, `with_people`. Tests in `tests/test_phone.py` and `tests/test_catalog_db.py`. **[user]** re-run `meta phone` to fill the table.
 
 - [ ] 9. Review thumbs: opt-in, stored in a Mac folder the user picks
   - ID: pv-1. _Design:_ review §2 (answer 3, narrowed by D-128).

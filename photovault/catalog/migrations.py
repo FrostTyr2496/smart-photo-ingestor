@@ -157,4 +157,28 @@ DROP TABLE jobs;
 ALTER TABLE jobs_new RENAME TO jobs;
 """
 
-MIGRATIONS: list[str] = [V1, V2, V3, V4, V5, V6, V7, V8]
+# V9 (sp-9, D-127, review sh-8 section 8): shoot place/subject columns, wider decision kinds, Apple's on-device
+# analysis. The `shoot_plan_decisions.kind` CHECK is widened by a table rebuild, as V8 did for `jobs`.
+V9 = """
+ALTER TABLE shoots ADD COLUMN place TEXT;
+ALTER TABLE shoots ADD COLUMN subject TEXT;
+ALTER TABLE shoots ADD COLUMN subject_source TEXT CHECK (subject_source IS NULL OR subject_source IN ('user','phone','folder','model'));
+ALTER TABLE shoots ADD COLUMN confirmed_at TEXT;       -- NULL = applied but not confirmed through a stack
+CREATE TABLE shoot_plan_decisions_new (
+  decision_id INTEGER PRIMARY KEY, proposal_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('accept','split','merge','skip','rename','reject_name','move','include','exclude','detail')),
+  payload_json TEXT NOT NULL, decided_at TEXT NOT NULL
+);
+INSERT INTO shoot_plan_decisions_new (decision_id, proposal_id, kind, payload_json, decided_at)
+  SELECT decision_id, proposal_id, kind, payload_json, decided_at FROM shoot_plan_decisions;
+DROP TABLE shoot_plan_decisions;
+ALTER TABLE shoot_plan_decisions_new RENAME TO shoot_plan_decisions;
+CREATE INDEX shoot_plan_decisions_proposal ON shoot_plan_decisions (proposal_id);
+CREATE TABLE phone_analysis (                          -- Apple's on-device analysis, text only (people stay local)
+  point_id INTEGER PRIMARY KEY REFERENCES geo_points, caption TEXT, labels_json TEXT, persons_json TEXT,
+  hints_json TEXT                                      -- activities, venues, venue_types, landmarks, bodies_of_water,
+                                                       -- areas_of_interest, holidays, events, albums
+);
+"""
+
+MIGRATIONS: list[str] = [V1, V2, V3, V4, V5, V6, V7, V8, V9]

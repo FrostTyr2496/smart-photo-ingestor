@@ -122,10 +122,44 @@ def _place_fields(row: dict) -> tuple[str | None, str | None, str | None, str | 
     return name, first("city", "city"), first("state_province", "state_province"), first("country", "country")
 
 
+HINT_KEYS = ("activities", "venues", "venue_types", "landmarks", "bodies_of_water", "areas_of_interest",
+             "holidays", "events")
+_PLACEHOLDER_PEOPLE = {"_unknown_", "unknown", ""}
+
+
+def _text_list(value: Any, *, drop_people_placeholders: bool = False) -> list[str]:
+    """Strings of a list (dict items contribute their ``name``/``title``), stripped, de-duplicated, in order."""
+    out: list[str] = []
+    for item in value if isinstance(value, list) else []:
+        if isinstance(item, dict):
+            item = item.get("name") or item.get("title")
+        if not isinstance(item, str):
+            continue
+        item = item.strip()
+        if drop_people_placeholders and item.lower() in _PLACEHOLDER_PEOPLE:
+            continue
+        if item and item not in out:
+            out.append(item)
+    return out
+
+
+def analysis_fields(row: dict) -> tuple[str | None, str, str, str]:
+    """``(caption, labels_json, persons_json, hints_json)`` from an osxphotos row (text only)."""
+    caption = row.get("ai_caption")
+    caption = caption.strip() if isinstance(caption, str) and caption.strip() else None
+    info = row.get("search_info")
+    info = info if isinstance(info, dict) else {}
+    hints = {key: _text_list(info.get(key)) for key in HINT_KEYS}
+    hints["albums"] = _text_list(row.get("albums"))
+    return (caption, json.dumps(_text_list(row.get("labels"))),
+            json.dumps(_text_list(row.get("persons"), drop_people_placeholders=True)), json.dumps(hints))
+
+
 def import_phone(conn: sqlite3.Connection, path: Path, emit: Emitter | None = None) -> dict:
     """Upsert the kept rows of an osxphotos export. Returns the counts (see the spec's Result line)."""
     counts: dict[str, Any] = {"seen": 0, "kept": 0, "inserted": 0, "updated": 0, "unchanged": 0,
-                              "skipped": {r: 0 for r in SKIP_REASONS}, "kept_by_source": {s: 0 for s in SOURCES}}
+                              "skipped": {r: 0 for r in SKIP_REASONS}, "kept_by_source": {s: 0 for s in SOURCES},
+                              "with_caption": 0, "with_labels": 0, "with_people": 0}
     skipped = counts["skipped"]
     with repo.transaction(conn):
         for row in _rows(Path(path)):
@@ -155,6 +189,16 @@ def import_phone(conn: sqlite3.Connection, path: Path, emit: Emitter | None = No
                     conn, utc_time=utc_text(when), lat=float(lat), lon=float(lon), alt=None, source=source,
                     source_ref=str(row["uuid"]), place_name=name, city=city, state=state, country=country,
                     accuracy_m=None, local_offset=local_offset, kind="video" if row.get("ismovie") else "photo")
+                caption, labels, persons, hints = analysis_fields(row)
+                conn.execute(
+                    "INSERT INTO phone_analysis (point_id, caption, labels_json, persons_json, hints_json) "
+                    "SELECT point_id, ?, ?, ?, ? FROM geo_points WHERE source = ? AND source_ref = ? "
+                    "ON CONFLICT(point_id) DO UPDATE SET caption = excluded.caption, labels_json = excluded.labels_json, "
+                    "persons_json = excluded.persons_json, hints_json = excluded.hints_json",
+                    (caption, labels, persons, hints, source, str(row["uuid"])))
+                counts["with_caption"] += caption is not None
+                counts["with_labels"] += labels != "[]"
+                counts["with_people"] += persons != "[]"
                 counts["kept"] += 1
                 counts["kept_by_source"][source] += 1
                 counts[outcome] += 1

@@ -326,7 +326,20 @@ widens the `jobs.kind` CHECK to include `card_clear` (shown in the v1 listing ab
 the table is rebuilt (create `jobs_new`, copy every row, drop, rename) and `db.migrate` runs migrations with foreign
 keys off and checks them before COMMIT. No row changes. A `card_clear` job has `source_volume_id` = the card and no
 target; its `job_items` use `src_rel` (the card file), `state` `committed` once deleted or `failed` with `error`. The
-cu-0 proposal (formerly V8) becomes V9.
+cu-0 proposal (formerly V8) becomes V10 (after sp-9's V9, section 5i).
+
+## 5i. Catalog schema v9 (migration 9)
+
+Approved with D-127 (sp-9; review `docs/reviews/2026-11-19-sh-8-shoots-to-confirm.md` section 8). The SQL is the `V9`
+string in `photovault/catalog/migrations.py`:
+- `shoots.place`, `shoots.subject` (separate columns), `shoots.subject_source` (user | phone | folder | model) and
+  `shoots.confirmed_at` (NULL = applied but not confirmed through a stack).
+- `shoot_plan_decisions.kind` CHECK adds `include`, `exclude` (payload: session `[first, last]`) and `detail`
+  (payload: field, value, source). A table rebuild as in V8; rows and the `proposal_id` index are kept.
+- `phone_analysis (point_id PK -> geo_points, caption, labels_json, persons_json, hints_json)`: Apple's on-device
+  analysis from the osxphotos export, text only, filled by `meta phone` for the rows it keeps (upsert). `hints_json`
+  holds `activities`, `venues`, `venue_types`, `landmarks`, `bodies_of_water`, `areas_of_interest`, `holidays`,
+  `events` and `albums`. People names stay in the catalog: never in git, logs or fixtures.
 
 ## 6. Naming (D-004, D-005)
 

@@ -31,7 +31,11 @@ def item(uuid: str, *, make: str | None = "Apple", model: str | None = "iPhone 1
 def rows() -> list[dict]:
     names_only = {"names": {"city": ["Westport"], "state_province": ["Eastshire"], "country": ["Freedonia"]}}
     return [
-        item("u-iphone"),
+        item("u-iphone", ai_caption="A boat at a quay", labels=["boat", "harbour"],
+             persons=["Ada Example", "_UNKNOWN_"], albums=["Quay Trip"],
+             search_info={"activities": ["sailing"], "venues": ["Quay Cafe"], "venue_types": ["cafe"],
+                          "landmarks": [], "bodies_of_water": ["Example Bay"], "areas_of_interest": [],
+                          "holidays": ["Founders Day"], "events": []}),
         item("u-iphone-nomake", make=None, model="Apple iPhone 14 Pro 77mm"),
         item("u-ipad", model="iPad Pro"),
         item("u-glasses", make="Meta AI", model="Ray-Ban Meta"),
@@ -137,3 +141,23 @@ def test_cli_result_and_errors(tmp_path, monkeypatch, capsys) -> None:
     code, lines = run(capsys, "meta", "phone", str(bad))
     assert code == 2 and any(e["event"] == "error" and "osxphotos" in e["message"] for e in lines)
     assert run(capsys, "meta", "phone", str(tmp_path / "missing.json"))[0] == 2
+
+
+def test_phone_analysis_filled_and_idempotent(conn, tmp_path) -> None:
+    path = write_array(tmp_path, rows())
+    res = phone.import_phone(conn, path)
+    assert (res["with_caption"], res["with_labels"], res["with_people"]) == (1, 1, 1)
+    phone.import_phone(conn, path)
+    assert conn.execute("SELECT COUNT(*) FROM phone_analysis").fetchone()[0] == res["kept"]
+    q = ("SELECT a.* FROM phone_analysis a JOIN geo_points g USING (point_id) WHERE g.source_ref = ?")
+    a = conn.execute(q, ("u-iphone",)).fetchone()
+    assert a["caption"] == "A boat at a quay" and json.loads(a["labels_json"]) == ["boat", "harbour"]
+    assert json.loads(a["persons_json"]) == ["Ada Example"]
+    hints = json.loads(a["hints_json"])
+    assert hints["activities"] == ["sailing"] and hints["albums"] == ["Quay Trip"] and hints["landmarks"] == []
+    other = conn.execute(q, ("u-ipad",)).fetchone()
+    assert other["caption"] is None and other["persons_json"] == "[]"
+    data = rows()
+    data[0]["ai_caption"] = "Changed"
+    phone.import_phone(conn, write_array(tmp_path, data))
+    assert conn.execute(q, ("u-iphone",)).fetchone()["caption"] == "Changed"
