@@ -39,3 +39,12 @@ describe('task links (rv-37)', () => {
     expect(hrefFor({ view: 'home' })).toBe('#/');
   });
 });
+
+describe('photos route: a shoot (rv-47)', () => {
+  it('carries a shoot key and round-trips', () => {
+    expect(parseRoute('#/photos?shoot=s7')).toEqual({ view: 'photos', shoot: 's7' });
+    expect(parseRoute('#/photos?shoot=s%3Aab12')).toEqual({ view: 'photos', shoot: 's:ab12' });
+    expect(parseRoute('#/photos?shoot=%3Cx%3E')).toEqual({ view: 'photos' });
+    expect(hrefFor({ view: 'photos', shoot: 's7' })).toBe('#/photos?shoot=s7');
+  });
+});

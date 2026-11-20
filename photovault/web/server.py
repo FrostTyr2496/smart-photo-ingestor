@@ -35,7 +35,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from PIL import Image
 
-from photovault import (backup, targets, actions, activity, cards, clock, metadata, naming, preview, previews, shoots, timemodel, usage,
+from photovault import (outline, backup, targets, actions, activity, cards, clock, metadata, naming, preview, previews, shoots, timemodel, usage,
                         volumes)
 from photovault.card_clear import cleared_at
 from photovault.catalog import db, repo
@@ -1047,6 +1047,7 @@ def _route(app: WebApp, conn, method: str, path: str, query: dict, body: Any) ->
         ("GET", "/api/shoots"): lambda: {"shoots": [dict(r) for r in repo.list_shoots(conn)]},
         ("GET", "/api/groups"): lambda: _groups(conn, query, app),
         ("GET", "/api/photo-days"): lambda: _photo_days(conn, query),
+        ("GET", "/api/outline"): lambda: _outline(conn, app, query),
         ("POST", "/api/groups/meta"): lambda: _groups_meta(conn, body),
         ("GET", "/api/clock-suggestions"): lambda: {"suggestions": clock.suggest_offsets(conn)},
         ("GET", "/api/body-clock"): lambda: {"rows": [dict(r) for r in repo.list_body_clock(conn)]},
@@ -1133,6 +1134,38 @@ def _shoots_plan(app: WebApp) -> dict:
         raise NotFound("no plan yet") from exc
     except (OSError, ValueError) as exc:
         raise BadRequest(f"the plan file could not be read: {exc}") from exc
+
+
+_PLAN_CACHE: dict[str, tuple[tuple, dict]] = {}
+
+
+def _plan_cached(app: WebApp) -> dict | None:
+    """The newest plan parsed once per file version (path, mtime, size), or None: the outline's input (rv-46)."""
+    path = _plan_path(app)
+    if path is None:
+        return None
+    try:
+        st = path.stat()
+        stamp = (str(path), st.st_mtime_ns, st.st_size)
+        hit = _PLAN_CACHE.get("plan")
+        if hit is not None and hit[0] == stamp:
+            return hit[1]
+        plan = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(plan, dict):
+        return None
+    _PLAN_CACHE["plan"] = (stamp, plan)
+    return plan
+
+
+def _outline(conn, app: WebApp, query: dict) -> dict:
+    """``GET /api/outline?volume_id=&missing=`` (rv-46, D-134): trips, shoots and loose days, read-only."""
+    try:
+        return outline.outline(conn, _plan_cached(app), volume_id=_opt_param(query, "volume_id"),
+                               missing=_opt_param(query, "missing"))
+    except ValueError as exc:
+        raise BadRequest(str(exc)) from exc
 
 
 def _plan_path(app: WebApp) -> Path | None:
@@ -1304,7 +1337,14 @@ def _volume_route(app: WebApp, conn, method: str, volume_id: str, sub: str | Non
         camera = _camera_param(query)
         limit = _int_param(query, "limit", 200, 1, 1000)
         offset = _int_param(query, "offset", 0, 0, 2**62)
-        filters = {"state": state, "copies": copies, "other_volume_id": other, "camera": camera}
+        shoot_key = _opt_param(query, "shoot_key")
+        try:
+            group_ids = (outline.resolve_key(conn, _plan_cached(app), shoot_key, volume_id=volume_id)
+                         if shoot_key not in (None, outline.OTHER_KEY) else None)
+        except ValueError as exc:
+            raise BadRequest(str(exc)) from exc
+        filters = {"state": state, "copies": copies, "other_volume_id": other, "camera": camera,
+                   "group_ids": group_ids, "ungrouped": shoot_key == outline.OTHER_KEY}
         rows = repo.volume_files(conn, volume_id, limit=limit, offset=offset, **filters)
         names = cards.camera_names(conn)
         return 200, {"files": [_file_row(r, names) for r in rows], "limit": limit, "offset": offset,
@@ -1386,6 +1426,22 @@ def _card_files(app: WebApp, conn, volume_id: str, query: dict) -> dict:
         files = [f for f in files if f["dup_here"] > 0]
     if other is not None:
         files = [f for f in files if any(c["volume_id"] == other for c in f["copies"])]
+    shoot_key = _opt_param(query, "shoot_key")
+    if shoot_key is not None:  # the files of one shoot (rv-48): every asset of its frames; `other` = no photo group
+        ids = json.dumps([f["asset_id"] for f in files if f["asset_id"] is not None])
+        if shoot_key == outline.OTHER_KEY:
+            grouped = {r[0] for r in conn.execute(
+                "SELECT asset_id FROM assets WHERE group_id IS NOT NULL AND asset_id IN (SELECT value FROM json_each(?))",
+                (ids,))}
+            files = [f for f in files if f["asset_id"] not in grouped]
+        else:
+            try:
+                gids = outline.resolve_key(conn, _plan_cached(app), shoot_key)
+            except ValueError as exc:
+                raise BadRequest(str(exc)) from exc
+            keep = {r[0] for r in conn.execute(
+                "SELECT asset_id FROM assets WHERE group_id IN (SELECT value FROM json_each(?))", (json.dumps(gids),))}
+            files = [f for f in files if f["asset_id"] in keep]
     return {"card": {"volume_id": volume_id, "label": vol["label"], "mounted": mount is not None,
                      "mount": str(mount) if mount else None, "last_seen_at": vol["last_seen_at"],
                      "cleared_at": cleared_at(conn, volume_id),
@@ -1610,9 +1666,12 @@ def _groups(conn, query: dict, app: WebApp | None = None) -> dict:
     before = _opt_param(query, "before")
     limit = _int_param(query, "limit", 200, 1, 1000)
     offset = _int_param(query, "offset", 0, 0, 2**62)
+    shoot_key = _opt_param(query, "shoot_key")
     try:
+        group_ids = (outline.resolve_key(conn, _plan_cached(app), shoot_key, volume_id=volume_id, missing=missing)
+                     if shoot_key is not None and app is not None else None)
         rows = repo.list_groups(conn, volume_id=volume_id, shoot_id=shoot_id, missing=missing, day=day, after=after,
-                                before=before, limit=limit,
+                                before=before, group_ids=group_ids, limit=limit,
                                 offset=offset)
         counts = repo.missing_counts(conn, volume_id=volume_id)
     except ValueError as exc:

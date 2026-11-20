@@ -390,6 +390,19 @@ export function DriveView({ id }: { id: string }) {
       setFilesLoading(false);
     }
   }, [id, filter]);
+  // One shoot's files for the Trips view (rv-48): the same filters, a page of up to 1000.
+  const fetchShoot = useCallback(
+    async (key: string) => {
+      const p = new URLSearchParams({ limit: '1000', offset: '0', shoot_key: key });
+      if (filter.state) p.set('state', filter.state);
+      if (filter.copies) p.set('copies', filter.copies);
+      if (filter.other) p.set('other', filter.other);
+      if (filter.camera) p.set('camera', filter.camera);
+      const d = await api<FilePage>('GET', `/api/volumes/${encodeURIComponent(id)}/files?${p}`);
+      return { rows: d.files, total: d.total };
+    },
+    [id, filter],
+  );
   useEffect(() => {
     void loadFiles();
   }, [loadFiles, epoch]);
@@ -684,13 +697,24 @@ export function DriveView({ id }: { id: string }) {
           total={s.files}
         />
         {filesError && <p className="text-sm text-err">Could not list files: {filesError}</p>}
-        <FileTable rows={files?.files ?? []} columns={columns} volumeId={id} mounted={drive.mounted} loading={filesLoading} summarize={summarizeFiles} />
-        <Pager
-          offset={filter.offset}
-          count={files?.files.length ?? 0}
-          total={files?.total ?? 0}
-          page={FILE_PAGE}
-          onPage={(offset) => setFilter((f) => ({ ...f, offset }))}
+        <FileTable
+          rows={files?.files ?? []}
+          columns={columns}
+          volumeId={id}
+          mounted={drive.mounted}
+          loading={filesLoading}
+          summarize={summarizeFiles}
+          filterKey={JSON.stringify({ ...filter, offset: 0 })}
+          fetchShoot={fetchShoot}
+          pager={
+            <Pager
+              offset={filter.offset}
+              count={files?.files.length ?? 0}
+              total={files?.total ?? 0}
+              page={FILE_PAGE}
+              onPage={(offset) => setFilter((f) => ({ ...f, offset }))}
+            />
+          }
         />
       </section>
         </>

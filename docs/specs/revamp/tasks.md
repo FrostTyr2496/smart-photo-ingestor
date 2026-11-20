@@ -598,7 +598,7 @@ newest plan's proposal holding the group (`shoots[].group_ids`, its `trip_id`) i
 the shoot's columns or the plan's details, falling back to the shoot name. Decisions saved after the plan are not folded
 in (Re-plan does that); say so in the legend's tooltip.
 
-- [ ] 46. **[stronger]** Outline API: trips, shoots and loose days with their state
+- [x] 46. **[stronger]** Outline API: trips, shoots and loose days with their state
   - ID: rv-46 (user ask, 2026-11-19; D-134).
   - `photovault/outline.py` `outline(conn, plan: dict | None, *, volume_id=None, missing=None) -> dict`, pure and read-only:
     `{"trips": [{key, name, state, start_date, end_date, groups, shoots: [...]}], "items": [...]}` where `items` is the
@@ -614,8 +614,12 @@ in (Re-plan does that); say so in the legend's tooltip.
   - Performance: the real catalog (65k groups) answers under 1 s; cache the plan's group → proposal map per plan id.
   - Verify: `uv run pytest tests/test_outline.py tests/test_web_api.py -q` (accepted, proposed, loose, a drive filter,
     no plan).
+  - Result (2026-11-19): `uv run pytest tests/test_outline.py tests/test_web_api.py -q` → 96 passed. `outline()` in
+    `photovault/outline.py`; `GET /api/outline`; `shoot_key` on `/api/groups`, drive files and card files (D-135). With
+    `volume_id` each entry also has `files`/`bytes` and the result has `other` (for rv-48). Real catalog (read-only,
+    68k frames, newest plan): 0.17 s overall, 0.11-0.2 s per drive. Not done: unhashed files do not match a `shoot_key`.
 
-- [ ] 47. Photos by trip
+- [x] 47. Photos by trip
   - ID: rv-47 (after rv-46).
   - A view switch in Photos' header, **Trips | Days** (default Trips, kept per browser); Days is today's timeline,
     unchanged.
@@ -633,8 +637,11 @@ in (Re-plan does that); say so in the legend's tooltip.
   - Deep links: `#/photos?shoot=<key>` scrolls to that shoot. Show in Photos (rv-27) keeps working (lands on the photo
     in whichever view is active).
   - Verify: `cd web && npm run typecheck && npm test && npm run build`; **[user]** browser check.
+  - Result (2026-11-19): typecheck, `npm test` (268 passed) and `npm run build` pass (D-136). `Tile` moved to
+    `views/PhotoTile.tsx`; trips UI in `views/PhotosTrips.tsx`; helpers in `lib/outline.ts`. Not seen in a browser.
+    Left out: the month rail is replaced by years + trip names in Trips; loose days are not in the rail.
 
-- [ ] 48. Files by trip
+- [x] 48. Files by trip
   - ID: rv-48 (after rv-46).
   - The drive/card Files list (`web/src/components/FileList.tsx`) gains a third view: **Trips | Folders | List**. Trips is
     a tree: trip → shoot → files (each group's primary plus its sidecars and pairs), with the same title shading and
@@ -642,3 +649,6 @@ in (Re-plan does that); say so in the legend's tooltip.
     (non-photo) under "Other files". The filter bar (Show · Copies · Camera) applies inside.
   - Expanding a shoot loads its files via `shoot_key`. The hover preview, right-click and Show in Photos keep working.
   - Verify: `cd web && npm run typecheck && npm test && npm run build`; **[user]** browser check on X9 Pro.
+  - Result (2026-11-19): typecheck, `npm test` (268), `npm run build` and full `uv run pytest -q` (824 passed, 9 skipped)
+    pass (D-137). Added `shoot_key=other` on drive and card files (backend, in `tests/test_outline.py`). Not seen in a
+    browser. Files not hashed yet fall under "Other files"; a shoot shows at most its first 1000 files.
