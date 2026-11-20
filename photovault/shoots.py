@@ -25,6 +25,7 @@ from typing import Any
 
 from . import naming
 from .catalog import repo
+from . import shoot_scoring
 from .timemodel import BodyClocks, instant_info, offset_tz
 
 PHONE_SOURCES = ("iphone", "ipad", "glasses")
@@ -107,7 +108,7 @@ def folder_info(rel_path: str | None, stop: set[str]) -> tuple[tuple[str, str] |
 
 class Item:
     __slots__ = ("gid", "when", "ts", "body", "seq", "locked", "shoot_id", "cap", "off", "rel", "lat", "lon",
-                 "city", "state", "place", "dated", "humans")
+                 "city", "state", "place", "dated", "humans", "prov")
 
 
 class Phone:
@@ -115,9 +116,17 @@ class Phone:
 
     def __init__(self, conn: sqlite3.Connection) -> None:
         marks = ",".join("?" * len(PHONE_SOURCES))
-        rows = conn.execute(
-            f"SELECT utc_time, lat, lon, local_offset, place_name, city, state, country FROM geo_points "
-            f"WHERE source IN ({marks})", PHONE_SOURCES).fetchall()
+        try:
+            rows = conn.execute(
+                f"SELECT g.utc_time, g.lat, g.lon, g.local_offset, g.place_name, g.city, g.state, g.country, "
+                f"a.caption, a.labels_json, a.persons_json, a.hints_json FROM geo_points g "
+                f"LEFT JOIN phone_analysis a ON a.point_id = g.point_id WHERE g.source IN ({marks})",
+                PHONE_SOURCES).fetchall()
+        except sqlite3.OperationalError:  # before schema V9
+            rows = conn.execute(
+                f"SELECT utc_time, lat, lon, local_offset, place_name, city, state, country, NULL AS caption, "
+                f"NULL AS labels_json, NULL AS persons_json, NULL AS hints_json FROM geo_points "
+                f"WHERE source IN ({marks})", PHONE_SOURCES).fetchall()
         pts = []
         for r in rows:
             try:
@@ -126,8 +135,10 @@ class Phone:
                 continue
             if t.tzinfo is None:
                 t = t.replace(tzinfo=UTC)
+            ana = ((r["caption"], r["labels_json"], r["persons_json"], r["hints_json"])
+                   if r["labels_json"] is not None or r["caption"] is not None or r["hints_json"] is not None else None)
             pts.append((t.timestamp(), r["lat"], r["lon"], r["local_offset"], r["place_name"], r["city"],
-                        r["state"], r["country"]))
+                        r["state"], r["country"], ana))
         pts.sort(key=lambda p: p[0])
         self.pts = pts
         self.ts = [p[0] for p in pts]
@@ -195,6 +206,7 @@ def load_items(conn: sqlite3.Connection, stop: set[str], phone: Phone) -> tuple[
                 continue
             it = Item()
             it.gid, it.when, it.ts = gid, info.when, info.when.timestamp()
+            it.prov = info.provenance
             it.body = nickname.get(r["body_id"]) or "?"
             it.seq, it.shoot_id, it.cap, it.off = r["sequence_id"], r["shoot_id"], r["capture_time"], r["capture_offset"]
             it.locked = r["shoot_id"] is not None
@@ -278,9 +290,8 @@ def _part_of_day(hour: int) -> str:
     return "morning" if 5 <= hour < 12 else "afternoon" if 12 <= hour < 17 else "evening" if 17 <= hour < 22 else "night"
 
 
-def _build_shoot(items: list[Item], lo: int, hi: int, phone: Phone, default_offset: str,
+def _build_shoot(seg: list[Item], phone: Phone, default_offset: str,
                  stop: set[str], rejected: set[str]) -> dict:
-    seg = items[lo:hi + 1]
     first, last = seg[0], seg[-1]
     camera_off = _mode(i.off for i in seg) or default_offset
     pts_phone = phone.span(first.ts, last.ts)
@@ -396,7 +407,7 @@ def _build_shoot(items: list[Item], lo: int, hi: int, phone: Phone, default_offs
         # private bookkeeping, removed before output
         "_phone_off": _mode(offs), "_state": _mode(p[6] for p in pts_phone) or _mode(i.state for i in seg),
         "_country": _mode(p[7] for p in pts_phone), "_humans": {h for i in seg for h in i.humans},
-        "_t0": first.ts, "_t1": last.ts, "_w0": w0, "_w1": w1, "_body": first.body,
+        "_t0": first.ts, "_t1": last.ts, "_w0": w0, "_w1": w1, "_body": first.body, "_items": seg,
     }
 
 
@@ -508,9 +519,12 @@ def _trip_dict(members: list[dict], pid: str | None = None) -> dict:
 
 # ---------------------------------------------------------------- decisions
 
-DECISION_KINDS = ("accept", "split", "merge", "skip", "rename", "reject_name", "move")  # the V7 CHECK
+DECISION_KINDS = ("accept", "split", "merge", "skip", "rename", "reject_name", "move", "include", "exclude",
+                  "detail")  # the V9 CHECK
+DETAIL_FIELDS = ("place", "subject", "people")
 _PAYLOAD_KEYS = {"accept": set(), "skip": set(), "split": {"after_group_id"}, "merge": {"with"},
-                 "rename": {"value", "source"}, "reject_name": {"value"}, "move": {"trip_id"}}
+                 "rename": {"value", "source"}, "reject_name": {"value"}, "move": {"trip_id"},
+                 "include": {"session"}, "exclude": {"session"}, "detail": {"field", "value", "source"}}
 # Every kind may also carry these: `batch` groups the rows of one review action ("Accept trip", "Accept all
 # unflagged"), so they are listed and undone together; `ui` names that action and `trip` its trip.
 _BATCH_KEYS = {"batch", "ui", "trip"}
@@ -569,6 +583,22 @@ def check_decision(d: Any) -> tuple[str, str, dict]:
         t = payload.get("trip_id")
         if t is not None and not (isinstance(t, str) and re.fullmatch(r"t:[0-9a-f]{6,40}", t)):
             raise ValueError("move needs trip_id: a trip id or null")
+    elif kind in ("include", "exclude"):
+        sess = payload.get("session")
+        if (not isinstance(sess, list) or len(sess) != 2
+                or any(isinstance(g, bool) or not isinstance(g, int) for g in sess)):
+            raise ValueError(f"{kind} needs session: [first_group_id, last_group_id]")
+    elif kind == "detail":
+        v = payload.get("value")
+        if payload.get("field") not in DETAIL_FIELDS:
+            raise ValueError(f"detail needs field: {', '.join(DETAIL_FIELDS)}")
+        if payload["field"] == "people":
+            if not isinstance(v, list) or any(not isinstance(x, str) for x in v) or len(v) > 100:
+                raise ValueError("detail people needs value: a list of names")
+        elif not isinstance(v, str) or not v.strip() or len(v) > 200:
+            raise ValueError("detail needs a value (1-200 characters)")
+        if not isinstance(payload.get("source", "user"), str):
+            raise ValueError("source must be text")
     for k in ("batch", "ui", "trip"):
         if k in payload and not isinstance(payload[k], str):
             raise ValueError(f"{k} must be text")
@@ -630,6 +660,43 @@ def _replay_structure(items: list[Item], segs: list[tuple[int, int]], decisions:
     return segs
 
 
+def _replay_members(free: list[Item], groups: list[list[Item]], base_pids: list[str],
+                    decisions: list[dict]) -> tuple[list[list[Item]], list[Item], dict[str, set[int]]]:
+    """Apply `include` and `exclude` decisions (sh-8): a session (frames from its first to its last group id, among
+    those held by one shoot) moves into the shoot, or out of it into the unassigned pool. An excluded session is never
+    offered to that shoot again. Returns the new groups, the unassigned items and the exclusions per proposal id."""
+    pos = {it.gid: k for k, it in enumerate(free)}
+    owner: list[int | None] = [None] * len(free)
+    for gi, g in enumerate(groups):
+        for it in g:
+            owner[pos[it.gid]] = gi
+    by_pid = {pid: gi for gi, pid in enumerate(base_pids)}
+    excluded: dict[str, set[int]] = {}
+    for d in decisions:
+        if d["kind"] not in ("include", "exclude") or d["id"] not in by_pid:
+            continue
+        sess = d.get("session")
+        if not (isinstance(sess, list) and len(sess) == 2 and sess[0] in pos and sess[1] in pos):
+            continue
+        a, b = sorted((pos[sess[0]], pos[sess[1]]))
+        who = owner[a]
+        frames = [k for k in range(a, b + 1) if owner[k] == who]
+        gi = by_pid[d["id"]]
+        if d["kind"] == "include":
+            for k in frames:
+                owner[k] = gi
+                excluded.get(d["id"], set()).discard(free[k].gid)
+        elif who == gi:
+            for k in frames:
+                owner[k] = None
+                excluded.setdefault(d["id"], set()).add(free[k].gid)
+    out: list[list[Item]] = [[] for _ in groups]
+    pool = []
+    for k, it in enumerate(free):
+        (out[owner[k]] if owner[k] is not None else pool).append(it)
+    return out, pool, excluded
+
+
 # ---------------------------------------------------------------- plan
 
 def plan(conn: sqlite3.Connection, *, gap_h: float = 8, split_km: float = 50, merge_h: float = 36,
@@ -652,7 +719,20 @@ def plan(conn: sqlite3.Connection, *, gap_h: float = 8, split_km: float = 50, me
     locked_items = [i for i in items if i.locked]
     free = [i for i in items if not i.locked]
     segs = _replay_structure(free, segments(free, gap_h, split_km), decisions)
-    shoots = [_build_shoot(free, a, b, phone, default_offset, stop, rejected) for a, b in segs]
+    base_pids = [_sha("s:", free[a].gid, free[b].gid) for a, b in segs]
+    groups = [free[a:b + 1] for a, b in segs]
+    pool: list[Item] = []
+    excluded: dict[str, set[int]] = {}
+    if any(d["kind"] in ("include", "exclude") for d in decisions):
+        groups, pool, excluded = _replay_members(free, groups, base_pids, decisions)
+    shoots = []
+    for g, pid in zip(groups, base_pids):
+        if g:
+            s = _build_shoot(g, phone, default_offset, stop, rejected)
+            s["proposal_id"] = pid  # stable under include and exclude
+            shoots.append(s)
+    cfg = shoot_scoring.load_config(conn)
+    unassigned_sessions = shoot_scoring.annotate(shoots, pool, cfg, phone, split_km, haversine_km, excluded)
 
     # one name per date: suffix duplicates with the part of the day, then a number
     def dupes() -> Counter:
@@ -704,6 +784,8 @@ def plan(conn: sqlite3.Connection, *, gap_h: float = 8, split_km: float = 50, me
                                "alternatives": [a for a in alts if a["value"] != value]}
                 if s is not None and "weak_name" in s["flags"]:
                     s["flags"].remove("weak_name")
+        elif kind == "detail" and s is not None and not s["locked"]:
+            shoot_scoring.set_detail(s["details"], d.get("field"), d.get("value"), d.get("source") or "user")
         elif kind == "accept" and (s is not None and not s["locked"]):
             s["state"] = "accepted"
         elif kind == "skip" and (s is not None and not s["locked"]):
@@ -730,7 +812,7 @@ def plan(conn: sqlite3.Connection, *, gap_h: float = 8, split_km: float = 50, me
                    "from": frm, "to": to},
         "summary": {"frames": total_frames, "shoots": len(shoots), "trips": len(trips), "unassigned": unassigned,
                     "locked": sum(1 for s in shoots if s["locked"]), "flagged": flagged},
-        "trips": trips, "shoots": shoots,
+        "trips": trips, "shoots": shoots, "unassigned_sessions": unassigned_sessions,
     }
 
 
@@ -880,6 +962,7 @@ def apply(conn: sqlite3.Connection, *, params: dict | None = None, expect: int |
             "INSERT INTO shoots (name, shoot_date, kind, created_at, trip_id, local_offset, name_source) "
             "VALUES (?,?,'general',?,?,?,?)",
             (name, s["shoot_date"], at, trip_ids.get(s["trip_id"]), off, s["name"]["source"])).lastrowid
+        _write_details(conn, sid, s)
         created.append({"shoot_id": sid, "name": name, "shoot_date": s["shoot_date"], "proposal_id": s["proposal_id"]})
         for gid in s["group_ids"]:
             cur = conn.execute("UPDATE capture_groups SET shoot_id = ? WHERE group_id = ? AND shoot_id IS NULL",
@@ -890,6 +973,23 @@ def apply(conn: sqlite3.Connection, *, params: dict | None = None, expect: int |
                 frames += 1
     return {"apply_id": apply_id, "shoots": len(created), "trips": len(trip_ids), "frames": frames,
             "renamed": renamed, "created": created}
+
+
+def _write_details(conn: sqlite3.Connection, shoot_id: int, s: dict) -> None:
+    """Store the details the user set (decision `detail`, source ``user``) in ``shoots.place`` / ``subject`` /
+    ``subject_source``. Suggestions from the phone or folders are not written: they are unconfirmed. ``confirmed_at``
+    is left to sh-10's stack review."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(shoots)")}
+    det = s.get("details") or {}
+    sets, vals = [], []
+    if "place" in cols and (det.get("place") or {}).get("source") == "user":
+        sets.append("place = ?")
+        vals.append(det["place"]["value"])
+    if {"subject", "subject_source"} <= cols and (det.get("subject") or {}).get("source") == "user":
+        sets += ["subject = ?", "subject_source = ?"]
+        vals += [det["subject"]["value"], "user"]
+    if sets:
+        conn.execute(f"UPDATE shoots SET {', '.join(sets)} WHERE shoot_id = ?", (*vals, shoot_id))
 
 
 def list_applies(conn: sqlite3.Connection) -> list[dict]:
@@ -929,3 +1029,47 @@ def undo(conn: sqlite3.Connection, apply_id: str) -> dict:
         if not conn.execute("SELECT 1 FROM shoots WHERE trip_id = ? LIMIT 1", (tid,)).fetchone():
             trips_gone += conn.execute("DELETE FROM trips WHERE trip_id = ?", (tid,)).rowcount
     return {"apply_id": apply_id, "frames": len(rows), "shoots": shoots_gone, "trips": trips_gone}
+
+
+
+def calibrate_members(conn: sqlite3.Connection, **plan_kw: Any) -> dict:
+    """Aggregate numbers for sh-8: candidates per band, how the dated-folder ground truth agrees with them, and how
+    many shoots get a tier-0 subject. Read-only; counts only, no names."""
+    p = plan(conn, **plan_kw)
+    stop = _stoplist(conn)
+    items, _ = load_items(conn, stop, Phone(conn))
+    folder_of = {i.gid: (i.dated[0] if i.dated else None) for i in items}
+    pos = {i.gid: k for k, i in enumerate(items)}
+    bands: Counter = Counter()
+    truth: dict[str, Counter] = {b: Counter() for b in ("likely", "maybe", "beyond_cutoff")}
+    for s in p["shoots"]:
+        if s["locked"]:
+            continue
+        own = Counter(folder_of.get(g) for g in s["group_ids"] if folder_of.get(g))
+        home_folder = own.most_common(1)[0][0] if own else None
+        for c in s["candidates"]:
+            bands[c["band"]] += 1
+            a, b = sorted((pos[c["session"][0]], pos[c["session"][1]]))
+            f = Counter(folder_of.get(i.gid) for i in items[a:b + 1] if folder_of.get(i.gid))
+            sf = f.most_common(1)[0][0] if f else None
+            kind = ("unlabelled" if home_folder is None or sf is None
+                    else "same_folder" if sf == home_folder else "other_folder")
+            truth[c["band"]][kind] += 1
+    sh = [s for s in p["shoots"] if not s["locked"]]
+    conf = [s["details"]["subject"]["confidence"] for s in sh if s["details"]["subject"]["value"]]
+    buckets = Counter("<0.3" if c < 0.3 else "0.3-0.6" if c < 0.6 else ">=0.6" for c in conf)
+    src = lambda s, f: str(s["details"][f]["source"])  # noqa: E731
+    return {
+        "shoots": len(sh), "candidates": sum(bands.values()), "bands": dict(bands),
+        "folder_agreement": {b: dict(v) for b, v in truth.items()},
+        "subject": {"with_value": len(conf), "by_confidence": dict(buckets),
+                    "phone_sourced": sum(1 for s in sh if src(s, "subject").startswith("phone")),
+                    "folder_sourced": sum(1 for s in sh if src(s, "subject") == "folder"),
+                    "only_beyond_cutoff": sum(1 for s in sh if s["details"]["subject"]["value"] is None
+                                              and s["details"]["subject"]["alternatives"]),
+                    "with_example_caption": sum(1 for s in sh if s["details"]["subject"]["example_caption"])},
+        "place": {"with_value": sum(1 for s in sh if s["details"]["place"]["value"]),
+                  "spot": sum(1 for s in sh if src(s, "place") in ("phone_place", "phone_venue")),
+                  "area_only": sum(1 for s in sh if src(s, "place") == "phone_area")},
+        "people": {"shoots_with_people": sum(1 for s in sh if s["details"]["people"]["value"])},
+    }

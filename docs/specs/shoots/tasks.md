@@ -237,7 +237,7 @@ Order: sp-9 and pv-1 (independent) → sh-8 → sh-9 → sh-10; ob-1 any time; s
   - `/api/groups/<id>/thumb` looks in the review folder after the act-4 cache.
   - Verify: `uv run pytest tests/test_previews.py tests/test_hashing.py -q` (`tmp_path` stores only).
 
-- [ ] 10. **[stronger]** Planner: membership confidence and details
+- [x] 10. **[stronger]** Planner: membership confidence and details
   - ID: sh-8 (after sp-9). _Design:_ review §6, plus the decay table above.
   - `shoots.plan` adds `members.core_sessions`, `candidates` (score, band, 1–3 reasons, `home_proposal`) and `details`
     (`place`, `subject` tier 0, `people`, each with value, source, confidence, evidence count and alternatives) to
@@ -252,6 +252,16 @@ Order: sp-9 and pv-1 (independent) → sh-8 → sh-9 → sh-10; ob-1 any time; s
   - Verify: `uv run pytest tests/test_shoots.py -q`, with these cases: an astro night with phone frames only 8 h
     before (area kept, subject dropped); a second body offset by 1 h; a sequence across the boundary; a replayed
     exclude.
+  - Result (2026-11-19): `photovault/shoot_scoring.py` (weights, decay table and caps in one place; settings
+    `shoot_pretick_min`, `shoot_show_min`, `shoot_review_beta`, `shoot_label_stoplist`, `shoot_score_weights`,
+    `shoot_phone_decay`). Every unlocked shoot gains `members.core_sessions`, `candidates` and `details`; the plan gains
+    top-level `unassigned_sessions`. `include`, `exclude` and `detail` decisions are accepted and replay; Apply writes
+    `shoots.place/subject/subject_source` from `user` details only, and leaves `confirmed_at` NULL for sh-10.
+    `shoots.calibrate_members` reports bands and folder agreement. Real catalog (read-only): plan 2.7 s for 67.8k frames;
+    31 candidates at the default 8 h gap (5 likely, 26 maybe, none below 0.1), none disagreeing with the dated folders
+    where checkable; 137 of 174 shoots get a tier-0 subject (87 at confidence >= 0.6), 12 have only beyond-cut-off
+    evidence. Details in `docs/private/2026-11-19-sh8-calibration.md`. Tests: `tests/test_shoot_members.py`,
+    `tests/test_shoots_apply_details.py`.
 
 - [ ] 11. The queue: Shoots to confirm
   - ID: sh-9 (after sh-8). _Design:_ review §4.
